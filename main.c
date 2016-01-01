@@ -116,7 +116,10 @@ static unsigned int panel_height = 24; /* need to adjust with font height */
 #define MOUSE_BTN_MID 2
 #define MOUSE_BTN_RIGHT 3
 
-#define TIME_STR_DEF "0000-00-00 00 00:00"
+#define MENU_ICON "::"
+
+#define TIME_STR_FMT "%Y-%m-%d/%V %H:%M"
+#define TIME_STR_DEF "0000-00-00/00 00:00"
 #define TIME_STR_MAX sizeof(TIME_STR_DEF)
 
 /* data structures */
@@ -211,32 +214,28 @@ static xcb_atom_t a_state;
 static xcb_atom_t a_protocols;
 static xcb_atom_t a_client_list;
 
-static uint8_t title_len; /* last known title len */
-static char title_buf[STATUS_BUF_MAX];
-
 static time_t prev_time;
 
 /* <panel stuff> */
-static char *panel_buf;
 
-static uint16_t panel_edge_xpad;
-static uint16_t panel_text_ypos;
-static uint16_t panel_time_xpos;
-static uint16_t panel_time_width;
+enum panel_area { /* in order of appearance */
+	PANEL_AREA_TAGS,
+	PANEL_AREA_MENU,
+	PANEL_AREA_TITLE,
+	PANEL_AREA_DOCK,
+	PANEL_AREA_TIME,
+	PANEL_AREA_MAX,
+};
 
-static int tags_x = 5; /* x offset of tags bar */
-static char *tags_ptr; /* tags string ptr */
+struct panel_item {
+	int16_t x;
+	uint16_t w;
+	const char *name; /* FIXME: temporary */
+};
 
-static int menu_x;  /* x offset of menu button */
-static char *menu_ptr; /* menu string ptr */
-
-static int title_x; /* x offset of title bar */
-static char *title_ptr; /* title bar ptr */
-
-static int dock_x; /* x offset of dock bar */
-
-static int clock_x; /* x offset of clock bar */
-static char *clock_ptr; /* clock bar ptr */
+static struct panel_item panel_items[PANEL_AREA_MAX];
+static uint16_t panel_vpad;
+static uint16_t title_max;
 /* </panel stuff> */
 
 /* ... and the mess begins */
@@ -286,6 +285,7 @@ static void text_exts(const char *text, int len, uint16_t *w, uint16_t *h)
 	XGlyphInfo ext;
 
 	XftTextExtentsUtf8(xdpy, font, (XftChar8 *) text, len, &ext);
+#if 0
 	ii("text: %s\n"
 	   "  x = %d\n"
 	   "  y = %d\n"
@@ -300,9 +300,31 @@ static void text_exts(const char *text, int len, uint16_t *w, uint16_t *h)
 	   ext.height,
 	   ext.xOff,
 	   ext.yOff);
-
+#endif
 	*w = ext.width;
 	*h = ext.height;
+}
+
+static void fill_rect(xcb_window_t win, xcb_gcontext_t gc,
+		      int16_t x, int16_t y, uint16_t w, uint16_t h)
+{
+	xcb_rectangle_t rect = { x, y, w, h, };
+	xcb_poly_fill_rectangle(dpy, win, gc, 1, &rect);
+}
+
+static void draw_panel_text(struct screen *scr, XftColor *color, int16_t x,
+			    uint16_t w, const char *text, int len, int flush)
+{
+	fill_rect(scr->panel, scr->gc, x, 0, w, panel_height);
+	XftDrawStringUtf8(scr->draw, color, font, x, panel_vpad,
+			  (XftChar8 *) text, len);
+
+	if (flush) {
+		/* this makes text displayed, do not ask.. */
+		xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
+				    XCB_CURRENT_TIME);
+		xcb_flush(dpy);
+	}
 }
 
 static void clean(void)
@@ -418,11 +440,39 @@ static int draw_text(xcb_window_t win, uint32_t color,
 }
 #endif
 
-static void show_title(xcb_window_t win)
+static void panel_items_stat(void)
 {
-	char *buf;
-	int16_t y;
-	uint8_t len;
+	int i;
+
+	for (i = 0; i < PANEL_AREA_MAX; i++) {
+		switch (i) {
+		case PANEL_AREA_TAGS:
+			panel_items[i].name = "PANEL_AREA_TAGS";
+			break;
+		case PANEL_AREA_MENU:
+			panel_items[i].name = "PANEL_AREA_MENU";
+			break;
+		case PANEL_AREA_TITLE:
+			panel_items[i].name = "PANEL_AREA_TITLE";
+			break;
+		case PANEL_AREA_DOCK:
+			panel_items[i].name = "PANEL_AREA_DOCK";
+			break;
+		case PANEL_AREA_TIME:
+			panel_items[i].name = "PANEL_AREA_TIME";
+			break;
+		}
+
+		mm("%s: %d,%d (%d)\n", panel_items[i].name, panel_items[i].x,
+		   panel_items[i].x + panel_items[i].w,
+		   panel_items[i].w);
+	}
+}
+
+static void print_title(xcb_window_t win)
+{
+	uint16_t len;
+	uint16_t w, h;
 	xcb_get_property_cookie_t c;
 	xcb_icccm_get_text_property_reply_t info;
 
@@ -435,38 +485,37 @@ static void show_title(xcb_window_t win)
 	if (!info.name)
 		return;
 
-	y = panel_height - 5;
-	len = info.name_len;
+	panel_items_stat();
 
-	if (len > TITLE_LINE_MAX) {
-		len = TITLE_LINE_MAX;
-	} else {
-		if (title_len > len) {
-			char *tmp = calloc(1, title_len);
-			memset(tmp, ' ', title_len);
+	/* FIXME: maybe implement dotting ...*/
 #if 0
-			draw_text(screen->panel, FONT_ACTIVE, 0, y, tmp,
-				  title_len);
+	text_exts(info.name, info.name_len, &w, &h);
+	mm("text exts %d,%d\n", w, h);
 #endif
-			XftDrawStringUtf8(screen->draw, &active_color, font,
-					  0, y, (XftChar8 *) tmp, title_len);
-			free(tmp);
-		}
+#if 0
+	if (w > panel_items[PANEL_AREA_TITLE].w)
+		w = panel_items[PANEL_AREA_TITLE].w - panel_vpad;
+#endif
+	if (info.name_len <= title_max) {
+		len = info.name_len;
+	} else {
+		len = title_max;
+		info.name[len - 2] = '.';
+		info.name[len - 1] = '.';
+		info.name[len] = '.';
 	}
 
-#if 0
-	buf = title_buf;
-	sprintf(buf, " ^ ");
-	buf += sizeof(" ^ ");
-	snprintf(buf, len, "%s", info.name);
+	/* FIXME: need to match window to screen */
 
-	title_len = title_buf - buf;
-#endif
-	XftDrawStringUtf8(screen->draw, &normal_color, font, 0, y,
-			  (XftChar8 *) info.name, title_len);
-#if 0
-	draw_text(screen->panel, FONT_NORMAL, 0, y, info.name, title_len);
-#endif
+	mm("menu %d, range %d,%d (%d), name %s\n",
+	   panel_items[PANEL_AREA_MENU].x + panel_items[PANEL_AREA_MENU].w,
+	   panel_items[PANEL_AREA_TITLE].x,
+	   panel_items[PANEL_AREA_TITLE].w,
+	   panel_items[PANEL_AREA_TITLE].x + panel_items[PANEL_AREA_TITLE].w,
+	   info.name);
+	draw_panel_text(screen, &active_color, panel_items[PANEL_AREA_TITLE].x,
+			panel_items[PANEL_AREA_TITLE].w,
+			(XftChar8 *) info.name, len, 1);
 }
 
 static void update_clients_list(void)
@@ -554,7 +603,7 @@ static void window_focus(xcb_window_t win, int focus)
 
 	if (focus) {
 		val[0] = border_active;
-		show_title(win);
+		print_title(win);
 	} else {
 		val[0] = border_normal;
 	}
@@ -852,11 +901,15 @@ static void clients_scan(void)
 #endif
 }
 
-static void fill_rect(xcb_window_t win, xcb_gcontext_t gc,
-		      int16_t x, int16_t y, uint16_t w, uint16_t h)
+static void print_menu(struct screen *scr)
 {
-	xcb_rectangle_t rect = { x, y, w, h, };
-	xcb_poly_fill_rectangle(dpy, win, gc, 1, &rect);
+	uint16_t x, w;
+
+	x = panel_items[PANEL_AREA_MENU].x;
+	w = panel_items[PANEL_AREA_MENU].w;
+
+	draw_panel_text(scr, &normal_color, x, w, (XftChar8 *) MENU_ICON,
+		        sizeof(MENU_ICON) - 1, 0);
 }
 
 static void print_time(struct screen *scr)
@@ -864,6 +917,8 @@ static void print_time(struct screen *scr)
 	time_t t;
 	struct tm *tm;
 	char str[TIME_STR_MAX];
+	int16_t x;
+	uint16_t w;
 
 	t = time(NULL);
 	if (t == prev_time)
@@ -873,21 +928,21 @@ static void print_time(struct screen *scr)
 	if (!tm)
 		return;
 
-	if (strftime(str, TIME_STR_MAX, "%Y-%m-%d %V %H:%M", tm) == 0)
+	if (strftime(str, TIME_STR_MAX, TIME_STR_FMT, tm) == 0)
 		strncpy(str, TIME_STR_DEF, TIME_STR_MAX);
 
-	fill_rect(scr->panel, scr->gc, panel_time_xpos, 0, panel_time_width,
-		  panel_height);
-	XftDrawStringUtf8(scr->draw, &normal_color, font, panel_time_xpos,
-			  panel_text_ypos, (XftChar8 *) str, sizeof(str) - 1);
+	x = panel_items[PANEL_AREA_TIME].x;
+	w = panel_items[PANEL_AREA_TIME].w;
+
+	draw_panel_text(scr, &normal_color, x, w, (XftChar8 *) str,
+			sizeof(str) - 1, 1);
 	prev_time = t;
 }
 
 static void tag_refresh(struct screen *scr, struct tag *tag, XftColor *color)
 {
-	fill_rect(scr->panel, scr->gc, tag->x, 0, tag->w, panel_height);
-	XftDrawStringUtf8(scr->draw, color, font, tag->x, panel_text_ypos,
-			  (XftChar8 *) tag->name, tag->nlen);
+	draw_panel_text(scr, color, tag->x, tag->w, (XftChar8 *) tag->name,
+		        tag->nlen, 0);
 }
 
 static int tag_clicked(struct tag *tag, int16_t x)
@@ -908,13 +963,6 @@ static void tag_select(struct screen *scr, int x)
 		scr->tag->flags &= ~TAG_FLG_ACTIVE;
 		color = &normal_color;
 		tag_refresh(scr, scr->tag, color);
-#if 0
-		fill_rect(scr->panel, scr->gc, scr->tag->x, 0, scr->tag->w,
-			  panel_height);
-		XftDrawStringUtf8(scr->draw, color, font, scr->tag->x,
-				  panel_text_ypos, (XftChar8 *) scr->tag->name,
-				  scr->tag->nlen);
-#endif
 	}
 
 	list_walk(cur, &screen->tags) {
@@ -943,24 +991,7 @@ static void tag_select(struct screen *scr, int x)
 			color = &normal_color;
 		}
 #endif
-#if 0
-		fill_rect(scr->panel, scr->gc, tag->x, 0, tag->w, panel_height);
-		XftDrawStringUtf8(scr->draw, color, font, tag->x,
-				  panel_text_ypos, (XftChar8 *) tag->name,
-				  tag->nlen);
-		tag_refresh(scr, tag, color);
-#endif
 	}
-
-#if 0
-	if (scr->tag) {
-		fill_rect(scr->panel, scr->gc, scr->tag->x, 0, scr->tag->w,
-			  panel_height);
-		XftDrawStringUtf8(scr->draw, &active_color, font, sel->x,
-				  panel_text_ypos, (XftChar8 *) sel->name,
-				  sel->nlen);
-	}
-#endif
 
         xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
                             XCB_CURRENT_TIME);
@@ -992,24 +1023,23 @@ static int tag_add(struct screen *scr, const char *name, int pos)
 	list_add(&scr->tags, &tag->head);
 
 	text_exts(name, tag->nlen, &tag->w, &h);
-	if (panel_text_ypos == 0)
-		panel_text_ypos = panel_height - (panel_height - h) / 2;
 #if 0
 	len = draw_text(scr->panel, FONT_ACTIVE, 5, y, name, len);
 #endif
 
-	if (pos != panel_edge_xpad) {
+	if (pos != panel_items[PANEL_AREA_TAGS].x) {
 		color = &normal_color;
+		tag->flags &= ~TAG_FLG_ACTIVE;
 	} else {
 		color = &active_color;
 		tag->flags |= TAG_FLG_ACTIVE;
 	}
 
-	XftDrawStringUtf8(scr->draw, color, font, pos, panel_text_ypos,
-			  (XftChar8 *) tag->name, tag->nlen);
+	draw_panel_text(scr, color, pos, tag->w, (XftChar8 *) tag->name,
+			tag->nlen, 0);
 
 	tag->x = pos;
-	tag->w += h; /* h for spacing */
+	tag->w += FONT_SIZE_FT; /* spacing */
 	return pos + tag->w;
 }
 
@@ -1033,7 +1063,7 @@ static int tag_add(struct screen *scr, const char *name, int pos)
  *			   1 --> "work"
  *			   2 --> "browser"
  */
-static void init_tags(struct screen *scr, int idx)
+static int init_tags(struct screen *scr, int idx)
 {
 	struct list_head *cur;
 	int fd, i, pos;
@@ -1053,7 +1083,7 @@ static void init_tags(struct screen *scr, int idx)
 	close(fd);
 	ptr = path + strlen(path);
 
-	pos = panel_edge_xpad;
+	pos = panel_items[PANEL_AREA_TAGS].x;
 	memset(name, 0, sizeof(name));
 	for (i = 0; i < TAGS_MAX; i++) {
 		sprintf(ptr, "%d", i);
@@ -1066,12 +1096,65 @@ static void init_tags(struct screen *scr, int idx)
 		pos = tag_add(scr, name, pos);
 		memset(name, 0, TAG_NAME_MAX);
 	}
+
+	return pos - panel_vpad / 2;
+}
+
+static int calc_title_max(void)
+{
+	int16_t w, h, i;
+	char *tmp;
+
+	i = 1;
+	w = 0;
+	while (w < panel_items[PANEL_AREA_TITLE].w) {
+		tmp = calloc(1, i + 1);
+		memset(tmp, 'w', i);
+		mm("%s\n", tmp);
+		text_exts(tmp, strlen(tmp), &w, &h);
+		free(tmp);
+		i++;
+	}
+	title_max = i - 2;
+	mm("title_max=%u\n", title_max);
+}
+
+static int update_panel_items(struct screen *scr, int idx)
+{
+	int16_t x;
+	uint16_t h, w;
+
+	text_exts(TIME_STR_DEF, TIME_STR_MAX, &w, &h);
+	panel_items[PANEL_AREA_TIME].x = scr->w - w;
+	panel_items[PANEL_AREA_TIME].w = w;
+
+	panel_vpad = panel_height - (panel_height - FONT_SIZE_FT) / 2;
+
+	x = FONT_SIZE_FT;
+	panel_items[PANEL_AREA_TAGS].x = x;
+	panel_items[PANEL_AREA_TAGS].w = init_tags(scr, idx);
+	x += panel_items[PANEL_AREA_TAGS].w + 1;
+
+	text_exts(MENU_ICON, sizeof(MENU_ICON) - 1, &w, &h);
+	panel_items[PANEL_AREA_MENU].x = x;
+	panel_items[PANEL_AREA_MENU].w = w + panel_vpad;
+	x += panel_items[PANEL_AREA_MENU].w + 1;
+
+	w = panel_items[PANEL_AREA_TIME].x - 1 - x - panel_vpad;
+	panel_items[PANEL_AREA_TITLE].w = w;
+	panel_items[PANEL_AREA_TITLE].x = x;
+	calc_title_max();
+
+	print_menu(scr);
+	print_time(scr); /* last element on panel */
+#if 1
+	panel_items_stat();
+#endif
 }
 
 static void init_panel(struct screen *scr, int idx)
 {
 	int y;
-	uint16_t h;
 	uint32_t val[2], mask;
 
 	scr->panel = xcb_generate_id(dpy);
@@ -1118,22 +1201,45 @@ static void init_panel(struct screen *scr, int idx)
 				  DefaultVisual(xdpy, xscr),
 				  DefaultColormap(xdpy, xscr));
 #endif
-
-	text_exts(TIME_STR_DEF, TIME_STR_MAX, &panel_time_width, &h);
-	panel_edge_xpad = h;
-	panel_time_xpos = scr->w - panel_time_width - h;
-
-	init_tags(scr, idx);
-	print_time(scr);
+	update_panel_items(scr, idx);
 }
 
-static void click_panel(xcb_button_press_event_t *e)
+#define pointer_inside(area, ex)\
+	(ex >= panel_items[area].x &&\
+	 ex <= panel_items[area].x + panel_items[area].w)
+
+static void dump_coords(int x)
+{
+	int i;
+
+	for (i = 0; i < PANEL_AREA_MAX; i++) {
+		mm("%d: %d >= %d <= %d (w = %d)\n", i, panel_items[i].x, x,
+		   panel_items[i].w + panel_items[i].x, panel_items[i].w);
+		if pointer_inside(i, x)
+			mm("^^^ inside %s\n", panel_items[i].name);
+	}
+}
+
+static void handle_button_press(xcb_button_press_event_t *e)
 {
 	switch (e->detail) {
 	case MOUSE_BTN_LEFT:
 		dd("MOUSE_BTN_LEFT\n");
-		if (screen->panel == e->event)
-			tag_select(screen, e->event_x);
+		if (screen->panel == e->event) {
+#if 0
+			dump_coords(e->event_x);
+#endif
+			if pointer_inside(PANEL_AREA_TAGS, e->event_x)
+				tag_select(screen, e->event_x);
+			else if pointer_inside(PANEL_AREA_MENU, e->event_x)
+				mm("menu\n");
+			else if pointer_inside(PANEL_AREA_TITLE, e->event_x)
+				mm("title\n");
+			else if pointer_inside(PANEL_AREA_DOCK, e->event_x)
+				mm("dock\n");
+			else if pointer_inside(PANEL_AREA_TIME, e->event_x)
+				mm("time\n");
+		}
 		break;
 	case MOUSE_BTN_MID:
 		dd("MOUSE_BTN_MID\n");
@@ -1380,7 +1486,7 @@ static void handle_events(void)
 	case XCB_BUTTON_PRESS:
 		tt("XCB_BUTTON_PRESS: win %p\n",
 		   ((xcb_button_press_event_t *)e)->event);
-		click_panel((xcb_button_press_event_t *)e);
+		handle_button_press((xcb_button_press_event_t *)e);
 		break;
 	case XCB_BUTTON_RELEASE:
 		tt("XCB_BUTTON_RELEASE\n");
@@ -1457,7 +1563,7 @@ static void handle_events(void)
 		   ((xcb_property_notify_event_t *)e)->state);
 		switch (((xcb_property_notify_event_t *)e)->atom) {
 		case XCB_ATOM_WM_NAME:
-			show_title(((xcb_property_notify_event_t *)e)->window);
+			print_title(((xcb_property_notify_event_t *)e)->window);
 			break;
 		}
 		break;
