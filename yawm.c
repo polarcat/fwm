@@ -65,11 +65,9 @@
 
 static char *basedir = "/tmp/yawm";
 
-static int randrbase;
-static unsigned int border_active = 0xff5050;
+static unsigned int border_active = 0x5050ff;
 static unsigned int border_normal = 0x005000;
 static unsigned int panel_bg = 0x101010;
-static unsigned int panel_fg = 0x909090;
 static unsigned int panel_height = 24; /* need to adjust with font height */
 
 /* defines */
@@ -81,17 +79,10 @@ static unsigned int panel_height = 24; /* need to adjust with font height */
 #define BORDER_WIDTH 1
 #define WINDOW_PAD (BORDER_WIDTH * 2)
 
-//#define FONT_NAME "fixed"
-//#define FONT_NAME_FT "Monospace:regular:antohint=true:pixelsize=14"
 #define FONT_SIZE_FT 10.
 #define FONT_NAME_FT "Monospace"
 #define FONT_COLOR_NORMAL { 0x7000, 0x7000, 0x7000, 0xffff, }
-//#define FONT_COLOR_ACTIVE { 0x4c00, 0x7800, 0x9900, 0xffff, }
 #define FONT_COLOR_ACTIVE { 0x7800, 0x9900, 0x4c00, 0xffff, }
-
-#define FONT_NAME "-misc-fixed-bold-*-*-*-14-*-*-*-*-*-*-*"
-#define FONT_ACTIVE 0x00aa00
-#define FONT_NORMAL 0x909090
 
 #define WIN_WIDTH_MIN 100
 #define WIN_HEIGHT_MIN 100
@@ -342,7 +333,7 @@ static void text_exts(const char *text, int len, uint16_t *w, uint16_t *h)
 	XGlyphInfo ext;
 
 	XftTextExtentsUtf8(xdpy, font, (XftChar8 *) text, len, &ext);
-#if 0
+#ifdef VERBOSE
 	ii("text: %s\n"
 	   "  x = %d\n"
 	   "  y = %d\n"
@@ -383,8 +374,6 @@ static void draw_panel_text(struct screen *scr, XftColor *color, int16_t x,
 		xcb_flush(dpy);
 	}
 }
-
-//execl("/bin/sh", "sh", "-c", command, '\0');
 
 static void spawn(const char **argv)
 {
@@ -437,6 +426,9 @@ static xcb_get_property_reply_t *get_prop_any(xcb_window_t w, xcb_atom_t a)
 	return xcb_get_property_reply(dpy, c, NULL);
 }
 
+#ifndef VERBOSE
+#define panel_items_stat(void) ;
+#else
 static void panel_items_stat(void)
 {
 	int i;
@@ -465,6 +457,7 @@ static void panel_items_stat(void)
 		   panel_items[i].w);
 	}
 }
+#endif
 
 static void print_title(xcb_window_t win)
 {
@@ -482,9 +475,7 @@ static void print_title(xcb_window_t win)
 	if (!info.name)
 		return;
 
-#if 0
 	panel_items_stat();
-#endif
 
 	if (info.name_len <= title_max) {
 		len = info.name_len;
@@ -607,8 +598,6 @@ static void switch_window(xcb_key_press_event_t *e, int next)
 	scr = root2screen(e->root);
 	cli = win2client(scr, scr->tag->win);
 
-	mm("cur win %p\n", cli->win);
-
 	if (next) {
 		if (cli->head.next == &scr->tag->clients) /* end of list */
 			cli = list2client(scr->tag->clients.next);
@@ -625,8 +614,6 @@ static void switch_window(xcb_key_press_event_t *e, int next)
 	window_focus(scr, e->root, scr->tag->win, 0);
 	window_focus(scr, e->root, cli->win, 1);
 	xcb_flush(dpy);
-
-	mm("next win %p\n", cli->win);
 }
 
 static void place_window(void *arg)
@@ -818,21 +805,6 @@ static void client_moveresize(struct client *cli, int x, int y, int w, int h)
 	   cli->w, cli->h, cli->x, cli->y);
 }
 
-#if 0
-static struct client *win2client(xcb_window_t win)
-{
-	struct list_head *cur;
-	struct tag *tag = list2tag(screen->tags.next);
-
-	list_walk(cur, &tag->clients) {
-		struct client *cli = list2client(cur);
-		if (cli->win == win)
-			return cli;
-	}
-	return NULL;
-}
-#endif
-
 static void client_add(xcb_window_t win)
 {
 	struct tag *tag;
@@ -868,7 +840,6 @@ static void client_add(xcb_window_t win)
 
 	g = NULL;
 	if (a->override_redirect) {
-// && a->map_state != XCB_MAP_STATE_VIEWABLE) {
 		ww("ignore window %p");
 		goto out;
 	}
@@ -912,7 +883,7 @@ static void client_add(xcb_window_t win)
 	xcb_map_window(dpy, cli->win);
 	xcb_flush(dpy);
 
-	mm("cli %p, win %p, geo %dx%d+%d+%d\n", cli, cli->win,
+	dd("cli %p, win %p, geo %dx%d+%d+%d\n", cli, cli->win,
 	   cli->w, cli->h, cli->x, cli->y);
 
 	update_clients_list();
@@ -1228,9 +1199,8 @@ static int update_panel_items(struct screen *scr, int idx)
 
 	print_menu(scr);
 	print_time(scr); /* last element on panel */
-#if 1
+
 	panel_items_stat();
-#endif
 }
 
 static void init_panel(struct screen *scr, int idx)
@@ -1373,10 +1343,7 @@ static void screen_keys(struct screen *scr)
 	free(r);
 
 	xcb_ungrab_key(dpy, XCB_GRAB_ANY, scr->ptr->root, XCB_MOD_MASK_ANY);
-#if 0
-	xcb_grab_key(dpy, 1, scr->ptr->root, XCB_MOD_MASK_ANY, 0x32,
-		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-#endif
+
 	while (ptr->mod) {
 		mm("mod %x, key %x\n", ptr->mod, ptr->key);
 		xcb_grab_key(dpy, 1, scr->ptr->root, ptr->mod, ptr->key,
@@ -1428,7 +1395,6 @@ static void wait_events(void)
 	int state;
 	xcb_generic_event_t *e;
 
-	tt("\n");
 	while (1) {
 		e = xcb_wait_for_event(dpy);
 		if (!e)
@@ -1610,11 +1576,11 @@ static void handle_events(void)
 		tt("XCB_MAPPING_NOTIFY\n");
 		break;
 	case XCB_MAP_NOTIFY:
-		mm("XCB_MAP_NOTIFY: win %p\n",
+		tt("XCB_MAP_NOTIFY: win %p\n",
 		   ((xcb_map_notify_event_t *)e)->window);
 		break;
 	case XCB_MAP_REQUEST:
-		mm("XCB_MAP_REQUEST: win %p\n",
+		tt("XCB_MAP_REQUEST: win %p\n",
 		   ((xcb_map_request_event_t *)e)->window);
 		client_add(((xcb_map_notify_event_t *)e)->window);
 		break;
