@@ -1,6 +1,6 @@
 cc = $(CROSS_COMPILE)gcc
 out = yawm
-src = main.c
+src = yawm.c
 
 ldflags = $(LDFLAGS) -lm -g
 ldflags += -lxcb -lxcb-util -lxcb-icccm -lxcb-keysyms
