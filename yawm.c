@@ -586,8 +586,7 @@ static void window_focus(struct screen *scr, xcb_window_t root,
 	}
 
 	xcb_change_window_attributes(dpy, win, XCB_CW_BORDER_PIXEL, val);
-        xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
-                            XCB_CURRENT_TIME);
+        xcb_set_input_focus(dpy, XCB_NONE, win, XCB_CURRENT_TIME);
 }
 
 static void switch_window(xcb_key_press_event_t *e, int next)
