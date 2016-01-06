@@ -2,7 +2,8 @@ cc = $(CROSS_COMPILE)gcc
 out = yawm
 src = main.c
 
-ldflags = $(LDFLAGS) -lm -lxcb -lxcb-util -lxcb-icccm -g
+ldflags = $(LDFLAGS) -lm -g
+ldflags += -lxcb -lxcb-util -lxcb-icccm -lxcb-keysyms
 ldflags += $(shell pkg-config --libs xft) -lX11 -lX11-xcb
 ccflags += $(CFLAGS) $(shell pkg-config --cflags xft)
 

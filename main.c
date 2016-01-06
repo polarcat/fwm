@@ -66,8 +66,6 @@
 static char *basedir = "/tmp/yawm";
 
 static int randrbase;
-static int snap_margin = 4;
-static int border_width = 1;
 static unsigned int border_active = 0xff5050;
 static unsigned int border_normal = 0x005000;
 static unsigned int panel_bg = 0x101010;
@@ -75,6 +73,13 @@ static unsigned int panel_fg = 0x909090;
 static unsigned int panel_height = 24; /* need to adjust with font height */
 
 /* defines */
+
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
+
+#define BORDER_WIDTH 1
+#define WINDOW_PAD (BORDER_WIDTH * 2)
 
 //#define FONT_NAME "fixed"
 //#define FONT_NAME_FT "Monospace:regular:antohint=true:pixelsize=14"
@@ -122,6 +127,10 @@ static unsigned int panel_height = 24; /* need to adjust with font height */
 #define TIME_STR_DEF "0000-00-00/00 00:00"
 #define TIME_STR_MAX sizeof(TIME_STR_DEF)
 
+#define MODKEY XCB_MOD_MASK_4
+#define MODSHIFT (MODKEY | XCB_MOD_MASK_SHIFT)
+#define SHIFT XCB_MOD_MASK_SHIFT
+
 /* data structures */
 
 struct screen {
@@ -148,6 +157,8 @@ struct screen {
 	xcb_visualtype_t *visual;
 };
 
+#define list2screen(item) list_entry(item, struct screen, head)
+
 static struct screen *screen;
 static struct list_head screens;
 
@@ -155,6 +166,7 @@ struct tag {
 	struct list_head head;
 	struct list_head clients;
 
+	xcb_window_t win; /* active window */
 	struct screen *scr;
 
 	xcb_gcontext_t gc;
@@ -168,17 +180,6 @@ struct tag {
 
 #define list2tag(item) list_entry(item, struct tag, head)
 
-#if 0 /* screen arrays */
-struct screens {
-	struct screen **scr;
-	int max;
-};
-
-static struct screens screens0;
-#endif
-
-#define list2screen(item) list_entry(item, struct screen, head)
-
 struct client {
 	struct list_head head;
 	struct tag *tag;
@@ -191,6 +192,64 @@ struct client {
 
 #define list2client(item) list_entry(item, struct client, head)
 
+struct winhash {
+	uint32_t hash;
+	struct client *cli;
+};
+
+struct arg {
+	const void *ptr;
+};
+
+struct keymap {
+	uint16_t mod;
+	xcb_keysym_t sym;
+	xcb_keycode_t key;
+	void (*action)(void *);
+	void *arg;
+};
+
+/* config */
+
+enum winpos {
+	WIN_POS_FILL,
+	WIN_POS_TOP_LEFT,
+	WIN_POS_TOP_RIGHT,
+	WIN_POS_BOTTOM_LEFT,
+	WIN_POS_BOTTOM_RIGHT,
+	WIN_POS_LEFT_FILL,
+	WIN_POS_RIGHT_FILL,
+	WIN_POS_TOP_FILL,
+	WIN_POS_BOTTOM_FILL,
+};
+
+static void next_window(void *);
+static void prev_window(void *);
+static void raise_window(void *);
+static void place_window(void *);
+
+static void spawn(const char **argv);
+
+static char *term[] = { "xterm", NULL };
+static char *lock[] = { "xscreensaver-command", "--lock", NULL };
+
+static struct keymap kmap[] = {
+	{ MODKEY, XK_Tab, 0, next_window, NULL, },
+	{ MODKEY, XK_BackSpace, 0, prev_window, NULL, },
+	{ MODKEY, XK_Return, 0, raise_window, NULL, },
+	{ MODKEY, XK_t, 0, spawn, (void *) term, },
+	{ SHIFT, XK_F5, 0, place_window, (void *) WIN_POS_TOP_LEFT, },
+	{ SHIFT, XK_F6, 0, place_window, (void *) WIN_POS_TOP_RIGHT, },
+	{ SHIFT, XK_F7, 0, place_window, (void *) WIN_POS_BOTTOM_LEFT, },
+	{ SHIFT, XK_F8, 0, place_window, (void *) WIN_POS_BOTTOM_RIGHT, },
+	{ MODKEY, XK_F5, 0, place_window, (void *) WIN_POS_LEFT_FILL, },
+	{ MODKEY, XK_F6, 0, place_window, (void *) WIN_POS_RIGHT_FILL, },
+	{ MODKEY, XK_F7, 0, place_window, (void *) WIN_POS_TOP_FILL, },
+	{ MODKEY, XK_F8, 0, place_window, (void *) WIN_POS_BOTTOM_FILL, },
+	{ MODKEY, XK_F9, 0, place_window, (void *) WIN_POS_FILL, },
+	{ 0, 0, 0, NULL, NULL, },
+};
+
 /* globals */
 
 static XftColor normal_color;
@@ -198,8 +257,6 @@ static XftColor active_color;
 static XftFont *font;
 static XftDraw *normal_font;
 static XftDraw *active_font;
-
-static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 static int xscr;
 static Display *xdpy;
@@ -327,6 +384,23 @@ static void draw_panel_text(struct screen *scr, XftColor *color, int16_t x,
 	}
 }
 
+//execl("/bin/sh", "sh", "-c", command, '\0');
+
+static void spawn(const char **argv)
+{
+	if (fork() == 0) {
+		if (dpy)
+			close(xcb_get_file_descriptor(dpy));
+		if (setsid() < 0) {
+			tt("setsid() failed\n");
+			exit(1);
+		}
+		tt("execvp %s\n", argv[0]);
+		execvp(argv[0], argv);
+		exit(0);
+	}
+}
+
 static void clean(void)
 {
 	xcb_disconnect(dpy);
@@ -353,14 +427,6 @@ static void clean(void)
 		panic("%s, err=%d\n", #func, error__->error_code);\
 }
 
-static void change_single_value(xcb_window_t win, uint32_t val, uint32_t mask)
-{
-	uint32_t v[1];
-
-	v[0] = val;
-	xcb_change_window_attributes(dpy, win, mask, v);
-}
-
 #define PROP_TYPE_ANY XCB_GET_PROPERTY_TYPE_ANY
 
 static xcb_get_property_reply_t *get_prop_any(xcb_window_t w, xcb_atom_t a)
@@ -370,75 +436,6 @@ static xcb_get_property_reply_t *get_prop_any(xcb_window_t w, xcb_atom_t a)
 	c = xcb_get_property(dpy, 0, w, a, PROP_TYPE_ANY, 0, PROP_MAX);
 	return xcb_get_property_reply(dpy, c, NULL);
 }
-
-#if 0
-static int draw_text_utf8(xcb_window_t win, int active, int x, int y,
-			  const char *text, int len)
-{
-#if 0
-	XftFont *font;
-	XftColor color;
-	XftDraw *draw;
-	XRenderColor c = { 0x4c00, 0x7800, 0x9900, 0xffff, };
-
-	font = XftFontOpen(dpy, win->scr, XFT_FAMILY, XftTypeString, "Monospace",
-			   XFT_SIZE, XftTypeDouble, 10.0, NULL);
-        XftColorAllocValue(dpy, root_visual, root_cmap, &blue, &color);
-	draw = XftDrawCreate(dpy, win, root_visual, root_cmap);
-	XftDrawStringUtf8(draw, &color, font, x, y, (XftChar8 *) text, len);
-#endif
-	XftColor *color;
-	XftDraw *draw;
-
-	draw = XftDrawCreate(dpy, win, font_visual, font_cmap);
-	if (active)
-		color = &active_color;
-	else
-		color = &normal_color;
-
-	XftDrawStringUtf8(draw, color, font, x, y, (XftChar8 *) text, len);
-	return 0;
-}
-
-static int panel_text(int active, int x, int y, const char *text, int len)
-{
-	if (active)
-		color = &active_color;
-	else
-		color = &normal_color;
-
-	XftDrawStringUtf8(draw, color, font, x, y, (XftChar8 *) text, len);
-}
-#endif
-
-#if 0
-static int draw_text(xcb_window_t win, uint32_t color,
-		     int x, int y, const char *text, int len)
-{
-	uint32_t mask, val[3];
-	xcb_gcontext_t gc;
-	xcb_font_t font;
-	xcb_void_cookie_t c;
-
-	/* get font */
-	font = xcb_generate_id(dpy);
-	xcb(c, xcb_open_font_checked(dpy, font, sslen(FONT_NAME), FONT_NAME));
-
-        /* create graphics context */
-        gc = xcb_generate_id(dpy);
-        mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND | XCB_GC_FONT;
-	val[0] = color;
-	val[1] = panel_bg;
-	val[2] = font;
-        xcb(c, xcb_create_gc_checked(dpy, gc, win, mask, val));
-        xcb(c, xcb_close_font_checked(dpy, font));
-
-	xcb(c, xcb_image_text_8_checked(dpy, len, win, gc, x, y, text));
-	xcb(c, xcb_free_gc(dpy, gc));
-
-	return xcb_query_text_extents_sizeof(text, len * 2);
-}
-#endif
 
 static void panel_items_stat(void)
 {
@@ -485,17 +482,10 @@ static void print_title(xcb_window_t win)
 	if (!info.name)
 		return;
 
+#if 0
 	panel_items_stat();
+#endif
 
-	/* FIXME: maybe implement dotting ...*/
-#if 0
-	text_exts(info.name, info.name_len, &w, &h);
-	mm("text exts %d,%d\n", w, h);
-#endif
-#if 0
-	if (w > panel_items[PANEL_AREA_TITLE].w)
-		w = panel_items[PANEL_AREA_TITLE].w - panel_vpad;
-#endif
 	if (info.name_len <= title_max) {
 		len = info.name_len;
 	} else {
@@ -506,13 +496,14 @@ static void print_title(xcb_window_t win)
 	}
 
 	/* FIXME: need to match window to screen */
-
+#if 0
 	mm("menu %d, range %d,%d (%d), name %s\n",
 	   panel_items[PANEL_AREA_MENU].x + panel_items[PANEL_AREA_MENU].w,
 	   panel_items[PANEL_AREA_TITLE].x,
 	   panel_items[PANEL_AREA_TITLE].w,
 	   panel_items[PANEL_AREA_TITLE].x + panel_items[PANEL_AREA_TITLE].w,
 	   info.name);
+#endif
 	draw_panel_text(screen, &active_color, panel_items[PANEL_AREA_TITLE].x,
 			panel_items[PANEL_AREA_TITLE].w,
 			(XftChar8 *) info.name, len, 1);
@@ -554,74 +545,186 @@ static void match_client_class(struct client *cli, const char *class,
 	mm("class %s, instance %s\n", info.class_name, info.instance_name);
 }
 
-#if 0
-static void client_name(struct client *cli)
+static struct screen *root2screen(xcb_window_t root)
 {
-	xcb_get_property_cookie_t c;
-	xcb_icccm_get_text_property_reply_t info;
+	struct list_head *cur;
 
-	c = xcb_icccm_get_wm_name(dpy, cli->win);
-	if (!xcb_icccm_get_wm_name_reply(dpy, c, &info, NULL)) {
-		ww("xcb_icccm_get_wm_name_reply() failed\n");
-		return;
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if (scr->ptr->root == root)
+			return scr;
 	}
-
-	dd("%d-bits, %d %s charactes\n", info.format, info.name_len,
-	   info.encoding == a_utf8 ? "utf8" : "");
-	dd("name: %s, encoding: %d\n", info.name, info.encoding);
-
-	if (!info.name) {
-		return;
-	} else if (info.format == 8 && info.encoding != a_utf8) {
-		cli->name = strdup(info.name);
-	} else {
-		int size = info.format / 8 * info.name_len;
-		cli->name = calloc(1, size + 1);
-		if (!cli->name) {
-			ee("calloc(1, %d) failed\n", size + 1);
-			return;
-		}
-		memcpy(cli->name, info.name, size);
-	}
+	return NULL;
 }
-#endif
+
+static struct client *win2client(struct screen *scr, xcb_window_t win)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &scr->tag->clients) {
+		struct client *cli = list2client(cur);
+		if (cli->win == win)
+			return cli;
+	}
+	return NULL;
+}
 
 static void window_raise(xcb_window_t win)
 {
 	uint32_t val[1] = { XCB_STACK_MODE_ABOVE, };
-	uint32_t mask = XCB_CONFIG_WINDOW_STACK_MODE;
-
-	xcb_change_window_attributes(dpy, win, mask, val);
+	xcb_configure_window(dpy, win, XCB_CONFIG_WINDOW_STACK_MODE, val);
 }
 
-static void window_focus(xcb_window_t win, int focus)
+static void window_focus(struct screen *scr, xcb_window_t root,
+			 xcb_window_t win, int focus)
 {
 	uint32_t val[1];
-	uint32_t mask = XCB_CW_BORDER_PIXEL;
+	struct client *cli;
 
 	tt("win %p, focus %d\n", win, focus);
 
-	if (focus) {
+	if (!focus) {
+		val[0] = border_normal;
+	} else {
 		val[0] = border_active;
 		print_title(win);
-	} else {
-		val[0] = border_normal;
+
+		if (!scr && root)
+			scr = root2screen(root);
+		scr->tag->win = win;
 	}
 
-	xcb_change_window_attributes(dpy, win, mask, val);
+	xcb_change_window_attributes(dpy, win, XCB_CW_BORDER_PIXEL, val);
         xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
                             XCB_CURRENT_TIME);
+}
+
+static void switch_window(xcb_key_press_event_t *e, int next)
+{
+	struct screen *scr;
+	struct client *cli;
+
+	scr = root2screen(e->root);
+	cli = win2client(scr, scr->tag->win);
+
+	mm("cur win %p\n", cli->win);
+
+	if (next) {
+		if (cli->head.next == &scr->tag->clients) /* end of list */
+			cli = list2client(scr->tag->clients.next);
+		else
+			cli = list2client(cli->head.next);
+	} else {
+		if (cli->head.prev == &scr->tag->clients) /* head of list */
+			cli = list2client(scr->tag->clients.prev);
+		else
+			cli = list2client(cli->head.prev);
+	}
+
+	window_raise(cli->win);
+	window_focus(scr, e->root, scr->tag->win, 0);
+	window_focus(scr, e->root, cli->win, 1);
+	xcb_flush(dpy);
+
+	mm("next win %p\n", cli->win);
+}
+
+static void place_window(void *arg)
+{
+	enum winpos pos = (enum winpos) arg;
+	uint32_t val[4], mask;
+
+	switch (pos) {
+	case WIN_POS_FILL:
+		val[0] = val[1] = 0;
+		val[2] = screen->w - WINDOW_PAD;
+		val[3] = screen->h - BORDER_WIDTH;
+		break;
+	case WIN_POS_LEFT_FILL:
+		val[0] = val[1] = 0;
+		goto halfw;
+	case WIN_POS_RIGHT_FILL:
+		val[0] = screen->w / 2;
+		val[1] = 0;
+		goto halfw;
+	case WIN_POS_TOP_FILL:
+		val[0] = val[1] = 0;
+		goto halfh;
+	case WIN_POS_BOTTOM_FILL:
+		val[0] = 0;
+		val[1] = screen->h / 2;
+		goto halfh;
+	case WIN_POS_TOP_LEFT:
+		val[0] = val[1] = 0;
+		goto halfwh;
+	case WIN_POS_TOP_RIGHT:
+		val[0] = screen->w / 2;
+		val[1] = 0;
+		goto halfwh;
+	case WIN_POS_BOTTOM_LEFT:
+		val[0] = 0;
+		val[1] = screen->h / 2;
+		goto halfwh;
+	case WIN_POS_BOTTOM_RIGHT:
+		val[0] = screen->w / 2;
+		val[1] = screen->h / 2;
+		goto halfwh;
+	default:
+		return;
+	}
+
+out:
+	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
+	xcb_configure_window(dpy, screen->tag->win, mask, val);
+	xcb_flush(dpy);
+	return;
+halfwh:
+	val[2] = screen->w / 2 - WINDOW_PAD;
+	val[3] = screen->h / 2 - WINDOW_PAD;
+	goto out;
+halfw:
+	val[2] = screen->w / 2 - WINDOW_PAD;
+	val[3] = screen->h - WINDOW_PAD;
+	goto out;
+halfh:
+	val[2] = screen->w - WINDOW_PAD;
+	val[3] = screen->h / 2 - WINDOW_PAD;
+	goto out;
+}
+
+static void hide_window(struct screen *scr, xcb_window_t win)
+{
+	int val[1] = { scr->h, };
+	int mask = XCB_CONFIG_WINDOW_Y;
+
+	xcb_configure_window(dpy, win, mask, val);
+}
+
+static void next_window(void *arg)
+{
+	switch_window((xcb_key_press_event_t *) arg, 1);
+}
+
+static void prev_window(void *arg)
+{
+	switch_window((xcb_key_press_event_t *) arg, 0);
+}
+
+static void raise_window(void *arg)
+{
+	xcb_key_press_event_t *e = (xcb_key_press_event_t *) arg;
+	struct screen *scr;
+	struct client *cli;
+
+	scr = root2screen(e->root);
+	cli = win2client(scr, scr->tag->win);
+
+	tt("cur win %p\n", cli->win);
+	/* FIXME: prev window must be unfocused */
+	window_raise(cli->win);
 	xcb_flush(dpy);
 }
-
-#if 0
-static void client_tag(struct client *cli)
-{
-	struct tag *tag = list2tag(screen->tags.next);
-
-	list_add(&tag->clients, &cli->head);
-}
-#endif
 
 #if 0
 static void client_move(struct client *cli, int x, int y)
@@ -687,13 +790,13 @@ static void client_moveresize(struct client *cli, int x, int y, int w, int h)
 
 	/* fit into monitor space */
 	if (cli->w > cli->scr->w)
-		cli->w = cli->scr->w - border_width;
+		cli->w = cli->scr->w - BORDER_WIDTH;
 	else if (cli->w < WIN_WIDTH_MIN)
-		cli->w = cli->scr->w / 2 - border_width;
+		cli->w = cli->scr->w / 2 - BORDER_WIDTH;
 	if (cli->h > cli->scr->h)
-		cli->h = cli->scr->h - border_width;
+		cli->h = cli->scr->h - BORDER_WIDTH;
 	else if (cli->h < WIN_HEIGHT_MIN)
-		cli->h = cli->scr->h / 2 - border_width;
+		cli->h = cli->scr->h / 2 - BORDER_WIDTH;
 
 	if (cli->x > cli->scr->w)
 		cli->x = 0;
@@ -710,12 +813,12 @@ static void client_moveresize(struct client *cli, int x, int y, int w, int h)
 	mask = XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
 	mask |= XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	xcb_configure_window(dpy, cli->win, mask, val);
-	xcb_flush(dpy);
 
 	dd("cli %p, win %p, geo %dx%d+%d+%d\n", cli, cli->win,
 	   cli->w, cli->h, cli->x, cli->y);
 }
 
+#if 0
 static struct client *win2client(xcb_window_t win)
 {
 	struct list_head *cur;
@@ -728,12 +831,13 @@ static struct client *win2client(xcb_window_t win)
 	}
 	return NULL;
 }
+#endif
 
 static void client_add(xcb_window_t win)
 {
 	struct tag *tag;
 	struct client *cli;
-	uint32_t val, msk;
+	uint32_t val[2], msk;
 	int dy, dh;
 	xcb_get_property_cookie_t c;
 	xcb_get_geometry_reply_t *g;
@@ -769,19 +873,19 @@ static void client_add(xcb_window_t win)
 		goto out;
 	}
 
-#if 0
 	/* tell x server to restore window upon our sudden exit */
-	xcb_change_save_set(dpy, XCB_SET_MODE_INSERT, w);
-#endif
-	val = border_width;
+	xcb_void_cookie_t cc;
+	xcb(cc, xcb_change_save_set(dpy, XCB_SET_MODE_INSERT, win));
+
+	val[0] = BORDER_WIDTH;
 	msk = XCB_CONFIG_WINDOW_BORDER_WIDTH;
-	xcb_change_window_attributes(dpy, win, msk, &val);
 
 	/* subscribe events */
-	val = XCB_EVENT_MASK_ENTER_WINDOW |
+	val[1] = XCB_EVENT_MASK_ENTER_WINDOW |
+	      XCB_EVENT_MASK_LEAVE_WINDOW |
 	      XCB_EVENT_MASK_PROPERTY_CHANGE;
-	msk = XCB_CW_EVENT_MASK;
-	xcb_change_window_attributes(dpy, win, msk, &val);
+	msk |= XCB_CW_EVENT_MASK;
+	xcb_change_window_attributes(dpy, win, msk, val);
 
 	/* get initial geometry */
 	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
@@ -798,20 +902,12 @@ static void client_add(xcb_window_t win)
 	cli->scr = screen;
 	cli->win = win;
 
-	tag = list2tag(screen->tags.next);
-	list_add(&tag->clients, &cli->head);
+	list_add(&screen->tag->clients, &cli->head);
 
-#if 0
-	client_name(cli);
-#endif
 	client_moveresize(cli, g->x, g->y, g->width, g->height);
-#if 0
-	client_tag(cli);
-#endif
+
 	window_raise(cli->win);
-#if 0 /* FIXME: focus window under cursor instead */
-	window_focus(cli->win, 1);
-#endif
+	window_focus(cli->scr, 0, cli->win, 1);
 
 	xcb_map_window(dpy, cli->win);
 	xcb_flush(dpy);
@@ -825,19 +921,19 @@ out:
 	free(g);
 }
 
-static void client_del(xcb_window_t win, struct client *cli)
+static void client_del(xcb_window_t win)
 {
+	struct client *cli;
+
 	if (win == screen->ptr->root) {
 		ww("wtf, root window destroyed!\n");
 		return;
 	}
 
+	cli = win2client(screen, win);
 	if (!cli) {
-		cli = win2client(win);
-		if (!cli) {
-			ww("window %p is not managed\n", win);
-			return;
-		}
+		ww("window %p was not managed\n", win);
+		return;
 	}
 
 	list_del(&cli->head);
@@ -849,7 +945,6 @@ static void clients_scan(void)
 	int i, n;
 	xcb_query_tree_cookie_t c;
 	xcb_query_tree_reply_t *tree;
-	xcb_query_pointer_reply_t *ptr;
 	xcb_window_t *wins;
 
 	struct client *client;
@@ -875,30 +970,6 @@ static void clients_scan(void)
 
 	free(tree);
 	update_clients_list();
-
-	tt("done\n");
-
-#if 0
-    changeworkspace(0);
-    /*
-     * Get pointer position so we can set focus on any window which
-     * might be under it.
-     */
-    pointer = xcb_query_pointer_reply(
-        conn, xcb_query_pointer(conn, screen->root), 0);
-
-    if (NULL == pointer)
-    {
-        focuswin = NULL;
-    }
-    else
-    {
-        setfocus(findclient(pointer->child));
-        free(pointer);
-    }
-    xcb_flush(conn);
-    free(reply);
-#endif
 }
 
 static void print_menu(struct screen *scr)
@@ -956,6 +1027,7 @@ static void tag_select(struct screen *scr, int x)
 {
 	XftColor *color;
 	struct list_head *cur;
+	struct tag *prev;
 
 	if (scr->tag && tag_clicked(scr->tag, x)) {
 		return;
@@ -965,12 +1037,11 @@ static void tag_select(struct screen *scr, int x)
 		tag_refresh(scr, scr->tag, color);
 	}
 
-	list_walk(cur, &screen->tags) {
+	prev = scr->tag;
+
+	list_walk(cur, &scr->tags) {
 		struct tag *tag = list2tag(cur);
 
-#if 0
-		if (x >= tag->x && x <= tag->x + tag->w) {
-#else
 		if (tag == scr->tag) {
 			continue;
 		} else if (!tag_clicked(tag, x)) {
@@ -978,19 +1049,28 @@ static void tag_select(struct screen *scr, int x)
 			color = &normal_color;
 			tag_refresh(scr, tag, color);
 		} else {
-#endif
 			tag->flags |= TAG_FLG_ACTIVE;
 			color = &active_color;
 			scr->tag = tag;
 			tag_refresh(scr, tag, color);
 			break;
 		}
-#if 0
-		} else {
-			tag->flags &= ~TAG_FLG_ACTIVE;
-			color = &normal_color;
+	}
+
+	if (scr->tag && scr->tag != prev) {
+		if (prev) {
+			/* hide windows on previous tag */
+			list_walk(cur, &prev->clients) {
+				struct client *cli = list2client(cur);
+				xcb_unmap_window(dpy, cli->win);
+			}
 		}
-#endif
+
+		/* show windows on current tag */
+		list_walk(cur, &scr->tag->clients) {
+			struct client *cli = list2client(cur);
+			xcb_map_window(dpy, cli->win);
+		}
 	}
 
         xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
@@ -1023,9 +1103,6 @@ static int tag_add(struct screen *scr, const char *name, int pos)
 	list_add(&scr->tags, &tag->head);
 
 	text_exts(name, tag->nlen, &tag->w, &h);
-#if 0
-	len = draw_text(scr->panel, FONT_ACTIVE, 5, y, name, len);
-#endif
 
 	if (pos != panel_items[PANEL_AREA_TAGS].x) {
 		color = &normal_color;
@@ -1033,6 +1110,7 @@ static int tag_add(struct screen *scr, const char *name, int pos)
 	} else {
 		color = &active_color;
 		tag->flags |= TAG_FLG_ACTIVE;
+		scr->tag = tag;
 	}
 
 	draw_panel_text(scr, color, pos, tag->w, (XftChar8 *) tag->name,
@@ -1069,21 +1147,21 @@ static int init_tags(struct screen *scr, int idx)
 	int fd, i, pos;
 	char path[BASE_PATH_MAX], name[TAG_NAME_MAX + 2], *ptr;
 
+	pos = panel_items[PANEL_AREA_TAGS].x;
 	if (!basedir) {
-		ii("no tags configured\n");
-		return;
+		ww("no user defined tags\n");
+		goto out;
 	}
 
 	snprintf(path, sizeof(path), "%s/%d/", basedir, idx);
 	fd = open(path, O_RDONLY);
 	if (fd < 0) {
-		ii("no tags for screen %d\n", idx);
-		return;
+		ww("no user defined tags for screen %d\n", idx);
+		goto out;
 	}
 	close(fd);
 	ptr = path + strlen(path);
 
-	pos = panel_items[PANEL_AREA_TAGS].x;
 	memset(name, 0, sizeof(name));
 	for (i = 0; i < TAGS_MAX; i++) {
 		sprintf(ptr, "%d", i);
@@ -1096,6 +1174,10 @@ static int init_tags(struct screen *scr, int idx)
 		pos = tag_add(scr, name, pos);
 		memset(name, 0, TAG_NAME_MAX);
 	}
+
+out:
+	if (pos == panel_items[PANEL_AREA_TAGS].x) /* add default tag */
+		pos = tag_add(scr, "*", pos);
 
 	return pos - panel_vpad / 2;
 }
@@ -1110,7 +1192,6 @@ static int calc_title_max(void)
 	while (w < panel_items[PANEL_AREA_TITLE].w) {
 		tmp = calloc(1, i + 1);
 		memset(tmp, 'w', i);
-		mm("%s\n", tmp);
 		text_exts(tmp, strlen(tmp), &w, &h);
 		free(tmp);
 		i++;
@@ -1188,19 +1269,14 @@ static void init_panel(struct screen *scr, int idx)
         xcb_create_gc(dpy, scr->gc, scr->panel, mask, val);
 
 	xcb_map_window(dpy, scr->panel);
-	xcb_flush(dpy);
 
 	/* now correct screen height */
 	scr->h -= panel_height;
 
-#if 0
-	scr->draw = XftDrawCreate(xdpy, scr->panel, scr->visual,
-				  scr->ptr->default_colormap);
-#else
 	scr->draw = XftDrawCreate(xdpy, scr->panel,
 				  DefaultVisual(xdpy, xscr),
 				  DefaultColormap(xdpy, xscr));
-#endif
+
 	update_panel_items(scr, idx);
 }
 
@@ -1208,6 +1284,9 @@ static void init_panel(struct screen *scr, int idx)
 	(ex >= panel_items[area].x &&\
 	 ex <= panel_items[area].x + panel_items[area].w)
 
+#ifndef VERBOSE
+#define dump_coords(x) ;
+#else
 static void dump_coords(int x)
 {
 	int i;
@@ -1219,6 +1298,7 @@ static void dump_coords(int x)
 			mm("^^^ inside %s\n", panel_items[i].name);
 	}
 }
+#endif
 
 static void handle_button_press(xcb_button_press_event_t *e)
 {
@@ -1226,9 +1306,7 @@ static void handle_button_press(xcb_button_press_event_t *e)
 	case MOUSE_BTN_LEFT:
 		dd("MOUSE_BTN_LEFT\n");
 		if (screen->panel == e->event) {
-#if 0
 			dump_coords(e->event_x);
-#endif
 			if pointer_inside(PANEL_AREA_TAGS, e->event_x)
 				tag_select(screen, e->event_x);
 			else if pointer_inside(PANEL_AREA_MENU, e->event_x)
@@ -1252,7 +1330,61 @@ static void handle_button_press(xcb_button_press_event_t *e)
 	}
 }
 
-#if 1
+static void handle_key_press(xcb_key_press_event_t *e)
+{
+	struct keymap *ptr = kmap;
+
+	mm("%p pressed\n", e->detail);
+
+	while (ptr->mod) {
+		if (ptr->key == e->detail) {
+			mm("%p pressed\n", ptr->key);
+			if (ptr->action && !ptr->arg)
+				ptr->action(e);
+			else
+				ptr->action(ptr->arg);
+			return;
+		}
+		ptr++;
+	}
+}
+
+static void screen_keys(struct screen *scr)
+{
+	xcb_get_modifier_mapping_cookie_t c;
+	xcb_get_modifier_mapping_reply_t *r;
+	xcb_keycode_t *mod;
+	struct keymap *ptr = kmap;
+	int i;
+
+	c = xcb_get_modifier_mapping(dpy);
+	r = xcb_get_modifier_mapping_reply(dpy, c, NULL);
+	if (!r)
+		panic("xcb_get_modifier_mapping_reply() failed\n");
+
+	mod = xcb_get_modifier_mapping_keycodes(r);
+	if (!mod)
+		panic("\nxcb_get_modifier_mapping_keycodes() failed\n");
+
+	for (i = 0; i < r->keycodes_per_modifier; i++) {
+		mm("%d: key code %x ? %x\n", i, mod[i], MODSHIFT);
+	}
+
+	free(r);
+
+	xcb_ungrab_key(dpy, XCB_GRAB_ANY, scr->ptr->root, XCB_MOD_MASK_ANY);
+#if 0
+	xcb_grab_key(dpy, 1, scr->ptr->root, XCB_MOD_MASK_ANY, 0x32,
+		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+#endif
+	while (ptr->mod) {
+		mm("mod %x, key %x\n", ptr->mod, ptr->key);
+		xcb_grab_key(dpy, 1, scr->ptr->root, ptr->mod, ptr->key,
+			     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+		ptr++;
+	}
+}
+
 static void screen_add(xcb_screen_t *ptr, int idx)
 {
 	struct screen *scr;
@@ -1287,62 +1419,9 @@ static void screen_add(xcb_screen_t *ptr, int idx)
 		}
 	}
 
+	screen_keys(scr);
 	list_add(&screens, &scr->head);
 }
-#else
-static void screen_add(xcb_screen_t *ptr, int idx)
-{
-	struct screen *scr;
-	int len;
-
-	if (!ptr)
-		panic("xcb_screen_t pointer is null\n")
-
-	tt("screen[%d]\n", idx);
-
-	scr = calloc(1, sizeof(*scr));
-	if (!scr && screens0.max == 0)
-		panic("calloc(%lu) failed\n", sizeof(*scr));
-
-	/* initialize monitor */
-	scr->ptr = ptr;
-	scr->num = idx;
-	scr->x = 0;
-	scr->y = 0;
-	scr->w = ptr->width_in_pixels;
-	scr->h = ptr->height_in_pixels;
-	scr->flags |= SCR_FLG_PANEL;
-	strncpy(scr->menustr, "::", sizeof("::") - 1);
-
-	list_init(&scr->tags);
-	tag_add(scr, "main", sizeof("main") - 1);
-
-	ii("screen[%d] %p, size %dx%d\n", idx, scr, scr->w, scr->h);
-	ii("current tag %p %s\n", list2tag(scr->tags.next),
-	   (list2tag(scr->tags.next))->name);
-
-	if (scr->flags & SCR_FLG_PANEL)
-		init_panel(scr);
-
-	if (!screens0.scr) {
-		len = sizeof(screens0.scr[0]);
-		screens0.scr = calloc(1, len);
-		if (!screens0.scr)
-			panic("calloc(%d) failed\n", len);
-	} else {
-		len = (screens0.max + 1) * sizeof(*screens0.scr[0]);
-		screens0.scr = realloc(screens0.scr, len);
-		if (!screens0.scr) {
-			ee("realloc(%d) failed\n", len);
-			return;
-		}
-	}
-
-	screens0.scr[screens0.max] = scr;
-	screens0.max++;
-	dd("max screens %d\n", screens0.max);
-}
-#endif
 
 static void wait_events(void)
 {
@@ -1382,6 +1461,9 @@ static void print_configure_mask(uint32_t mask)
 		printf("XCB_CONFIG_WINDOW_STACK_MODE | ");
 }
 
+#ifndef VERBOSE
+#define print_configure_request(e) ;
+#else
 static void print_configure_request(xcb_configure_request_event_t *e)
 {
 	dd("prop:\n"
@@ -1412,6 +1494,7 @@ static void print_configure_request(xcb_configure_request_event_t *e)
 	print_configure_mask(e->value_mask);
 	printf("\n");
 }
+#endif
 
 static void window_configure(void *arg)
 {
@@ -1443,11 +1526,8 @@ static void handle_events(void)
 	xcb_generic_event_t *e;
 	uint8_t type;
 
-#if 1
 	e = xcb_wait_for_event(dpy);
-#else
-	e = xcb_poll_for_event(dpy);
-#endif
+
 	if (xcb_connection_has_error(dpy))
 		panic("failed to get event\n");
 
@@ -1456,24 +1536,7 @@ static void handle_events(void)
 
 	tt("got event %d (%d)\n", e->response_type, XCB_EVENT_RESPONSE_TYPE(e));
 
-#if 1
 	switch (e->response_type & ~0x80) {
-#else
-	switch (e->response_type & ~0x80) {
-	case XCB_VISIBILITY_NOTIFY:
-		mm("XCB_VISIBILITY_NOTIFY\n");
-		switch (((xcb_visibility_notify_event_t *) e)->state) {
-		case XCB_VISIBILITY_FULLY_OBSCURED:
-			mm("XCB_VISIBILITY_FULLY_OBSCURED\n");
-			wait_events();
-			break;
-		case XCB_VISIBILITY_PARTIALLY_OBSCURED: /* fall through */
-		case XCB_VISIBILITY_UNOBSCURED:
-			mm("XCB_VISIBILITY_UNOBSCURED\n");
-			break;
-		}
-		break;
-#endif
 	case 0: break; /* NO EVENT */
 	case XCB_VISIBILITY_NOTIFY:
 		tt("XCB_VISIBILITY_NOTIFY: win %p\n",
@@ -1505,9 +1568,10 @@ static void handle_events(void)
 		   ((xcb_configure_notify_event_t *)e)->window);
 		break;
 	case XCB_DESTROY_NOTIFY:
-		tt("XCB_DESTROY_NOTIFY: win %p\n",
+		tt("XCB_DESTROY_NOTIFY: event %p, win %p\n",
+		   ((xcb_destroy_notify_event_t *)e)->event,
 		   ((xcb_destroy_notify_event_t *)e)->window);
-		client_del(((xcb_destroy_notify_event_t *)e)->window, NULL);
+		client_del(((xcb_destroy_notify_event_t *)e)->window);
 		break;
 	case XCB_ENTER_NOTIFY:
 		tt("XCB_ENTER_NOTIFY\n");
@@ -1515,7 +1579,9 @@ static void handle_events(void)
 		   ((xcb_enter_notify_event_t *)e)->root,
 		   ((xcb_enter_notify_event_t *)e)->event,
 		   ((xcb_enter_notify_event_t *)e)->child);
-		window_focus(((xcb_enter_notify_event_t *)e)->event, 1);
+		window_focus(NULL, ((xcb_enter_notify_event_t *)e)->root,
+			     ((xcb_enter_notify_event_t *)e)->event, 1);
+		xcb_flush(dpy);
 		break;
 	case XCB_LEAVE_NOTIFY:
 		tt("XCB_LEAVE_NOTIFY\n");
@@ -1523,7 +1589,9 @@ static void handle_events(void)
 		   ((xcb_enter_notify_event_t *)e)->root,
 		   ((xcb_enter_notify_event_t *)e)->event,
 		   ((xcb_enter_notify_event_t *)e)->child);
-		window_focus(((xcb_enter_notify_event_t *)e)->event, 0);
+		window_focus(NULL, ((xcb_enter_notify_event_t *)e)->root,
+			     ((xcb_enter_notify_event_t *)e)->event, 0);
+		xcb_flush(dpy);
 		break;
 	case XCB_EXPOSE:
 		tt("XCB_EXPOSE: win %p\n", ((xcb_expose_event_t *)e)->window);
@@ -1532,7 +1600,11 @@ static void handle_events(void)
 		tt("XCB_FOCUS_IN\n");
 		break;
 	case XCB_KEY_PRESS:
-		tt("XCB_KEY_PRESS\n");
+		tt("XCB_KEY_PRESS: root %p, win %p, child %p\n",
+		   ((xcb_key_press_event_t *)e)->root,
+		   ((xcb_key_press_event_t *)e)->event,
+		   ((xcb_key_press_event_t *)e)->child);
+		handle_key_press((xcb_key_press_event_t *)e);
 		break;
 	case XCB_MAPPING_NOTIFY:
 		tt("XCB_MAPPING_NOTIFY\n");
@@ -1622,52 +1694,46 @@ static void init_root(xcb_window_t win)
 
 #define atom_by_name(name) get_atom_by_name(name, sizeof(name) - 1)
 
-#if 0
-void static init_font(struct screen *scr)
-#else
-void static init_font(void)
-#endif
+static void init_font(void)
 {
 	XRenderColor normal = FONT_COLOR_NORMAL;
 	XRenderColor active = FONT_COLOR_ACTIVE;
-#if 0
-	xcb_visualtype_iterator_t visual_iter;
-	xcb_depth_iterator_t depth_iter;
 
-	depth_iter = xcb_screen_allowed_depths_iterator(scr->ptr);
-	for (; depth_iter.rem; xcb_depth_next(&depth_iter)) {
-		visual_iter = xcb_depth_visuals_iterator(depth_iter.data);
-		for (; visual_iter.rem; xcb_visualtype_next(&visual_iter)) {
-			xcb_visualid_t tmp = scr->ptr->root_visual;
-			if (tmp == visual_iter.data->visual_id) {
-				scr->visual = visual_iter.data;
-				break;
-			}
-		}
-	}
-
-	if (!scr->visual)
-		panic("cannot get font visual\n");
-#endif
 	font = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
 			   FONT_NAME_FT, XFT_SIZE, XftTypeDouble,
 			   FONT_SIZE_FT, NULL);
 	if (!font)
 		panic("XftFontOpen(%s)\n", FONT_NAME_FT);
 
-#if 0
-        XftColorAllocValue(xdpy, scr->visual, scr->ptr->default_colormap,
-			   &normal, &normal_color);
-        XftColorAllocValue(xdpy, scr->visual, scr->ptr->default_colormap,
-			   &active, &active_color);
-#else
         XftColorAllocValue(xdpy, DefaultVisual(xdpy, xscr),
 			   DefaultColormap(xdpy, xscr),
 			   &normal, &normal_color);
         XftColorAllocValue(xdpy, DefaultVisual(xdpy, xscr),
 			   DefaultColormap(xdpy, xscr),
 			   &active, &active_color);
-#endif
+}
+
+static void init_keys(void)
+{
+	xcb_key_symbols_t *syms;
+	xcb_keycode_t *key;
+	struct keymap *ptr = kmap;
+
+	syms = xcb_key_symbols_alloc(dpy);
+	if (!syms)
+		panic("xcb_key_symbols_alloc() failed\n");
+
+	while (ptr->mod) {
+		key = xcb_key_symbols_get_keycode(syms, ptr->sym);
+		if (!key)
+			panic("xcb_key_symbols_get_keycode(sym=%p) failed\n",
+			      ptr->sym);
+		ptr->key = *key;
+		mm("grab mod %p + key %p\n", ptr->mod, ptr->key);
+		ptr++;
+	}
+
+	xcb_key_symbols_free(syms);
 }
 
 int main()
@@ -1692,6 +1758,8 @@ int main()
 		return 1;
 	}
 
+	init_keys();
+
 	a_name = atom_by_name("_NEW_WM_NAME");
 	a_desktop = atom_by_name("_NET_WM_DESKTOP");
 	a_delete_window = atom_by_name("WM_DELETE_WINDOW");
@@ -1703,18 +1771,10 @@ int main()
 
 	list_init(&screens);
 
-	/* create default screen */
 	screen_add(xcb_setup_roots_iterator(xcb_get_setup(dpy)).data, 0);
-	/* set current screen */
-#if 1
 	screen = list2screen(screens.next);
-#else
-	screen = screens0.scr[0];
-#endif
+
 	init_root(screen->ptr->root);
-#if 0
-	init_font(screen);
-#endif
 
 	clients_scan();
 
