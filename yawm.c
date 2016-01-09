@@ -32,6 +32,7 @@
 
 #define DEBUG
 #define TRACE
+#define TRACE_EVENTS
 
 #define ee(fmt, ...) {\
 	int errno_save__ = errno;\
@@ -57,6 +58,12 @@
 #define tt(fmt, ...) printf("(tt) %s: " fmt, __func__, ##__VA_ARGS__)
 #else
 #define tt(fmt, ...) do {} while(0)
+#endif
+
+#ifdef TRACE_EVENTS
+#define te(fmt, ...) printf("(tt) %s: " fmt, __func__, ##__VA_ARGS__)
+#else
+#define te(fmt, ...) do {} while(0)
 #endif
 
 #define sslen(str) (sizeof(str) - 1)
@@ -579,8 +586,7 @@ static void window_raise(xcb_window_t win)
 	xcb_configure_window(dpy, win, XCB_CONFIG_WINDOW_STACK_MODE, val);
 }
 
-static void window_focus(struct screen *scr, xcb_window_t root,
-			 xcb_window_t win, int focus)
+static void window_focus(struct screen *scr, xcb_window_t win, int focus)
 {
 	uint32_t val[1];
 	struct client *cli;
@@ -595,9 +601,6 @@ static void window_focus(struct screen *scr, xcb_window_t root,
 	} else {
 		val[0] = border_active;
 		print_title(win);
-
-		if (!scr && root)
-			scr = root2screen(root);
 		scr->tag->win = win;
 	}
 
@@ -626,9 +629,87 @@ static void switch_window(xcb_key_press_event_t *e, int next)
 	}
 
 	window_raise(cli->win);
-	window_focus(scr, e->root, scr->tag->win, 0);
-	window_focus(scr, e->root, cli->win, 1);
+	window_focus(scr, scr->tag->win, 0);
+	window_focus(scr, cli->win, 1);
 	xcb_flush(dpy);
+}
+
+static void print_tag(struct screen *scr, struct tag *tag)
+{
+	XftColor *color;
+	struct list_head *cur;
+	struct tag *prev;
+
+#if 0
+	if (scr->tag) { /* deselect current instantly */
+		scr->tag->flags &= ~TAG_FLG_ACTIVE;
+		color = &normal_color;
+		tag_refresh(scr, scr->tag, color);
+	}
+
+	prev = tag;
+
+	list_walk(cur, &scr->tags) {
+		struct tag *tag = list2tag(cur);
+
+		if (tag == scr->tag) {
+			continue;
+		} else if (!tag_clicked(tag, x)) {
+			tag->flags &= ~TAG_FLG_ACTIVE;
+			color = &normal_color;
+			tag_refresh(scr, tag, color);
+		} else {
+			tag->flags |= TAG_FLG_ACTIVE;
+			color = &active_color;
+			scr->tag = tag;
+			tag_refresh(scr, tag, color);
+			break;
+		}
+	}
+
+	if (scr->tag && scr->tag != prev) {
+		if (prev) {
+			/* hide windows on previous tag */
+			list_walk(cur, &prev->clients) {
+				struct client *cli = list2client(cur);
+				xcb_unmap_window(dpy, cli->win);
+			}
+		}
+
+		/* show windows on current tag */
+		list_walk(cur, &scr->tag->clients) {
+			struct client *cli = list2client(cur);
+			xcb_map_window(dpy, cli->win);
+		}
+	}
+
+        xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
+                            XCB_CURRENT_TIME);
+	xcb_flush(dpy);
+#endif
+}
+
+static void switch_tag(xcb_key_press_event_t *e, int next)
+{
+	struct screen *scr;
+	struct tag *tag;
+
+	scr = root2screen(e->root);
+	tag = scr->tag;
+
+	if (next) {
+		if (tag->head.next == &scr->tags) /* end of list */
+			tag = list2tag(scr->tags.next);
+		else
+			tag = list2tag(tag->head.next);
+	} else {
+		if (tag->head.prev == &scr->tags) /* head of list */
+			tag = list2tag(scr->tags.prev);
+		else
+			tag = list2tag(tag->head.prev);
+	}
+
+	scr->tag = tag;
 }
 
 static void client_moveresize(struct client *cli, int x, int y, int w, int h)
@@ -649,6 +730,9 @@ static void client_moveresize(struct client *cli, int x, int y, int w, int h)
 		cli->h = cli->scr->h - BORDER_WIDTH;
 	else if (cli->h < WIN_HEIGHT_MIN)
 		cli->h = cli->scr->h / 2 - BORDER_WIDTH;
+
+	if (cli->h + cli->y >= cli->scr->h)
+		cli->h = cli->scr->h - cli->y - WINDOW_PAD;
 
 	if (cli->x > cli->scr->w)
 		cli->x = 0;
@@ -789,6 +873,16 @@ static void panel_raise(xcb_window_t root)
 		window_raise(scr->panel);
 }
 
+static void next_tag(void *arg)
+{
+
+}
+
+static void prev_tag(void *arg)
+{
+
+}
+
 #if 0
 static void client_resize(struct client *cli, int w, int h)
 {
@@ -887,7 +981,6 @@ static void client_add(xcb_window_t win)
 	client_moveresize(cli, g->x, g->y, g->width, g->height);
 
 	window_raise(cli->win);
-	window_focus(cli->scr, 0, cli->win, 1);
 
 	xcb_map_window(dpy, cli->win);
 	xcb_flush(dpy);
@@ -941,6 +1034,9 @@ static void clients_scan(void)
 			continue;
 		client_add(wins[i]);
 	}
+
+	if (!list_empty(&screen->tag->clients))
+		window_focus(screen, wins[i], 1);
 
 	free(tree);
 	update_clients_list();
@@ -1388,8 +1484,8 @@ static void handle_visibility(xcb_visibility_notify_event_t *e)
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
 		if (scr->panel == e->window) {
-//			window_raise(scr->panel);
-			update_panel_items(scr);
+			window_raise(scr->panel);
+//			update_panel_items(scr);
 			return;
 		}
 	}
@@ -1402,6 +1498,33 @@ static void handle_unmap_notify(xcb_unmap_notify_event_t *e)
 		client_del(e->event, e->window);
 		return;
 	}
+}
+
+static void handle_enter_notify(xcb_enter_notify_event_t *e)
+{
+	struct screen *scr;
+
+	scr = root2screen(e->root);
+	if (scr->tag->win)
+		window_focus(scr, scr->tag->win, 0);
+
+	window_focus(scr, e->event, 1);
+
+	if (e->mode == MODKEY)
+		window_raise(e->event);
+
+	xcb_flush(dpy);
+}
+
+static void handle_leave_notify(xcb_leave_notify_event_t *e)
+{
+#if 0
+	struct screen *scr;
+
+	scr = root2screen(e->root);
+	window_focus(scr, e->event, 0);
+	xcb_flush(dpy);
+#endif
 }
 
 static void screen_keys(struct screen *scr)
@@ -1565,14 +1688,12 @@ static void handle_events(void)
 	if (!e)
 		return;
 
-#ifdef TRACE_EVENTS
-	tt("got event %d (%d)\n", e->response_type, XCB_EVENT_RESPONSE_TYPE(e));
-#endif
+	te("got event %d (%d)\n", e->response_type, XCB_EVENT_RESPONSE_TYPE(e));
 
 	switch (e->response_type & ~0x80) {
 	case 0: break; /* NO EVENT */
 	case XCB_VISIBILITY_NOTIFY:
-		tt("XCB_VISIBILITY_NOTIFY: win %p\n",
+		te("XCB_VISIBILITY_NOTIFY: win %p\n",
 		   ((xcb_visibility_notify_event_t *) e)->window);
 #if 0
                 switch (((xcb_visibility_notify_event_t *) e)->state) {
@@ -1584,123 +1705,114 @@ static void handle_events(void)
 #endif
 		break;
 	case XCB_CREATE_NOTIFY:
-		tt("XCB_CREATE_NOTIFY: win %p\n",
-		   ((xcb_create_notify_event_t *)e)->window);
+		te("XCB_CREATE_NOTIFY: win %p\n",
+		   ((xcb_create_notify_event_t *) e)->window);
 		break;
 	case XCB_BUTTON_PRESS:
-		mouse_x = ((xcb_button_press_event_t *)e)->root_x;
-		mouse_y = ((xcb_button_press_event_t *)e)->root_y;
-		mouse_button = ((xcb_button_press_event_t *)e)->detail;
-		tt("XCB_BUTTON_PRESS: root %p, event %p, child %p\n",
-		   ((xcb_button_press_event_t *)e)->root,
-		   ((xcb_button_press_event_t *)e)->event,
-		   ((xcb_button_press_event_t *)e)->child);
-		handle_button_press((xcb_button_press_event_t *)e);
+		mouse_x = ((xcb_button_press_event_t *) e)->root_x;
+		mouse_y = ((xcb_button_press_event_t *) e)->root_y;
+		mouse_button = ((xcb_button_press_event_t *) e)->detail;
+		te("XCB_BUTTON_PRESS: root %p, event %p, child %p\n",
+		   ((xcb_button_press_event_t *) e)->root,
+		   ((xcb_button_press_event_t *) e)->event,
+		   ((xcb_button_press_event_t *) e)->child);
+		handle_button_press((xcb_button_press_event_t *) e);
 		break;
 	case XCB_BUTTON_RELEASE:
-		tt("XCB_BUTTON_RELEASE\n");
+		te("XCB_BUTTON_RELEASE\n");
 		motion_clean();
 		break;
 	case XCB_MOTION_NOTIFY:
-#ifdef TRACE_EVENTS
-		tt("XCB_MOTION_NOTIFY\n");
-#endif
-		handle_motion_notify((xcb_motion_notify_event_t *)e);
+		te("XCB_MOTION_NOTIFY\n");
+		handle_motion_notify((xcb_motion_notify_event_t *) e);
 		break;
 	case XCB_CLIENT_MESSAGE:
 		tt("XCB_CLIENT_MESSAGE\n");
 		break;
 	case XCB_CONFIGURE_REQUEST:
-		tt("XCB_CONFIGURE_REQUEST: win %p\n",
-		   ((xcb_configure_request_event_t *)e)->window);
+		te("XCB_CONFIGURE_REQUEST: win %p\n",
+		   ((xcb_configure_request_event_t *) e)->window);
 		print_configure_request(e);
 		window_configure(e);
 		break;
 	case XCB_CONFIGURE_NOTIFY:
-#ifdef TRACE_EVENTS
-		tt("XCB_CONFIGURE_NOTIFY: win %p\n",
-		   ((xcb_configure_notify_event_t *)e)->window);
-#endif
+		te("XCB_CONFIGURE_NOTIFY: event %p, window %p, above %p\n",
+		   ((xcb_configure_notify_event_t *) e)->event,
+		   ((xcb_configure_notify_event_t *) e)->window,
+		   ((xcb_configure_notify_event_t *) e)->above_sibling);
 		break;
 	case XCB_DESTROY_NOTIFY:
-		tt("XCB_DESTROY_NOTIFY: event %p, win %p\n",
-		   ((xcb_destroy_notify_event_t *)e)->event,
-		   ((xcb_destroy_notify_event_t *)e)->window);
-		client_del(((xcb_destroy_notify_event_t *)e)->event,
-			   ((xcb_destroy_notify_event_t *)e)->window);
+		te("XCB_DESTROY_NOTIFY: event %p, win %p\n",
+		   ((xcb_destroy_notify_event_t *) e)->event,
+		   ((xcb_destroy_notify_event_t *) e)->window);
+		client_del(((xcb_destroy_notify_event_t *) e)->event,
+			   ((xcb_destroy_notify_event_t *) e)->window);
 		break;
 	case XCB_ENTER_NOTIFY:
-#ifdef TRACE_EVENTS
-		tt("XCB_ENTER_NOTIFY: root %p, event %p, child %p\n",
-		   ((xcb_enter_notify_event_t *)e)->root,
-		   ((xcb_enter_notify_event_t *)e)->event,
-		   ((xcb_enter_notify_event_t *)e)->child);
-#endif
-		window_focus(NULL, ((xcb_enter_notify_event_t *)e)->root,
-			     ((xcb_enter_notify_event_t *)e)->event, 1);
-		xcb_flush(dpy);
+		te("XCB_ENTER_NOTIFY: root %p, event %p, child %p\n",
+		   ((xcb_enter_notify_event_t *) e)->root,
+		   ((xcb_enter_notify_event_t *) e)->event,
+		   ((xcb_enter_notify_event_t *) e)->child);
+		te("detail %p, state %p, mode %p\n",
+		   ((xcb_enter_notify_event_t *) e)->detail,
+		   ((xcb_enter_notify_event_t *) e)->state,
+		   ((xcb_enter_notify_event_t *) e)->mode);
+		handle_enter_notify((xcb_enter_notify_event_t *) e);
 		break;
 	case XCB_LEAVE_NOTIFY:
-		tt("XCB_LEAVE_NOTIFY\n");
-		dd("root %p, event %p, child %p\n",
-		   ((xcb_enter_notify_event_t *)e)->root,
-		   ((xcb_enter_notify_event_t *)e)->event,
-		   ((xcb_enter_notify_event_t *)e)->child);
-		window_focus(NULL, ((xcb_enter_notify_event_t *)e)->root,
-			     ((xcb_enter_notify_event_t *)e)->event, 0);
-		xcb_flush(dpy);
+		te("XCB_LEAVE_NOTIFY: root %p, event %p, child %p\n",
+		   ((xcb_leave_notify_event_t *) e)->root,
+		   ((xcb_leave_notify_event_t *) e)->event,
+		   ((xcb_leave_notify_event_t *) e)->child);
+		te("detail %p, state %p, mode %p\n",
+		   ((xcb_leave_notify_event_t *) e)->detail,
+		   ((xcb_leave_notify_event_t *) e)->state,
+		   ((xcb_leave_notify_event_t *) e)->mode);
+		handle_leave_notify((xcb_leave_notify_event_t *) e);
 		break;
 	case XCB_EXPOSE:
-		tt("XCB_EXPOSE: win %p\n", ((xcb_expose_event_t *)e)->window);
+		te("XCB_EXPOSE: win %p\n", ((xcb_expose_event_t *) e)->window);
 		break;
 	case XCB_FOCUS_IN:
-		tt("XCB_FOCUS_IN\n");
+		te("XCB_FOCUS_IN\n");
 		break;
 	case XCB_KEY_PRESS:
-		tt("XCB_KEY_PRESS: root %p, win %p, child %p\n",
-		   ((xcb_key_press_event_t *)e)->root,
-		   ((xcb_key_press_event_t *)e)->event,
-		   ((xcb_key_press_event_t *)e)->child);
-		handle_key_press((xcb_key_press_event_t *)e);
+		te("XCB_KEY_PRESS: root %p, win %p, child %p\n",
+		   ((xcb_key_press_event_t *) e)->root,
+		   ((xcb_key_press_event_t *) e)->event,
+		   ((xcb_key_press_event_t *) e)->child);
+		handle_key_press((xcb_key_press_event_t *) e);
 		break;
 	case XCB_MAPPING_NOTIFY:
-		tt("XCB_MAPPING_NOTIFY\n");
+		te("XCB_MAPPING_NOTIFY\n");
 		break;
 	case XCB_MAP_NOTIFY:
-		tt("XCB_MAP_NOTIFY: win %p\n",
-		   ((xcb_map_notify_event_t *)e)->window);
+		te("XCB_MAP_NOTIFY: win %p\n",
+		   ((xcb_map_notify_event_t *) e)->window);
 		break;
 	case XCB_MAP_REQUEST:
-		tt("XCB_MAP_REQUEST: win %p\n",
-		   ((xcb_map_request_event_t *)e)->window);
-		client_add(((xcb_map_notify_event_t *)e)->window);
+		te("XCB_MAP_REQUEST: parent %p, win %p\n",
+		   ((xcb_map_request_event_t *) e)->parent,
+		   ((xcb_map_request_event_t *) e)->window);
+		client_add(((xcb_map_notify_event_t *) e)->window);
 		break;
 	case XCB_PROPERTY_NOTIFY:
-		tt("XCB_PROPERTY_NOTIFY: %p\n",
-		   ((xcb_property_notify_event_t *)e)->window);
-		dd("prop:\n"
-		   " response_type=%u\n"
-		   " sequence=%u\n"
-		   " atom=%d\n"
-		   " state=%u\n",
-		   ((xcb_property_notify_event_t *)e)->response_type,
-		   ((xcb_property_notify_event_t *)e)->sequence,
-		   ((xcb_property_notify_event_t *)e)->atom,
-		   ((xcb_property_notify_event_t *)e)->state);
-		switch (((xcb_property_notify_event_t *)e)->atom) {
+		te("XCB_PROPERTY_NOTIFY: win %p\n",
+		   ((xcb_property_notify_event_t *) e)->window);
+		switch (((xcb_property_notify_event_t *) e)->atom) {
 		case XCB_ATOM_WM_NAME:
-			print_title(((xcb_property_notify_event_t *)e)->window);
+			print_title(((xcb_property_notify_event_t *) e)->window);
 			break;
 		}
 		break;
 	case XCB_UNMAP_NOTIFY:
-		tt("XCB_UNMAP_NOTIFY: event %p, window %p\n",
+		te("XCB_UNMAP_NOTIFY: event %p, window %p\n",
 		   ((xcb_unmap_notify_event_t *) e)->event,
 		   ((xcb_unmap_notify_event_t *) e)->window);
 		handle_unmap_notify((xcb_unmap_notify_event_t *) e);
 		break;
 	default:
-		tt("unhandled event type %d\n", type);
+		te("unhandled event type %d\n", type);
 		break;
 	}
 
