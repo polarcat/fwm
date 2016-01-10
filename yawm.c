@@ -211,7 +211,7 @@ struct keymap {
 /* config */
 
 enum winpos {
-	WIN_POS_FILL,
+	WIN_POS_FILL = 1,
 	WIN_POS_TOP_LEFT,
 	WIN_POS_TOP_RIGHT,
 	WIN_POS_BOTTOM_LEFT,
@@ -222,11 +222,17 @@ enum winpos {
 	WIN_POS_BOTTOM_FILL,
 };
 
+enum tagdir {
+	TAG_DIR_NEXT = 1,
+	TAG_DIR_PREV,
+};
+
+static void walk_tags(void *);
+static void retag_window(void *);
 static void next_window(void *);
 static void prev_window(void *);
 static void raise_window(void *);
 static void place_window(void *);
-
 static void spawn(const char **argv);
 
 static char *term[] = { "xterm", NULL };
@@ -246,6 +252,10 @@ static struct keymap kmap[] = {
 	{ MODKEY, XK_F7, 0, place_window, (void *) WIN_POS_TOP_FILL, },
 	{ MODKEY, XK_F8, 0, place_window, (void *) WIN_POS_BOTTOM_FILL, },
 	{ MODKEY, XK_F9, 0, place_window, (void *) WIN_POS_FILL, },
+	{ MODKEY, XK_Home, 0, retag_window, (void *) TAG_DIR_NEXT, },
+	{ MODKEY, XK_End, 0, retag_window, (void *) TAG_DIR_PREV, },
+	{ MODKEY, XK_Page_Up, 0, walk_tags, (void *) TAG_DIR_NEXT, },
+	{ MODKEY, XK_Page_Down, 0, walk_tags, (void *) TAG_DIR_PREV, },
 	{ 0, 0, 0, NULL, NULL, },
 };
 
@@ -586,7 +596,7 @@ static void window_raise(xcb_window_t win)
 	xcb_configure_window(dpy, win, XCB_CONFIG_WINDOW_STACK_MODE, val);
 }
 
-static void window_focus(struct screen *scr, xcb_window_t win, int focus)
+static void window_focus(struct tag *tag, xcb_window_t win, int focus)
 {
 	uint32_t val[1];
 	struct client *cli;
@@ -601,7 +611,7 @@ static void window_focus(struct screen *scr, xcb_window_t win, int focus)
 	} else {
 		val[0] = border_active;
 		print_title(win);
-		scr->tag->win = win;
+		tag->win = win;
 	}
 
 	xcb_change_window_attributes(dpy, win, XCB_CW_BORDER_PIXEL, val);
@@ -614,6 +624,12 @@ static void switch_window(xcb_key_press_event_t *e, int next)
 	struct client *cli;
 
 	scr = root2screen(e->root);
+
+	if (list_empty(&scr->tag->clients))
+		return;
+	else if (list_single(&scr->tag->clients))
+		return;
+
 	cli = win2client(scr, scr->tag->win);
 
 	if (next) {
@@ -629,87 +645,9 @@ static void switch_window(xcb_key_press_event_t *e, int next)
 	}
 
 	window_raise(cli->win);
-	window_focus(scr, scr->tag->win, 0);
-	window_focus(scr, cli->win, 1);
+	window_focus(scr->tag, scr->tag->win, 0);
+	window_focus(scr->tag, cli->win, 1);
 	xcb_flush(dpy);
-}
-
-static void print_tag(struct screen *scr, struct tag *tag)
-{
-	XftColor *color;
-	struct list_head *cur;
-	struct tag *prev;
-
-#if 0
-	if (scr->tag) { /* deselect current instantly */
-		scr->tag->flags &= ~TAG_FLG_ACTIVE;
-		color = &normal_color;
-		tag_refresh(scr, scr->tag, color);
-	}
-
-	prev = tag;
-
-	list_walk(cur, &scr->tags) {
-		struct tag *tag = list2tag(cur);
-
-		if (tag == scr->tag) {
-			continue;
-		} else if (!tag_clicked(tag, x)) {
-			tag->flags &= ~TAG_FLG_ACTIVE;
-			color = &normal_color;
-			tag_refresh(scr, tag, color);
-		} else {
-			tag->flags |= TAG_FLG_ACTIVE;
-			color = &active_color;
-			scr->tag = tag;
-			tag_refresh(scr, tag, color);
-			break;
-		}
-	}
-
-	if (scr->tag && scr->tag != prev) {
-		if (prev) {
-			/* hide windows on previous tag */
-			list_walk(cur, &prev->clients) {
-				struct client *cli = list2client(cur);
-				xcb_unmap_window(dpy, cli->win);
-			}
-		}
-
-		/* show windows on current tag */
-		list_walk(cur, &scr->tag->clients) {
-			struct client *cli = list2client(cur);
-			xcb_map_window(dpy, cli->win);
-		}
-	}
-
-        xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
-                            XCB_CURRENT_TIME);
-	xcb_flush(dpy);
-#endif
-}
-
-static void switch_tag(xcb_key_press_event_t *e, int next)
-{
-	struct screen *scr;
-	struct tag *tag;
-
-	scr = root2screen(e->root);
-	tag = scr->tag;
-
-	if (next) {
-		if (tag->head.next == &scr->tags) /* end of list */
-			tag = list2tag(scr->tags.next);
-		else
-			tag = list2tag(tag->head.next);
-	} else {
-		if (tag->head.prev == &scr->tags) /* head of list */
-			tag = list2tag(scr->tags.prev);
-		else
-			tag = list2tag(tag->head.prev);
-	}
-
-	scr->tag = tag;
 }
 
 static void client_moveresize(struct client *cli, int x, int y, int w, int h)
@@ -756,7 +694,6 @@ static void client_moveresize(struct client *cli, int x, int y, int w, int h)
 
 static void place_window(void *arg)
 {
-	enum winpos pos = (enum winpos) arg;
 	int16_t x, y;
 	uint16_t w, h;
 	struct client *cli;
@@ -765,7 +702,7 @@ static void place_window(void *arg)
 	if (!cli)
 		return;
 
-	switch (pos) {
+	switch ((enum winpos) arg) {
 	case WIN_POS_FILL:
 		dd("WIN_POS_FILL\n");
 		x = y = 0;
@@ -856,10 +793,11 @@ static void raise_window(void *arg)
 	struct client *cli;
 
 	scr = root2screen(e->root);
-	cli = win2client(scr, scr->tag->win);
 
-	tt("cur win %p\n", cli->win);
-	/* FIXME: prev window must be unfocused */
+	if (list_empty(&scr->tag->clients))
+		return;
+
+	cli = win2client(scr, scr->tag->win);
 	window_raise(cli->win);
 	xcb_flush(dpy);
 }
@@ -873,14 +811,111 @@ static void panel_raise(xcb_window_t root)
 		window_raise(scr->panel);
 }
 
-static void next_tag(void *arg)
+static void print_tag(struct screen *scr, struct tag *tag, XftColor *color,
+			int flush)
 {
+	draw_panel_text(scr, color, tag->x, tag->w, (XftChar8 *) tag->name,
+		        tag->nlen, 0);
+
+	if (flush) {
+	        xcb_set_input_focus(dpy, XCB_NONE,
+				    XCB_INPUT_FOCUS_POINTER_ROOT,
+				    XCB_CURRENT_TIME);
+		xcb_flush(dpy);
+	}
+}
+
+static void show_windows(struct tag *tag)
+{
+	struct list_head *cur;
+	struct client *cli = NULL;
+
+	list_walk(cur, &tag->clients) {
+		cli = list2client(cur);
+		xcb_map_window(dpy, cli->win);
+	}
+
+	if (tag->win) {
+		tt("tag->win=%p\n", tag->win);
+		window_focus(tag, tag->win, 1);
+	}
+	xcb_flush(dpy);
+}
+
+static void hide_windows(struct tag *tag)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &tag->clients) {
+		struct client *cli = list2client(cur);
+		xcb_unmap_window(dpy, cli->win);
+	}
+	xcb_flush(dpy);
+}
+
+static void switch_tag(struct screen *scr, enum tagdir dir)
+{
+	struct tag *tag;
+
+	if (dir == TAG_DIR_NEXT) {
+		if (scr->tag->head.next == &scr->tags) /* end of list */
+			tag = list2tag(scr->tags.next);
+		else
+			tag = list2tag(scr->tag->head.next);
+	} else {
+		if (scr->tag->head.prev == &scr->tags) /* head of list */
+			tag = list2tag(scr->tags.prev);
+		else
+			tag = list2tag(scr->tag->head.prev);
+	}
+
+	scr->tag->win = 0;
+	scr->tag->flags &= ~TAG_FLG_ACTIVE;
+	print_tag(scr, scr->tag, &normal_color, 0);
+	hide_windows(scr->tag);
+
+	tag->flags |= TAG_FLG_ACTIVE;
+	print_tag(scr, tag, &active_color, 1);
+	show_windows(tag);
+	scr->tag = tag;
 
 }
 
-static void prev_tag(void *arg)
+static void walk_tags(void *arg)
 {
+	if (list_single(&screen->tags))
+		return;
 
+	switch_tag(screen, (enum tagdir) arg);
+}
+
+static void trace_windows(struct tag *tag)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &tag->clients) {
+		struct client *cli = list2client(cur);
+		mm("tag %s, win %p\n", tag->name, cli->win);
+	}
+}
+
+static void retag_window(void *arg)
+{
+	struct client *cli;
+
+	if (list_single(&screen->tags))
+		return;
+
+	cli = win2client(screen, screen->tag->win);
+	if (!cli)
+		return;
+
+	list_del(&cli->head);
+	walk_tags(arg);
+	list_add(&screen->tag->clients, &cli->head);
+	screen->tag->win = cli->win;
+	window_focus(screen->tag, screen->tag->win, 1);
+	xcb_flush(dpy);
 }
 
 #if 0
@@ -956,8 +991,7 @@ static void client_add(xcb_window_t win)
 
 	/* subscribe events */
 	val[1] = XCB_EVENT_MASK_ENTER_WINDOW |
-	      XCB_EVENT_MASK_LEAVE_WINDOW |
-	      XCB_EVENT_MASK_PROPERTY_CHANGE;
+		 XCB_EVENT_MASK_PROPERTY_CHANGE;
 	mask |= XCB_CW_EVENT_MASK;
 	xcb_change_window_attributes(dpy, win, mask, val);
 
@@ -1036,7 +1070,7 @@ static void clients_scan(void)
 	}
 
 	if (!list_empty(&screen->tag->clients))
-		window_focus(screen, wins[i], 1);
+		window_focus(screen->tag, wins[i], 1);
 
 	free(tree);
 	update_clients_list();
@@ -1080,12 +1114,6 @@ static void print_time(struct screen *scr)
 	prev_time = t;
 }
 
-static void tag_refresh(struct screen *scr, struct tag *tag, XftColor *color)
-{
-	draw_panel_text(scr, color, tag->x, tag->w, (XftChar8 *) tag->name,
-		        tag->nlen, 0);
-}
-
 static int tag_clicked(struct tag *tag, int16_t x)
 {
 	if (x >= tag->x && x <= tag->x + tag->w)
@@ -1093,9 +1121,8 @@ static int tag_clicked(struct tag *tag, int16_t x)
 	return 0;
 }
 
-static void tag_select(struct screen *scr, int x)
+static void select_tag(struct screen *scr, int x)
 {
-	XftColor *color;
 	struct list_head *cur;
 	struct tag *prev;
 
@@ -1103,49 +1130,32 @@ static void tag_select(struct screen *scr, int x)
 		return;
 	} else if (scr->tag) { /* deselect current instantly */
 		scr->tag->flags &= ~TAG_FLG_ACTIVE;
-		color = &normal_color;
-		tag_refresh(scr, scr->tag, color);
+		print_tag(scr, scr->tag, &normal_color, 0);
 	}
 
 	prev = scr->tag;
 
-	list_walk(cur, &scr->tags) {
+	list_walk(cur, &scr->tags) { /* refresh labels */
 		struct tag *tag = list2tag(cur);
 
 		if (tag == scr->tag) {
 			continue;
 		} else if (!tag_clicked(tag, x)) {
 			tag->flags &= ~TAG_FLG_ACTIVE;
-			color = &normal_color;
-			tag_refresh(scr, tag, color);
+			print_tag(scr, tag, &normal_color, 0);
 		} else {
 			tag->flags |= TAG_FLG_ACTIVE;
-			color = &active_color;
+			print_tag(scr, tag, &active_color, 1);
 			scr->tag = tag;
-			tag_refresh(scr, tag, color);
 			break;
 		}
 	}
 
 	if (scr->tag && scr->tag != prev) {
-		if (prev) {
-			/* hide windows on previous tag */
-			list_walk(cur, &prev->clients) {
-				struct client *cli = list2client(cur);
-				xcb_unmap_window(dpy, cli->win);
-			}
-		}
-
-		/* show windows on current tag */
-		list_walk(cur, &scr->tag->clients) {
-			struct client *cli = list2client(cur);
-			xcb_map_window(dpy, cli->win);
-		}
+		if (prev)
+			hide_windows(prev);
+		show_windows(scr->tag);
 	}
-
-        xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
-                            XCB_CURRENT_TIME);
-	xcb_flush(dpy);
 }
 
 static int tag_add(struct screen *scr, const char *name, int pos)
@@ -1308,7 +1318,6 @@ static void init_panel(struct screen *scr)
 	uint32_t val[2], mask;
 
 	scr->panel = xcb_generate_id(dpy);
-	dd("panel window %x\n", scr->panel);
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
 	val[0] = panel_bg;
@@ -1420,7 +1429,7 @@ static void handle_button_press(xcb_button_press_event_t *e)
 		if (screen->panel == e->event) {
 			dump_coords(e->event_x);
 			if pointer_inside(PANEL_AREA_TAGS, e->event_x)
-				tag_select(screen, e->event_x);
+				select_tag(screen, e->event_x);
 			else if pointer_inside(PANEL_AREA_MENU, e->event_x)
 				mm("menu\n");
 			else if pointer_inside(PANEL_AREA_TITLE, e->event_x)
@@ -1505,26 +1514,16 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	struct screen *scr;
 
 	scr = root2screen(e->root);
-	if (scr->tag->win)
-		window_focus(scr, scr->tag->win, 0);
 
-	window_focus(scr, e->event, 1);
+	if (scr->tag->win)
+		window_focus(scr->tag, scr->tag->win, 0);
+
+	window_focus(scr->tag, e->event, 1);
 
 	if (e->mode == MODKEY)
 		window_raise(e->event);
 
 	xcb_flush(dpy);
-}
-
-static void handle_leave_notify(xcb_leave_notify_event_t *e)
-{
-#if 0
-	struct screen *scr;
-
-	scr = root2screen(e->root);
-	window_focus(scr, e->event, 0);
-	xcb_flush(dpy);
-#endif
 }
 
 static void screen_keys(struct screen *scr)
@@ -1758,17 +1757,6 @@ static void handle_events(void)
 		   ((xcb_enter_notify_event_t *) e)->state,
 		   ((xcb_enter_notify_event_t *) e)->mode);
 		handle_enter_notify((xcb_enter_notify_event_t *) e);
-		break;
-	case XCB_LEAVE_NOTIFY:
-		te("XCB_LEAVE_NOTIFY: root %p, event %p, child %p\n",
-		   ((xcb_leave_notify_event_t *) e)->root,
-		   ((xcb_leave_notify_event_t *) e)->event,
-		   ((xcb_leave_notify_event_t *) e)->child);
-		te("detail %p, state %p, mode %p\n",
-		   ((xcb_leave_notify_event_t *) e)->detail,
-		   ((xcb_leave_notify_event_t *) e)->state,
-		   ((xcb_leave_notify_event_t *) e)->mode);
-		handle_leave_notify((xcb_leave_notify_event_t *) e);
 		break;
 	case XCB_EXPOSE:
 		te("XCB_EXPOSE: win %p\n", ((xcb_expose_event_t *) e)->window);

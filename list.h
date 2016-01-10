@@ -10,32 +10,37 @@
 #include <stddef.h>
 
 struct list_head {
-    struct list_head *prev;
-    struct list_head *next;
+	struct list_head *prev;
+	struct list_head *next;
 };
 
 static inline void list_init(struct list_head *head)
 {
-    head->next = head->prev = head;
+	head->next = head->prev = head;
+}
+
+static inline int list_single(struct list_head *head)
+{
+	return (head->next == head->prev && head->next != head);
 }
 
 static inline int list_empty(struct list_head *head)
 {
-    return (head->next == head);
+	return (head->next == head);
 }
 
 static inline void list_add(struct list_head *head, struct list_head *item)
 {
-    item->next = head;
-    item->prev = head->prev;
-    head->prev->next = item;
-    head->prev = item;
+	item->next = head;
+	item->prev = head->prev;
+	head->prev->next = item;
+	head->prev = item;
 }
 
 static inline void list_del(struct list_head *item)
 {
-    item->prev->next = item->next;
-    item->next->prev = item->prev;
+	item->prev->next = item->next;
+	item->next->prev = item->prev;
 }
 
 #define container_of(ptr, type, member) __extension__ ({ \
