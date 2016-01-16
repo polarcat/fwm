@@ -12,7 +12,6 @@
 #include <errno.h>
 #include <string.h>
 #include <signal.h>
-#include <pthread.h>
 #include <fcntl.h>
 #include <time.h>
 
@@ -29,10 +28,6 @@
 #include <X11/keysym.h>
 
 #include "list.h"
-
-#define DEBUG
-#define TRACE
-#define TRACE_EVENTS
 
 #define ee(fmt, ...) {\
 	int errno_save__ = errno;\
@@ -314,11 +309,11 @@ struct panel_item {
 static const char *cal[] = { "zenity", "--calendar", NULL };
 
 static struct panel_item panel_items[PANEL_AREA_MAX] = {
-	{ 0, 0, NULL, NULL, NULL, },
-	{ 0, 0, NULL, NULL, NULL, },
-	{ 0, 0, NULL, NULL, NULL, },
-	{ 0, 0, NULL, NULL, NULL, },
-	{ 0, 0, spawn, (void *) cal, NULL, },
+	{ 0, 0, NULL, NULL, NULL, }, /* tags */
+	{ 0, 0, NULL, NULL, NULL, }, /* menu */
+	{ 0, 0, NULL, NULL, NULL, }, /* title */
+	{ 0, 0, NULL, NULL, NULL, }, /* dock */
+	{ 0, 0, spawn, (void *) cal, NULL, }, /* clock */
 };
 
 static uint16_t panel_vpad;
@@ -416,17 +411,25 @@ static void draw_panel_text(struct screen *scr, XftColor *color, int16_t x,
 	}
 }
 
+static void spawn_cleanup(int sig)
+{
+	while (waitpid(-1, NULL, WNOHANG) < 0) {
+		if (errno != EINTR)
+			break;
+	}
+}
+
 static void spawn(const char **argv)
 {
-	if (fork() == 0) {
-		tt("execvp %s %s\n", argv[0], argv[1]);
+	if (fork() != 0)
+		return;
 
-		close(xcb_get_file_descriptor(dpy));
-		close(ConnectionNumber(xdpy));
-		setsid();
-		execvp(argv[0], argv);
-		exit(0);
-	}
+	tt("execvp %s %s\n", argv[0], argv[1]);
+	close(xcb_get_file_descriptor(dpy));
+	close(ConnectionNumber(xdpy));
+	setsid();
+	execvp(argv[0], argv);
+	exit(0);
 }
 
 static void clean(void)
@@ -2202,6 +2205,9 @@ static void init_keys(void)
 int main()
 {
 	xcb_screen_t *scr;
+
+	if (signal(SIGCHLD, spawn_cleanup) == SIG_ERR)
+		panic("SIGCHLD handler failed\n");
 
 	xdpy = XOpenDisplay(NULL);
 	if (!xdpy) {
