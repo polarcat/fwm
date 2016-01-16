@@ -52,6 +52,9 @@ static inline void list_del(struct list_head *item)
 #define list_walk(curr, head) \
 	for (curr = (head)->next; curr != (head); curr = curr->next)
 
+#define list_back(curr, head) \
+	for (curr = (head)->prev; curr != (head); curr = curr->prev)
+
 #define list_walk_safe(curr, temp, head) \
 	for (curr = (head)->next, temp = curr->next; curr != (head); \
 		curr = temp, temp = curr->next)
