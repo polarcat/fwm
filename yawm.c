@@ -455,7 +455,7 @@ static void clean(void)
 	cookie = func;\
 	xcb_generic_error_t *error__ = xcb_request_check(dpy, cookie);\
         if (error__)\
-		panic("%s, err=%d\n", #func, error__->error_code);\
+		ee("%s, err=%d\n", #func, error__->error_code);\
 }
 
 #define PROP_TYPE_ANY XCB_GET_PROPERTY_TYPE_ANY
@@ -736,6 +736,8 @@ out:
 	window_raise(cli->win);
 	window_focus(scr->tag, scr->tag->win, 0);
 	window_focus(scr->tag, cli->win, 1);
+	xcb_warp_pointer(dpy, XCB_NONE, cli->win, 0, 0, 0, 0, cli->w / 2,
+			 cli->h / 2);
 	xcb_flush(dpy);
 }
 
@@ -1163,8 +1165,7 @@ static void client_add(struct screen *scr, xcb_window_t win)
 //	}
 
 	/* tell x server to restore window upon our sudden exit */
-	xcb_void_cookie_t cc;
-	xcb_eval(cc, xcb_change_save_set(dpy, XCB_SET_MODE_INSERT, win));
+	xcb_change_save_set(dpy, XCB_SET_MODE_INSERT, win);
 
 	val[0] = BORDER_WIDTH;
 	mask = XCB_CONFIG_WINDOW_BORDER_WIDTH;
@@ -1208,6 +1209,8 @@ static void client_add(struct screen *scr, xcb_window_t win)
 	if (scr->tag == tag) {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 		xcb_map_window(dpy, cli->win);
+		xcb_warp_pointer(dpy, XCB_NONE, cli->win, 0, 0, 0, 0,
+				 cli->w / 2, cli->h / 2);
 	} else {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
 		xcb_unmap_window(dpy, cli->win);
@@ -1644,6 +1647,7 @@ static void handle_panel_press(xcb_button_press_event_t *e)
 	} else if pointer_inside(PANEL_AREA_DOCK, e->event_x) {
 		ii("dock\n");
 	} else if (pointer_inside(PANEL_AREA_TIME, e->event_x)) {
+		ii("clock\n");
 		if (panel_items[PANEL_AREA_TIME].action) {
 			void *arg = panel_items[PANEL_AREA_TIME].arg;
 			panel_items[PANEL_AREA_TIME].action(arg);
@@ -1677,7 +1681,9 @@ static void handle_button_press(xcb_button_press_event_t *e)
 
 	window_raise(e->child);
 	panel_raise(e->root);
+
 	/* subscribe to motion events */
+
 	xcb_grab_pointer(dpy, 0, e->root,
 			 XCB_EVENT_MASK_BUTTON_MOTION |
 			 XCB_EVENT_MASK_BUTTON_RELEASE,
@@ -2141,14 +2147,11 @@ static void init_root(xcb_window_t win)
 	uint32_t val = XCB_EVENT_MASK_BUTTON_PRESS;
 
 	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
-			XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_LEFT,
-			MODKEY));
+		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_LEFT, MODKEY));
 	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
-			XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_MID,
-			MODKEY));
+		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_MID, MODKEY));
 	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
-			XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_RIGHT,
-			MODKEY));
+		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_RIGHT, MODKEY));
 
 	/* subscribe events */
 	val = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT |
