@@ -191,15 +191,6 @@ struct client {
 
 #define list2client(item) list_entry(item, struct client, head)
 
-struct winhash {
-	uint32_t hash;
-	struct client *cli;
-};
-
-struct arg {
-	const void *ptr;
-};
-
 struct keymap {
 	uint16_t mod;
 	xcb_keysym_t sym;
