@@ -70,7 +70,7 @@
 
 /* defaults */
 
-static char *basedir = "/tmp/yawm";
+static char *basedir;
 
 static uint32_t border_active = 0x5050ff;
 static uint32_t border_normal = 0x005000;
@@ -469,6 +469,10 @@ static int get_prop_str(xcb_window_t win, enum xcb_atom_enum_t atom,
 
 	c = xcb_get_property(dpy, 0, win, atom, XCB_ATOM_STRING, 0, max);
 	r = xcb_get_property_reply(dpy, c, NULL);
+	if (!r) {
+		ret[0] = '\0';
+		return 0;
+	}
 	tmp = xcb_get_property_value(r);
 	len = xcb_get_property_value_length(r);
 	max--;
@@ -482,7 +486,7 @@ static int get_prop_str(xcb_window_t win, enum xcb_atom_enum_t atom,
 		ret[len] = '\0';
 		memcpy(ret, tmp, len);
 	}
-	ii("len=%d, max=%d, str=%s\n", len, max, tmp);
+	dd("len=%d, max=%d, str=%s\n", len, max, tmp);
 	free(r);
 	return len;
 }
@@ -597,7 +601,7 @@ static void refresh_rules(struct screen *scr)
 		}
 	}
 
-	ii("root %s\n", name);
+	dd("root %s\n", name);
 }
 
 #define match_class(a, b) strncmp(a, b, sizeof(b) - 1) == 0
@@ -975,13 +979,19 @@ static void raise_window(void *arg)
 	xcb_flush(dpy);
 }
 
-static void panel_raise(xcb_window_t root)
+static void panel_raise(struct screen *scr, xcb_window_t root)
 {
-	struct screen *scr;
+	if (!scr)
+		scr = root2screen(root);
 
-	scr = root2screen(root);
-	if (scr->panel)
+	if (scr->panel) {
 		window_raise(scr->panel);
+		struct list_head *cur;
+		list_walk(cur, &scr->dock) {
+			struct client *cli = list2client(cur);
+			window_raise(cli->win);
+		}
+	}
 }
 
 static void print_tag(struct screen *scr, struct tag *tag, XftColor *color,
@@ -1531,22 +1541,26 @@ static int tag_add(struct screen *scr, const char *name, int idx, int pos)
 /*
  * Tags dir structure:
  *
- * /<basedir>/<screennumber>/<tagnumber>
- *
- * where each <tagnumber> file contains tag name
+ * /<basedir>/<screennumber>/<tagnumber>/<items>
+ * <items> are files:
+ *   .name       reserved to store tag name
+ *   <winclass>  window with <winclass> will be created on given tag
  *
  * Example:
  *
  * $HOME/.yawm/twomonitors/
- *			 0/
- *			   0 --> "main"
- *			   1 --> "work"
- *			   2 --> "compile"
- *			   3 --> "chat"
- *			 1/
- *			   0 --> "main"
- *			   1 --> "work"
- *			   2 --> "browser"
+ *			   0/
+ *			     0/.name --> "main"
+ *			     1/.name --> "work"
+ *			       XTerm
+ *			     2/.name --> "compile"
+ *			     3/.name --> "chat"
+ *			       XChat
+ *			   1/
+ *			     0/.name --> "main"
+ *			     1/.name --> "work"
+ *			     2/.name --> "browser"
+ *			       Firefox
  */
 static int init_tags(struct screen *scr)
 {
@@ -1609,6 +1623,26 @@ static int calc_title_max(void)
 	}
 	title_max = i - 2;
 	mm("title_max=%u\n", title_max);
+}
+
+static void redraw_panel_items(struct screen *scr)
+{
+	XftColor *color;
+	struct list_head *cur;
+
+	list_walk(cur, &scr->tags) {
+		struct tag *tag = list2tag(cur);
+		if (scr->tag == tag)
+			color = &active_color;
+		else
+			color = &normal_color;
+
+		draw_panel_text(scr, color, tag->x, tag->w,
+				(XftChar8 *) tag->name, tag->nlen, 0);
+	}
+
+	print_menu(scr);
+	print_title(scr->tag->win);
 }
 
 static int update_panel_items(struct screen *scr)
@@ -1806,7 +1840,7 @@ static void handle_button_press(xcb_button_press_event_t *e)
 		return;
 
 	window_raise(e->child);
-	panel_raise(e->root);
+	panel_raise(NULL, e->root);
 
 	/* subscribe to motion events */
 
@@ -1837,7 +1871,6 @@ static void handle_key_press(xcb_key_press_event_t *e)
 	}
 }
 
-#if 0
 static void handle_visibility(xcb_visibility_notify_event_t *e)
 {
 	struct list_head *cur;
@@ -1845,13 +1878,12 @@ static void handle_visibility(xcb_visibility_notify_event_t *e)
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
 		if (scr->panel == e->window) {
-			window_raise(scr->panel);
-//			update_panel_items(scr);
+			panel_raise(scr, scr->ptr->root);
+			redraw_panel_items(scr);
 			return;
 		}
 	}
 }
-#endif
 
 static void handle_create_notify(xcb_create_notify_event_t *e)
 {
@@ -2163,14 +2195,12 @@ static void handle_events(void)
 	case XCB_VISIBILITY_NOTIFY:
 		te("XCB_VISIBILITY_NOTIFY: win %p\n",
 		   ((xcb_visibility_notify_event_t *) e)->window);
-#if 0
                 switch (((xcb_visibility_notify_event_t *) e)->state) {
                 case XCB_VISIBILITY_FULLY_OBSCURED:
                 case XCB_VISIBILITY_PARTIALLY_OBSCURED: /* fall through */
 			handle_visibility((xcb_visibility_notify_event_t *) e);
 			break;
                 }
-#endif
 		break;
 	case XCB_CREATE_NOTIFY:
 		te("XCB_CREATE_NOTIFY: parent %p, window %p\n",
@@ -2375,6 +2405,12 @@ static void init_keys(void)
 int main()
 {
 	xcb_screen_t *scr;
+
+	basedir = getenv("YAWM_HOME");
+	if (!basedir)
+		basedir = "/tmp/yawm";
+
+	ii("basedir: %s\n", basedir);
 
 	if (signal(SIGCHLD, spawn_cleanup) == SIG_ERR)
 		panic("SIGCHLD handler failed\n");
