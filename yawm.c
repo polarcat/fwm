@@ -72,8 +72,9 @@
 
 static char *basedir;
 
-static uint32_t border_active = 0x5050ff;
-static uint32_t border_normal = 0x005000;
+static uint32_t border_docked = 0xa0a0a0;
+static uint32_t border_active = 0xf0a000;
+static uint32_t border_normal = 0x303000;
 static uint32_t panel_bg = 0x107010;
 static uint32_t panel_height = 24; /* need to adjust with font height */
 
@@ -84,7 +85,7 @@ static uint32_t panel_height = 24; /* need to adjust with font height */
 #endif
 
 #define BORDER_WIDTH 1
-#define WINDOW_PAD (BORDER_WIDTH * 2)
+#define WINDOW_PAD BORDER_WIDTH
 
 #define FONT_SIZE_FT 10.
 #define FONT_NAME_FT "Monospace"
@@ -388,11 +389,13 @@ static void fill_rect(xcb_window_t win, xcb_gcontext_t gc,
 static void draw_panel_text(struct screen *scr, XftColor *color, int16_t x,
 			    uint16_t w, const char *text, int len, int flush)
 {
-	tt("text=%s, len=%d\n", text, len);
+	tt("win=%p, text=%s, len=%d\n", scr->panel, text, len);
 
 	fill_rect(scr->panel, scr->gc, x, 0, w, panel_height);
+	dd("fill_rect(%p) completed\n", scr->panel);
 	XftDrawStringUtf8(scr->draw, color, font, x, panel_vpad,
 			  (XftChar8 *) text, len);
+	dd("XftDrawStringUtf8(%p) completed\n", scr->panel);
 
 	if (flush) {
 #if 0
@@ -715,20 +718,14 @@ static void window_raise(xcb_window_t win)
 
 static void window_border_color(xcb_window_t win, uint32_t color)
 {
-	uint32_t val[1] = { color, }, mask;
-	mask = XCB_CW_BORDER_PIXEL;
-	xcb_change_window_attributes(dpy, win, mask, val);
+	uint32_t val[1] = { color, };
+	xcb_change_window_attributes(dpy, win, XCB_CW_BORDER_PIXEL, val);
 }
 
 static void window_border_width(xcb_window_t win, uint16_t width)
 {
-	uint32_t val[1] = { width, }, mask;
-	mask = XCB_CONFIG_WINDOW_BORDER_WIDTH;
-#if 1
-	xcb_change_window_attributes(dpy, win, mask, val);
-#else
-        xcb_configure_window(dpy, win, mask, val);
-#endif
+	uint32_t val[1] = { width, };
+	xcb_configure_window(dpy, win, XCB_CONFIG_WINDOW_BORDER_WIDTH, val);
 }
 
 static void window_focus(struct tag *tag, xcb_window_t win, int focus)
@@ -826,7 +823,8 @@ out:
 static void client_moveresize(struct screen *scr, struct client *cli,
 			      int x, int y, int w, int h, int dock)
 {
-	uint32_t val[4], mask;
+	uint32_t val[4];
+	uint16_t mask;
 
 	cli->x = x;
 	cli->y = y;
@@ -836,16 +834,16 @@ static void client_moveresize(struct screen *scr, struct client *cli,
 	if (!dock) {
 		/* fit into monitor space */
 		if (cli->w > scr->w)
-			cli->w = scr->w - BORDER_WIDTH;
+			cli->w = scr->w - 2 * BORDER_WIDTH;
 		else if (cli->w < WIN_WIDTH_MIN)
-			cli->w = scr->w / 2 - BORDER_WIDTH;
+			cli->w = scr->w / 2 - 2 * BORDER_WIDTH;
 		if (cli->h > scr->h)
-			cli->h = scr->h - BORDER_WIDTH;
+			cli->h = scr->h - 2 * BORDER_WIDTH;
 		else if (cli->h < WIN_HEIGHT_MIN)
-			cli->h = scr->h / 2 - BORDER_WIDTH;
+			cli->h = scr->h / 2 - 2 * BORDER_WIDTH;
 
 		if (cli->h + cli->y >= scr->h)
-			cli->h = scr->h - cli->y - WINDOW_PAD;
+			cli->h = scr->h - cli->y - 2 * BORDER_WIDTH;
 
 		if (cli->x > scr->w)
 			cli->x = 0;
@@ -884,8 +882,8 @@ static void place_window(void *arg)
 	case WIN_POS_FILL:
 		dd("WIN_POS_FILL\n");
 		x = y = 0;
-		w = screen->w - WINDOW_PAD;
-		h = screen->h - BORDER_WIDTH;
+		w = screen->w - 2 * BORDER_WIDTH - WINDOW_PAD;
+		h = screen->h - 2 * BORDER_WIDTH - WINDOW_PAD;
 		break;
 	case WIN_POS_LEFT_FILL:
 		dd("WIN_POS_LEFT_FILL\n");
@@ -933,27 +931,17 @@ out:
 	xcb_flush(dpy);
 	return;
 halfwh:
-	w = screen->w / 2 - WINDOW_PAD;
-	h = screen->h / 2 - WINDOW_PAD;
+	w = screen->w / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
+	h = screen->h / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
 	goto out;
 halfw:
-	w = screen->w / 2 - WINDOW_PAD;
-	h = screen->h - WINDOW_PAD;
+	w = screen->w / 2 - 2 * BORDER_WIDTH;
+	h = screen->h - 2 * BORDER_WIDTH;
 	goto out;
 halfh:
-	w = screen->w - WINDOW_PAD;
-	h = screen->h / 2 - WINDOW_PAD;
+	w = screen->w - 2 * BORDER_WIDTH - WINDOW_PAD;
+	h = screen->h / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
 	goto out;
-}
-
-static void hide_window(struct screen *scr, xcb_window_t win)
-{
-	uint32_t val[1] = { scr->h, };
-	uint32_t mask = XCB_CONFIG_WINDOW_Y;
-
-	tt("\n");
-
-	xcb_configure_window(dpy, win, mask, val);
 }
 
 static void next_window(void *arg)
@@ -1244,8 +1232,9 @@ static void dock_add(struct screen *scr, struct client *cli)
 	}
 
 	window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
-	window_border_width(cli->win, 1);
+	window_border_color(cli->win, border_docked);
 	xcb_map_window(dpy, cli->win);
+	xcb_flush(dpy);
 }
 
 static void client_add(struct screen *scr, xcb_window_t win, int docked)
@@ -1311,6 +1300,7 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 
 	cli->win = win;
 	window_raise(win);
+	window_border_width(cli->win, BORDER_WIDTH);
 
 	if (docked || window_docked(win)) {
 		dock_add(scr, cli);
@@ -1340,7 +1330,16 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 	if (!tag)
 		tag = scr->tag;
 
-	list_add(&tag->clients, &cli->head);
+	if (!tag->win) {
+		list_add(&tag->clients, &cli->head);
+	} else { /* attempt to list windows in order of appearance */
+		struct client *cur = win2client(scr, tag->win, 0);
+		if (cur) {
+			dd("cur %p\n", cur->win);
+			list_add(&cur->head, &cli->head);
+		} else
+			list_add(&tag->clients, &cli->head);
+	}
 	tag->win = win;
 	client_moveresize(scr, cli, g->x, g->y, g->width, g->height, 0);
 
@@ -1388,7 +1387,7 @@ static void client_del(xcb_window_t root, xcb_window_t win)
 		goto out;
 	}
 
-	switch_window(root, cli, DIR_PREV);
+	switch_window(root, cli, DIR_NEXT);
 	list_del(&cli->head);
 	free(cli);
 
@@ -1769,7 +1768,7 @@ static void motion_clean(void)
 
 static void handle_motion_notify(xcb_motion_notify_event_t *e)
 {
-	uint32_t mask;
+	uint16_t mask;
 	uint32_t val[2];
 	int16_t dx, dy;
 	struct client *cli;
@@ -1816,7 +1815,10 @@ static void handle_panel_press(xcb_button_press_event_t *e)
 		struct list_head *cur;
 		ii("menu, tag %s\n", screen->tag->name);
 		list_walk(cur, &screen->tag->clients)
-			ii("  win %p\n", list2client(cur)->win);
+			ii("  win %p, geo %ux%u+%d+%d\n",
+			   list2client(cur)->win, list2client(cur)->w,
+			   list2client(cur)->h, list2client(cur)->x,
+			   list2client(cur)->y);
 	} else if pointer_inside(PANEL_AREA_TITLE, e->event_x) {
 		ii("title\n");
 	} else if pointer_inside(PANEL_AREA_DOCK, e->event_x) {
@@ -1900,8 +1902,14 @@ static void handle_visibility(xcb_visibility_notify_event_t *e)
 	}
 }
 
+#if 0
 static void handle_create_notify(xcb_create_notify_event_t *e)
 {
+#if 0
+	xcb_map_window(dpy, e->window);
+	window_border_width(e->window, BORDER_WIDTH);
+#endif
+#if 0
 	struct screen *scr;
 
 	if (!window_docked(e->window))
@@ -1910,7 +1918,9 @@ static void handle_create_notify(xcb_create_notify_event_t *e)
 	scr = root2screen(e->parent);
 	if (scr)
 		client_add(scr, e->window, 1);
+#endif
 }
+#endif
 
 static void handle_unmap_notify(xcb_unmap_notify_event_t *e)
 {
@@ -2147,24 +2157,41 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 {
 	uint32_t val[7] = { 0 };
 	int i = 0;
+	uint16_t mask = 0;
 
 	/* the order has to correspond to the order value_mask bits */
-	if (e->value_mask & XCB_CONFIG_WINDOW_X)
+	if (e->value_mask & XCB_CONFIG_WINDOW_X) {
 		val[i++] = e->x;
-	if (e->value_mask & XCB_CONFIG_WINDOW_Y)
+		mask |= XCB_CONFIG_WINDOW_X;
+	}
+	if (e->value_mask & XCB_CONFIG_WINDOW_Y) {
 		val[i++] = e->y;
-	if (e->value_mask & XCB_CONFIG_WINDOW_WIDTH)
+		mask |= XCB_CONFIG_WINDOW_Y;
+	}
+	if (e->value_mask & XCB_CONFIG_WINDOW_WIDTH) {
 		val[i++] = e->width;
-	if (e->value_mask & XCB_CONFIG_WINDOW_HEIGHT)
+		mask |= XCB_CONFIG_WINDOW_WIDTH;
+	}
+	if (e->value_mask & XCB_CONFIG_WINDOW_HEIGHT) {
 		val[i++] = e->height;
-	if (e->value_mask & XCB_CONFIG_WINDOW_BORDER_WIDTH)
+		mask |= XCB_CONFIG_WINDOW_HEIGHT;
+	}
+#if 0
+	if (e->value_mask & XCB_CONFIG_WINDOW_BORDER_WIDTH) {
 		val[i++] = BORDER_WIDTH; //e->border_width;
-	if (e->value_mask & XCB_CONFIG_WINDOW_SIBLING)
+		mask |= XCB_CONFIG_WINDOW_BORDER_WIDTH;
+	}
+#endif
+	if (e->value_mask & XCB_CONFIG_WINDOW_SIBLING) {
 		val[i++] = e->sibling;
-	if (e->value_mask & XCB_CONFIG_WINDOW_STACK_MODE)
+		mask |= XCB_CONFIG_WINDOW_SIBLING;
+	}
+	if (e->value_mask & XCB_CONFIG_WINDOW_STACK_MODE) {
 		val[i++] = e->stack_mode;
+		mask |= XCB_CONFIG_WINDOW_STACK_MODE;
+	}
 
-        xcb_configure_window(dpy, e->window, e->value_mask, val);
+        xcb_configure_window(dpy, e->window, mask, val);
         xcb_flush(dpy);
 }
 
@@ -2199,7 +2226,9 @@ static void handle_events(void)
 		te("XCB_CREATE_NOTIFY: parent %p, window %p\n",
 		   ((xcb_create_notify_event_t *) e)->parent,
 		   ((xcb_create_notify_event_t *) e)->window);
+#if 0
 		handle_create_notify((xcb_create_notify_event_t *) e);
+#endif
 		break;
 	case XCB_BUTTON_PRESS:
 		mouse_x = ((xcb_button_press_event_t *) e)->root_x;
@@ -2308,7 +2337,7 @@ static void handle_events(void)
 	}
 
 	free(e);
-	print_time(screen);
+//	print_time(screen);
 }
 
 static xcb_atom_t get_atom_by_name(const char *str, int len)
