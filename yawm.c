@@ -395,9 +395,11 @@ static void draw_panel_text(struct screen *scr, XftColor *color, int16_t x,
 			  (XftChar8 *) text, len);
 
 	if (flush) {
+#if 0
 		/* this makes text displayed, do not ask.. */
 		xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
 				    XCB_CURRENT_TIME);
+#endif
 		xcb_flush(dpy);
 	}
 }
@@ -447,16 +449,6 @@ static void clean(void)
 	xcb_generic_error_t *error__ = xcb_request_check(dpy, cookie);\
         if (error__)\
 		ee("%s, err=%d\n", #func, error__->error_code);\
-}
-
-#define PROP_TYPE_ANY XCB_GET_PROPERTY_TYPE_ANY
-
-static xcb_get_property_reply_t *get_prop_any(xcb_window_t w, xcb_atom_t a)
-{
-	xcb_get_property_cookie_t c;
-
-	c = xcb_get_property(dpy, 0, w, a, PROP_TYPE_ANY, 0, PROP_MAX);
-	return xcb_get_property_reply(dpy, c, NULL);
 }
 
 static int get_prop_str(xcb_window_t win, enum xcb_atom_enum_t atom,
@@ -550,6 +542,25 @@ static void print_title(xcb_window_t win)
 			(XftChar8 *) title, len, 1);
 }
 
+static enum winstatus window_status(xcb_window_t win)
+{
+	enum winstatus status;
+	xcb_get_window_attributes_cookie_t c;
+	xcb_get_window_attributes_reply_t *a;
+
+	c = xcb_get_window_attributes(dpy, win);
+	a = xcb_get_window_attributes_reply(dpy, c, NULL);
+	if (!a)
+		status = WIN_STATUS_UNKNOWN;
+	else if (a->map_state != XCB_MAP_STATE_VIEWABLE)
+		status = WIN_STATUS_HIDDEN;
+	else
+		status = WIN_STATUS_VISIBLE;
+
+	free(a);
+	return status;
+}
+
 static void update_clients_list(void)
 {
 	struct list_head *ccur, *tcur;
@@ -561,6 +572,8 @@ static void update_clients_list(void)
 		struct tag *tag = list2tag(tcur);
 		list_walk(ccur, &tag->clients) {
 			struct client *cli = list2client(ccur);
+			if (window_status(cli->win) == WIN_STATUS_UNKNOWN)
+				continue;
 			dd("append client %p, window %p\n", cli, cli->win);
 			xcb_change_property(dpy, XCB_PROP_MODE_APPEND,
 					    screen->ptr->root, a_client_list,
@@ -681,26 +694,11 @@ static void trace_attrs(xcb_window_t win)
 	free(a);
 }
 
-static enum winstatus window_status(xcb_window_t win)
-{
-	xcb_get_window_attributes_cookie_t c;
-	xcb_get_window_attributes_reply_t *a;
-
-	c = xcb_get_window_attributes(dpy, win);
-	a = xcb_get_window_attributes_reply(dpy, c, NULL);
-	if (!a)
-		return WIN_STATUS_UNKNOWN;
-	if (a->map_state != XCB_MAP_STATE_VIEWABLE)
-		return WIN_STATUS_HIDDEN;
-	free(a);
-	return WIN_STATUS_VISIBLE;
-}
-
 static void window_state(xcb_window_t win, uint8_t state)
 {
 	uint32_t data[] = { state, XCB_NONE };
-	xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, win, a_state, a_state,
-			    32, 2, data);
+	xcb_change_property_checked(dpy, XCB_PROP_MODE_REPLACE, win,
+				    a_state, a_state, 32, 2, data);
 }
 
 static void window_lower(xcb_window_t win)
@@ -715,11 +713,22 @@ static void window_raise(xcb_window_t win)
 	xcb_configure_window(dpy, win, XCB_CONFIG_WINDOW_STACK_MODE, val);
 }
 
-static void window_border(xcb_window_t win, uint16_t width, uint32_t color)
+static void window_border_color(xcb_window_t win, uint32_t color)
 {
-	uint32_t val[2] = { color, width, }, mask;
-	mask = XCB_CW_BORDER_PIXEL | XCB_CONFIG_WINDOW_BORDER_WIDTH;
+	uint32_t val[1] = { color, }, mask;
+	mask = XCB_CW_BORDER_PIXEL;
 	xcb_change_window_attributes(dpy, win, mask, val);
+}
+
+static void window_border_width(xcb_window_t win, uint16_t width)
+{
+	uint32_t val[1] = { width, }, mask;
+	mask = XCB_CONFIG_WINDOW_BORDER_WIDTH;
+#if 1
+	xcb_change_window_attributes(dpy, win, mask, val);
+#else
+        xcb_configure_window(dpy, win, mask, val);
+#endif
 }
 
 static void window_focus(struct tag *tag, xcb_window_t win, int focus)
@@ -732,14 +741,14 @@ static void window_focus(struct tag *tag, xcb_window_t win, int focus)
 		return;
 
 	if (!focus) {
-		window_border(win, BORDER_WIDTH, border_normal);
+		window_border_color(win, border_normal);
 	} else {
-		window_border(win, BORDER_WIDTH, border_active);
+		window_border_color(win, border_active);
 		print_title(win);
 		tag->win = win;
 	}
 
-        xcb_set_input_focus(dpy, XCB_NONE, win, XCB_CURRENT_TIME);
+	xcb_set_input_focus(dpy, XCB_NONE, win, XCB_CURRENT_TIME);
 }
 
 static void switch_window(xcb_window_t root, struct client *cli, enum dir dir)
@@ -1001,7 +1010,7 @@ static void print_tag(struct screen *scr, struct tag *tag, XftColor *color,
 		        tag->nlen, 0);
 
 	if (flush) {
-	        xcb_set_input_focus(dpy, XCB_NONE,
+		xcb_set_input_focus(dpy, XCB_NONE,
 				    XCB_INPUT_FOCUS_POINTER_ROOT,
 				    XCB_CURRENT_TIME);
 		xcb_flush(dpy);
@@ -1015,7 +1024,7 @@ static void show_windows(struct tag *tag)
 	list_walk(cur, &tag->clients) {
 		struct client *cli = list2client(cur);
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
-		xcb_map_window(dpy, cli->win);
+		xcb_map_window_checked(dpy, cli->win);
 	}
 
 	if (tag->win) {
@@ -1032,7 +1041,7 @@ static void hide_windows(struct tag *tag)
 	list_walk(cur, &tag->clients) {
 		struct client *cli = list2client(cur);
 		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
-		xcb_unmap_window(dpy, cli->win);
+		xcb_unmap_window_checked(dpy, cli->win);
 	}
 
 	xcb_flush(dpy);
@@ -1234,11 +1243,8 @@ static void dock_add(struct screen *scr, struct client *cli)
 		client_moveresize(scr, cli, x, y, cli->w, cli->h, 1);
 	}
 
-	mask = XCB_CONFIG_WINDOW_BORDER_WIDTH;
-	xcb_change_window_attributes(dpy, cli->win, mask, val);
-
 	window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
-	window_border(cli->win, 1, 0xffffff);
+	window_border_width(cli->win, 1);
 	xcb_map_window(dpy, cli->win);
 }
 
@@ -1260,10 +1266,16 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 		return;
 	else if (win == screen->panel)
 		return;
-	else if (win2client(scr, win, WIN_DOCK))
+	else if (win2client(scr, win, WIN_DOCK)) {
+		dd("already on dock list\n");
 		return; /* already added */
-	else if (win2client(scr, win, WIN_NORMAL))
+	}
+	else if (win2client(scr, win, WIN_NORMAL)) {
+		ii("already on clients list\n");
+		xcb_map_window(dpy, win);
+		xcb_flush(dpy);
 		return; /* already added */
+	}
 
 	refresh_rules(scr);
 #if 0
@@ -1335,8 +1347,10 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 	if (scr->tag == tag) {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 		xcb_map_window(dpy, win);
+#if 0
 		xcb_warp_pointer(dpy, XCB_NONE, win, 0, 0, 0, 0,
 				 cli->w / 2, cli->h / 2);
+#endif
 	} else {
 		window_state(win, XCB_ICCCM_WM_STATE_ICONIC);
 		xcb_unmap_window(dpy, win);
@@ -1370,6 +1384,7 @@ static void client_del(xcb_window_t root, xcb_window_t win)
 	cli = win2client(scr, win, WIN_NORMAL);
 	if (!cli) {
 		tt("win %p was not managed\n", win);
+		xcb_unmap_subwindows_checked(dpy, win);
 		goto out;
 	}
 
@@ -1932,32 +1947,7 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	xcb_flush(dpy);
 }
 
-#if 0
-static void handle_configure_request(xcb_configure_request_event_t *e)
-{
-	struct screen *scr;
-
-	scr = root2screen(e->parent);
-	if (!scr)
-		scr = screen;
-
-	if (e->parent && e->parent != scr->ptr->root) {
-		ii("parent %p\n", e->parent);
-		trace_hints(scr, e->parent);
-	}
-	if (e->window) {
-		ii("window %p\n", e->window);
-		trace_hints(scr, e->window);
-		trace_attrs(e->window);
-	}
-	if (e->sibling) {
-		ii("sibling %p\n", e->sibling);
-		trace_hints(scr, e->sibling);
-	}
-}
-#endif
-
-static int window_alien(xcb_window_t win)
+static int override_redirect(xcb_window_t win)
 {
 	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
@@ -1977,25 +1967,27 @@ static int window_alien(xcb_window_t win)
 
 static void handle_configure_notify(xcb_configure_notify_event_t *e)
 {
-	if (window_alien(e->window)) {
-		xcb_map_window(dpy, e->window);
-		xcb_flush(dpy);
-	}
-#if 0
 	struct screen *scr;
+
+	if (override_redirect(e->window)) {
+		ii("override redirect window %p\n", e->window);
+		return;
+	}
 
 	scr = root2screen(e->event);
 	if (!scr)
 		scr = screen;
 
+	ii("win %p above %p\n", e->window, e->above_sibling);
 	if (e->above_sibling) {
-		struct client *cli = win2client(scr, e->above_sibling);
-		if (!cli)
+		struct client *cli = win2client(scr, e->above_sibling, 0);
+		if (!cli) {
 			ii("window %p is not managed\n", e->above_sibling);
-		trace_hints(scr, e->window);
-		trace_hints(scr, e->above_sibling);
+			if (override_redirect(e->above_sibling)) {
+				ii("override redirect window %p\n", e->above_sibling);
+			}
+		}
 	}
-#endif
 }
 
 #if 0
@@ -2156,10 +2148,7 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 	uint32_t val[7] = { 0 };
 	int i = 0;
 
-	if (e->value_mask & XCB_CONFIG_WINDOW_STACK_MODE)
-		val[i++] = e->stack_mode;
-	if (e->value_mask & XCB_CONFIG_WINDOW_SIBLING)
-		val[i++] = e->sibling;
+	/* the order has to correspond to the order value_mask bits */
 	if (e->value_mask & XCB_CONFIG_WINDOW_X)
 		val[i++] = e->x;
 	if (e->value_mask & XCB_CONFIG_WINDOW_Y)
@@ -2169,7 +2158,11 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 	if (e->value_mask & XCB_CONFIG_WINDOW_HEIGHT)
 		val[i++] = e->height;
 	if (e->value_mask & XCB_CONFIG_WINDOW_BORDER_WIDTH)
-		val[i++] = e->border_width;
+		val[i++] = BORDER_WIDTH; //e->border_width;
+	if (e->value_mask & XCB_CONFIG_WINDOW_SIBLING)
+		val[i++] = e->sibling;
+	if (e->value_mask & XCB_CONFIG_WINDOW_STACK_MODE)
+		val[i++] = e->stack_mode;
 
         xcb_configure_window(dpy, e->window, e->value_mask, val);
         xcb_flush(dpy);
@@ -2227,7 +2220,7 @@ static void handle_events(void)
 		handle_motion_notify((xcb_motion_notify_event_t *) e);
 		break;
 	case XCB_CLIENT_MESSAGE:
-		tt("XCB_CLIENT_MESSAGE: win %p, type %d\n",
+		te("XCB_CLIENT_MESSAGE: win %p, type %d\n",
 		   ((xcb_client_message_event_t *) e)->window,
 		   ((xcb_client_message_event_t *) e)->type);
 #if 0
@@ -2239,9 +2232,6 @@ static void handle_events(void)
 		   ((xcb_configure_request_event_t *) e)->window);
 		print_configure_request((xcb_configure_request_event_t *) e);
 		handle_configure_request((xcb_configure_request_event_t *) e);
-#if 0
-		handle_configure_request((xcb_configure_request_event_t *) e);
-#endif
 		break;
 	case XCB_CONFIGURE_NOTIFY:
 		te("XCB_CONFIGURE_NOTIFY: event %p, window %p, above %p\n",
@@ -2297,8 +2287,9 @@ static void handle_events(void)
 		client_add(screen, ((xcb_map_notify_event_t *) e)->window, 0);
 		break;
 	case XCB_PROPERTY_NOTIFY:
-		te("XCB_PROPERTY_NOTIFY: win %p\n",
-		   ((xcb_property_notify_event_t *) e)->window);
+		te("XCB_PROPERTY_NOTIFY: win %p, atom %d\n",
+		   ((xcb_property_notify_event_t *) e)->window,
+		   ((xcb_property_notify_event_t *) e)->atom);
 		switch (((xcb_property_notify_event_t *) e)->atom) {
 		case XCB_ATOM_WM_NAME:
 			print_title(((xcb_property_notify_event_t *) e)->window);
