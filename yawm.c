@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <time.h>
+#include <poll.h>
 
 #include <xcb/xcb.h>
 #include <xcb/randr.h>
@@ -72,10 +73,10 @@
 
 static char *basedir;
 
-static uint32_t border_docked = 0xa0a0a0;
-static uint32_t border_active = 0xf0a000;
-static uint32_t border_normal = 0x303000;
-static uint32_t panel_bg = 0x107010;
+static uint32_t border_docked = 0x505050;
+static uint32_t border_active = 0x905030;
+static uint32_t border_normal = 0x303030;
+static uint32_t panel_bg = 0x101010;
 static uint32_t panel_height = 24; /* need to adjust with font height */
 
 /* defines */
@@ -89,8 +90,8 @@ static uint32_t panel_height = 24; /* need to adjust with font height */
 
 #define FONT_SIZE_FT 10.
 #define FONT_NAME_FT "Monospace"
-//#define FONT_COLOR_NORMAL { 0x7000, 0x7000, 0x7000, 0xffff, }
-#define FONT_COLOR_NORMAL { 0x1000, 0x1000, 0x1000, 0xffff, }
+#define FONT_COLOR_NORMAL { 0x7000, 0x7000, 0x7000, 0xffff, }
+//#define FONT_COLOR_NORMAL { 0x1000, 0x1000, 0x1000, 0xffff, }
 //#define FONT_COLOR_ACTIVE { 0x7800, 0x9900, 0x4c00, 0xffff, }
 #define FONT_COLOR_ACTIVE { 0xff00, 0xff00, 0xff00, 0xffff, }
 
@@ -128,6 +129,7 @@ static uint32_t panel_height = 24; /* need to adjust with font height */
 #define TIME_STR_FMT "%Y-%m-%d/%V %H:%M"
 #define TIME_STR_DEF "0000-00-00/00 00:00"
 #define TIME_STR_MAX sizeof(TIME_STR_DEF)
+#define TIME_REFRESH_INTERVAL 30000 /* ms */
 
 #define MODKEY XCB_MOD_MASK_4
 #define SHIFT XCB_MOD_MASK_SHIFT
@@ -392,19 +394,9 @@ static void draw_panel_text(struct screen *scr, XftColor *color, int16_t x,
 	tt("win=%p, text=%s, len=%d\n", scr->panel, text, len);
 
 	fill_rect(scr->panel, scr->gc, x, 0, w, panel_height);
-	dd("fill_rect(%p) completed\n", scr->panel);
 	XftDrawStringUtf8(scr->draw, color, font, x, panel_vpad,
 			  (XftChar8 *) text, len);
-	dd("XftDrawStringUtf8(%p) completed\n", scr->panel);
-
-	if (flush) {
-#if 0
-		/* this makes text displayed, do not ask.. */
-		xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
-				    XCB_CURRENT_TIME);
-#endif
-		xcb_flush(dpy);
-	}
+	XSync(xdpy, 0);
 }
 
 static void spawn_cleanup(int sig)
@@ -677,6 +669,7 @@ static struct client *win2client(struct screen *scr, xcb_window_t win, int dock)
 	return NULL;
 }
 
+#if 0
 static void trace_attrs(xcb_window_t win)
 {
 	xcb_get_window_attributes_cookie_t c;
@@ -696,6 +689,7 @@ static void trace_attrs(xcb_window_t win)
 
 	free(a);
 }
+#endif
 
 static void window_state(xcb_window_t win, uint8_t state)
 {
@@ -713,7 +707,8 @@ static void window_lower(xcb_window_t win)
 static void window_raise(xcb_window_t win)
 {
 	uint32_t val[1] = { XCB_STACK_MODE_ABOVE, };
-	xcb_configure_window(dpy, win, XCB_CONFIG_WINDOW_STACK_MODE, val);
+	uint16_t mask = XCB_CONFIG_WINDOW_STACK_MODE;
+	xcb_configure_window_checked(dpy, win, mask, val);
 }
 
 static void window_border_color(xcb_window_t win, uint32_t color)
@@ -1216,7 +1211,7 @@ static void dock_add(struct screen *scr, struct client *cli)
 	list_add(&scr->dock, &cli->head);
 
 	cli->w = panel_height + panel_height / 3;
-	cli->h = panel_height - 3 * DOCKWIN_GAP + 1;
+	cli->h = panel_height - 3 * DOCKWIN_GAP - 1;
 
 	x = panel_items[PANEL_AREA_TIME].x - 2 * DOCKWIN_GAP;
 
@@ -1957,6 +1952,7 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	xcb_flush(dpy);
 }
 
+#if 0
 static int override_redirect(xcb_window_t win)
 {
 	xcb_get_window_attributes_cookie_t c;
@@ -1999,6 +1995,7 @@ static void handle_configure_notify(xcb_configure_notify_event_t *e)
 		}
 	}
 }
+#endif
 
 #if 0
 static void print_atom_name(xcb_atom_t atom)
@@ -2195,18 +2192,18 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
         xcb_flush(dpy);
 }
 
-static void handle_events(void)
+static int handle_events(void)
 {
 	xcb_generic_event_t *e;
 	uint8_t type;
 
-	e = xcb_wait_for_event(dpy);
+	e = xcb_poll_for_event(dpy);
 
 	if (xcb_connection_has_error(dpy))
 		panic("failed to get event\n");
 
 	if (!e)
-		return;
+		return 0;
 
 	te("got event %d (%d)\n", e->response_type, XCB_EVENT_RESPONSE_TYPE(e));
 
@@ -2267,7 +2264,7 @@ static void handle_events(void)
 		   ((xcb_configure_notify_event_t *) e)->event,
 		   ((xcb_configure_notify_event_t *) e)->window,
 		   ((xcb_configure_notify_event_t *) e)->above_sibling);
-#if 1
+#if 0
 		handle_configure_notify((xcb_configure_notify_event_t *) e);
 #endif
 		break;
@@ -2337,7 +2334,7 @@ static void handle_events(void)
 	}
 
 	free(e);
-//	print_time(screen);
+	return 1;
 }
 
 static xcb_atom_t get_atom_by_name(const char *str, int len)
@@ -2424,6 +2421,7 @@ static void init_keys(void)
 
 int main()
 {
+	struct pollfd pfd;
 	xcb_screen_t *scr;
 
 	basedir = getenv("YAWM_HOME");
@@ -2472,9 +2470,27 @@ int main()
 
 	clients_scan(screen);
 
+	pfd.fd = xcb_get_file_descriptor(dpy);
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+
 	mm("enter events loop\n");
-	while (1)
-		handle_events();
+
+	while (1) {
+		int rc = poll(&pfd, 1, TIME_REFRESH_INTERVAL);
+		if (rc == 0) { /* timeout */
+			print_time(screen);
+		} else if (rc < 0) {
+			if (errno == EINTR)
+				continue;
+			/* something weird happened, but relax and try again */
+			sleep(1);
+			continue;
+		}
+
+		if (pfd.revents & POLLIN)
+			while (handle_events()) {} /* read all events */
+	}
 
 	xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
 			    XCB_CURRENT_TIME);
