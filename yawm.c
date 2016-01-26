@@ -232,6 +232,7 @@ static void raise_window(void *);
 static void place_window(void *);
 static void spawn(const char **argv);
 
+static const char *xrun[] = { "xfrun4", NULL };
 static const char *term[] = { "xterm", NULL };
 static const char *lock[] = { "xscreensaver-command", "--lock", NULL };
 
@@ -239,6 +240,7 @@ static struct keymap kmap[] = {
 	{ MODKEY, XK_Tab, 0, next_window, NULL, },
 	{ MODKEY, XK_BackSpace, 0, prev_window, NULL, },
 	{ MODKEY, XK_Return, 0, raise_window, NULL, },
+	{ MODKEY, XK_r, 0, spawn, (void *) xrun, },
 	{ MODKEY, XK_t, 0, spawn, (void *) term, },
 	{ SHIFT, XK_F5, 0, place_window, (void *) WIN_POS_TOP_LEFT, },
 	{ SHIFT, XK_F6, 0, place_window, (void *) WIN_POS_TOP_RIGHT, },
@@ -1262,10 +1264,6 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 	}
 
 	refresh_rules(scr);
-#if 0
-	xcb_window_t group;
-	group = trace_hints(scr, win);
-#endif
 
 	ac = xcb_get_window_attributes(dpy, win);
 	a = xcb_get_window_attributes_reply(dpy, ac, NULL);
@@ -1276,13 +1274,9 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 
 	g = NULL;
 	if (a->override_redirect) {
-		ww("ignore redirected window %p\n", win);
+		dd("ignore redirected window %p\n", win);
 		goto out;
 	}
-// else if (a->map_state != XCB_MAP_STATE_VIEWABLE && !group) {
-//		ww("ignore non-viewable window %p\n", win);
-//		goto out;
-//	}
 
 	/* tell x server to restore window upon our sudden exit */
 	xcb_change_save_set(dpy, XCB_SET_MODE_INSERT, win);
@@ -1317,7 +1311,8 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 	if (!g->depth && !a->colormap) {
 		dd("win %p, root %p, colormap=%p, class=%u, depth=%u\n",
 		   win, g->root, a->colormap, a->_class, g->depth);
-		ww("zombie window %p detected, will skip it\n", win);
+		xcb_destroy_window(dpy, win);
+		ww("zombie window %p destroyed\n", win);
 		goto out;
 	}
 
