@@ -391,14 +391,16 @@ static void fill_rect(xcb_window_t win, xcb_gcontext_t gc,
 }
 
 static void draw_panel_text(struct screen *scr, XftColor *color, int16_t x,
-			    uint16_t w, const char *text, int len, int flush)
+			    uint16_t w, const char *text, int len)
 {
 	tt("win=%p, text=%s, len=%d\n", scr->panel, text, len);
 
 	fill_rect(scr->panel, scr->gc, x, 0, w, panel_height);
-	XftDrawStringUtf8(scr->draw, color, font, x, panel_vpad,
-			  (XftChar8 *) text, len);
-	XSync(xdpy, 0);
+	if (text && len) {
+		XftDrawStringUtf8(scr->draw, color, font, x, panel_vpad,
+				  (XftChar8 *) text, len);
+		XSync(xdpy, 0);
+	}
 }
 
 static void spawn_cleanup(int sig)
@@ -521,6 +523,11 @@ static void print_title(xcb_window_t win)
 	uint16_t len;
 	uint16_t w, h;
 
+	if (!win) {
+		draw_panel_text(screen, NULL, panel_items[PANEL_AREA_TITLE].x,
+				panel_items[PANEL_AREA_TITLE].w, NULL, 0);
+	}
+
 	len = get_prop_str(win, XCB_ATOM_WM_NAME, title, sizeof(title));
 	if (!len || title[0] == '\0')
 		return;
@@ -536,7 +543,7 @@ static void print_title(xcb_window_t win)
 
 	draw_panel_text(screen, &active_color, panel_items[PANEL_AREA_TITLE].x,
 			panel_items[PANEL_AREA_TITLE].w,
-			(XftChar8 *) title, len, 1);
+			(XftChar8 *) title, len);
 }
 
 static enum winstatus window_status(xcb_window_t win)
@@ -992,7 +999,7 @@ static void print_tag(struct screen *scr, struct tag *tag, XftColor *color,
 			int flush)
 {
 	draw_panel_text(scr, color, tag->x, tag->w, (XftChar8 *) tag->name,
-		        tag->nlen, 0);
+		        tag->nlen);
 
 	if (flush) {
 		xcb_set_input_focus(dpy, XCB_NONE,
@@ -1340,6 +1347,7 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 		xcb_warp_pointer(dpy, XCB_NONE, win, 0, 0, 0, 0,
 				 cli->w / 2, cli->h / 2);
 #endif
+		print_title(cli->win);
 	} else {
 		window_state(win, XCB_ICCCM_WM_STATE_ICONIC);
 		xcb_unmap_window(dpy, win);
@@ -1381,6 +1389,8 @@ static void client_del(xcb_window_t root, xcb_window_t win)
 	list_del(&cli->head);
 	free(cli);
 
+	if (list_empty(&scr->tag->clients))
+		print_title(0);
 out:
 	tt("pid %d, deleted win %p\n", getpid(), win);
 	update_clients_list();
@@ -1423,10 +1433,10 @@ static void print_menu(struct screen *scr)
 	w = panel_items[PANEL_AREA_MENU].w;
 
 	draw_panel_text(scr, &normal_color, x, w, (XftChar8 *) MENU_ICON,
-		        sizeof(MENU_ICON) - 1, 0);
+		        sizeof(MENU_ICON) - 1);
 }
 
-static void print_time(struct screen *scr)
+static void print_time(struct screen *scr, int force)
 {
 	time_t t;
 	struct tm *tm;
@@ -1435,7 +1445,7 @@ static void print_time(struct screen *scr)
 	uint16_t w;
 
 	t = time(NULL);
-	if (t == prev_time)
+	if (t == prev_time && !force)
 		return;
 
 	tm = localtime(&t);
@@ -1449,7 +1459,7 @@ static void print_time(struct screen *scr)
 	w = panel_items[PANEL_AREA_TIME].w;
 
 	draw_panel_text(scr, &normal_color, x, w, (XftChar8 *) str,
-			sizeof(str) - 1, 1);
+			sizeof(str) - 1);
 	prev_time = t;
 }
 
@@ -1535,7 +1545,7 @@ static int tag_add(struct screen *scr, const char *name, int idx, int pos)
 	}
 
 	draw_panel_text(scr, color, pos, tag->w, (XftChar8 *) tag->name,
-			tag->nlen, 0);
+			tag->nlen);
 
 	tag->x = pos;
 	tag->w += FONT_SIZE_FT; /* spacing */
@@ -1642,11 +1652,12 @@ static void redraw_panel_items(struct screen *scr)
 			color = &normal_color;
 
 		draw_panel_text(scr, color, tag->x, tag->w,
-				(XftChar8 *) tag->name, tag->nlen, 0);
+				(XftChar8 *) tag->name, tag->nlen);
 	}
 
 	print_menu(scr);
 	print_title(scr->tag->win);
+	print_time(scr, 1);
 }
 
 static int update_panel_items(struct screen *scr)
@@ -1676,7 +1687,7 @@ static int update_panel_items(struct screen *scr)
 	calc_title_max();
 
 	print_menu(scr);
-	print_time(scr); /* last element on panel */
+	print_time(scr, 1); /* last element on panel */
 
 	panel_items_stat();
 }
@@ -1798,13 +1809,18 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 
 static void handle_panel_press(xcb_button_press_event_t *e)
 {
+	struct screen *scr = root2screen(e->root);
+
+	if (!scr)
+		scr = screen;
+
 	dump_coords(e->event_x);
 	if pointer_inside(PANEL_AREA_TAGS, e->event_x) {
-		select_tag(screen, e->event_x);
+		select_tag(scr, e->event_x);
 	} else if pointer_inside(PANEL_AREA_MENU, e->event_x) {
 		struct list_head *cur;
-		ii("menu, tag %s\n", screen->tag->name);
-		list_walk(cur, &screen->tag->clients)
+		ii("menu, tag %s\n", scr->tag->name);
+		list_walk(cur, &scr->tag->clients)
 			ii("  win %p, geo %ux%u+%d+%d\n",
 			   list2client(cur)->win, list2client(cur)->w,
 			   list2client(cur)->h, list2client(cur)->x,
@@ -2418,6 +2434,19 @@ int main()
 {
 	struct pollfd pfd;
 	xcb_screen_t *scr;
+	const char *logfile;
+
+	logfile = getenv("YAWM_LOG");
+	if (logfile) {
+		if (!freopen(logfile, "a+", stdout)) {
+			ee("failed to reopen %s as stdout\n", logfile);
+		} else {
+			if (!freopen(logfile, "a+", stderr)) {
+				ee("failed to reopen %s as stderr\n", logfile);
+			}
+		}
+		ii("logfile: %s\n", logfile);
+	}
 
 	basedir = getenv("YAWM_HOME");
 	if (!basedir)
@@ -2459,8 +2488,8 @@ int main()
 
 	init_root(screen->ptr->root);
 
-	strncpy(tray_class, "yawntray", sizeof(tray_class) - 1);
-	strncpy(dock_class, "yawndock", sizeof(tray_class) - 1);
+	strncpy(tray_class, "yawmtray", sizeof(tray_class) - 1);
+	strncpy(dock_class, "yawmdock", sizeof(tray_class) - 1);
 	ii("default tray class: %s, dock class: %s\n", tray_class, dock_class);
 
 	clients_scan(screen);
@@ -2474,7 +2503,7 @@ int main()
 	while (1) {
 		int rc = poll(&pfd, 1, TIME_REFRESH_INTERVAL);
 		if (rc == 0) { /* timeout */
-			print_time(screen);
+			print_time(screen, 0);
 		} else if (rc < 0) {
 			if (errno == EINTR)
 				continue;
@@ -2485,6 +2514,10 @@ int main()
 
 		if (pfd.revents & POLLIN)
 			while (handle_events()) {} /* read all events */
+		if (logfile) {
+			fflush(stdout);
+			fflush(stderr);
+		}
 	}
 
 	xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
