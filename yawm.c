@@ -1194,7 +1194,26 @@ static struct tag *client_tag(struct screen *scr, xcb_window_t win)
 	return NULL;
 }
 
-#define DOCKWIN_GAP (BORDER_WIDTH * 2)
+static int calc_title_max(void)
+{
+	int16_t w, h, i;
+	char *tmp;
+
+	i = 1;
+	w = 0;
+	while (w < panel_items[PANEL_AREA_TITLE].w) {
+		tmp = calloc(1, i + 1);
+		memset(tmp, 'w', i);
+		text_exts(tmp, strlen(tmp), &w, &h);
+		free(tmp);
+		i++;
+	}
+	title_max = i - 2;
+	mm("title_max=%u\n", title_max);
+}
+
+#define DOCKWIN_GAP (BORDER_WIDTH * 3)
+#define DOCKWIN_OFFSET (2 * DOCKWIN_GAP)
 
 static void dock_del(struct screen *scr, struct client *cli)
 {
@@ -1203,12 +1222,15 @@ static void dock_del(struct screen *scr, struct client *cli)
 
 	list_del(&cli->head);
 	free(cli);
-	x = panel_items[PANEL_AREA_TIME].x - 2 * DOCKWIN_GAP;
+	x = panel_items[PANEL_AREA_TIME].x - DOCKWIN_OFFSET;
 	list_walk(cur, &scr->dock) {
 		cli = list2client(cur);
 		x -= (cli->w + DOCKWIN_GAP + BORDER_WIDTH);
 		client_moveresize(scr, cli, x, cli->y, cli->w, cli->h, 1);
 	}
+
+	panel_items[PANEL_AREA_TITLE].w = x - panel_items[PANEL_AREA_TITLE].x;
+	calc_title_max();
 }
 
 static void dock_add(struct screen *scr, struct client *cli)
@@ -1222,7 +1244,7 @@ static void dock_add(struct screen *scr, struct client *cli)
 	cli->w = panel_height + panel_height / 3;
 	cli->h = panel_height - 3 * DOCKWIN_GAP - 1;
 
-	x = panel_items[PANEL_AREA_TIME].x - 2 * DOCKWIN_GAP;
+	x = panel_items[PANEL_AREA_TIME].x - DOCKWIN_OFFSET;
 
 	if (scr->flags & SCR_FLG_PANEL_TOP)
 		y = DOCKWIN_GAP;
@@ -1235,6 +1257,8 @@ static void dock_add(struct screen *scr, struct client *cli)
 		client_moveresize(scr, cli, x, y, cli->w, cli->h, 1);
 	}
 
+	panel_items[PANEL_AREA_TITLE].w = x - panel_items[PANEL_AREA_TITLE].x;
+	calc_title_max();
 	window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 	window_border_color(cli->win, border_docked);
 	xcb_map_window(dpy, cli->win);
@@ -1619,24 +1643,6 @@ out:
 		pos = tag_add(scr, "*", 0, pos);
 
 	return pos - panel_vpad / 2;
-}
-
-static int calc_title_max(void)
-{
-	int16_t w, h, i;
-	char *tmp;
-
-	i = 1;
-	w = 0;
-	while (w < panel_items[PANEL_AREA_TITLE].w) {
-		tmp = calloc(1, i + 1);
-		memset(tmp, 'w', i);
-		text_exts(tmp, strlen(tmp), &w, &h);
-		free(tmp);
-		i++;
-	}
-	title_max = i - 2;
-	mm("title_max=%u\n", title_max);
 }
 
 static void redraw_panel_items(struct screen *scr)
