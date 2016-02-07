@@ -3,7 +3,7 @@ out = yawm
 src = yawm.c
 
 ldflags = $(LDFLAGS) -lm -g
-ldflags += -lxcb -lxcb-util -lxcb-keysyms
+ldflags += -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms
 ldflags += $(shell pkg-config --libs xft) -lX11 -lX11-xcb
 ccflags += $(CFLAGS) $(shell pkg-config --cflags xft)
 
