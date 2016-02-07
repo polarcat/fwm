@@ -16,6 +16,9 @@
 #include <time.h>
 #include <poll.h>
 
+#include <sys/types.h>
+#include <dirent.h>
+
 #include <xcb/xcb.h>
 #include <xcb/randr.h>
 #include <xcb/xproto.h>
@@ -88,7 +91,7 @@ static uint32_t panel_height = 24; /* need to adjust with font height */
 #define BORDER_WIDTH 1
 #define WINDOW_PAD BORDER_WIDTH
 
-#define FONT_SIZE_FT 10.
+#define FONT_SIZE_FT 10.5
 #define FONT_NAME_FT "Monospace"
 #define FONT_COLOR_NORMAL { 0x7000, 0x7000, 0x7000, 0xffff, }
 //#define FONT_COLOR_NORMAL { 0x1000, 0x1000, 0x1000, 0xffff, }
@@ -105,8 +108,9 @@ static uint32_t panel_height = 24; /* need to adjust with font height */
 #define CLI_FLG_URGENT (1 << 2)
 #define CLI_FLG_NOFOCUS (1 << 3)
 #define CLI_FLG_FULLSCR (1 << 4)
+#define CLI_FLG_DOCK (1 << 5)
 
-#define SCR_FLG_PANEL (1 << 0)
+#define SCR_FLG_MAIN (1 << 0)
 #define SCR_FLG_PANEL_TOP (1 << 1)
 
 #define TAG_FLG_ACTIVE (1 << 0)
@@ -137,19 +141,39 @@ static uint32_t panel_height = 24; /* need to adjust with font height */
 
 /* data structures */
 
-struct screen {
-	uint16_t idx;
+static void spawn(const char **argv);
+
+enum panel_area { /* in order of appearance */
+	PANEL_AREA_TAGS,
+	PANEL_AREA_MENU,
+	PANEL_AREA_TITLE,
+	PANEL_AREA_DOCK,
+	PANEL_AREA_TIME,
+	PANEL_AREA_MAX,
+};
+
+struct panel_item {
+	int16_t x;
+	uint16_t w;
+	void (*action)(void *);
+	void *arg;
+};
+
+static uint16_t panel_vpad;
+static uint16_t title_max;
+
+struct screen { /* per output abstraction */
+	uint8_t id;
+
 	struct list_head head;
 	struct list_head tags;
 	struct list_head dock;
 
 	struct tag *tag; /* current tag */
-	uint8_t ntags; /* number of found tags */
-	xcb_screen_t *ptr;
-	xcb_randr_output_t id;
+	uint8_t ntags; /* number of tags */
 
 	int16_t by; /* bar geometry */
-	int16_t x, y, wx, wy, mx, my;
+	int16_t x, y;
 	uint16_t w, h;
 
 	uint32_t flags; /* SCR_FLG */
@@ -157,23 +181,24 @@ struct screen {
 	xcb_gcontext_t gc;
 	xcb_drawable_t panel;
 
-	char menustr[16];
-
 	/* text drawing related stuff */
 	XftDraw *draw;
 	xcb_visualtype_t *visual;
+	struct panel_item items[PANEL_AREA_MAX];
 };
 
 #define list2screen(item) list_entry(item, struct screen, head)
 
-static struct screen *screen;
-static struct list_head screens;
+struct list_head screens;
+struct screen *curscr;
+struct screen *defscr;
+static xcb_screen_t *rootscr; /* root window details */
 
 struct tag {
 	struct list_head head;
 	struct list_head clients;
 
-	uint8_t idx;
+	uint8_t id;
 	xcb_window_t win; /* active window */
 	struct screen *scr;
 
@@ -189,21 +214,19 @@ struct tag {
 #define list2tag(item) list_entry(item, struct tag, head)
 
 struct client {
-	struct list_head head;
+	struct list_head head; /* local list */
+	struct list_head list; /* global list */
 	int16_t x, y;
 	uint16_t w, h;
 	xcb_window_t win;
+	struct screen *scr;
+	uint32_t flags;
 };
 
 #define list2client(item) list_entry(item, struct client, head)
+#define glob2client(item) list_entry(item, struct client, list)
 
-struct keymap {
-	uint16_t mod;
-	xcb_keysym_t sym;
-	xcb_keycode_t key;
-	void (*action)(void *);
-	void *arg;
-};
+struct list_head clients; /* keep track of all clients */
 
 /* config */
 
@@ -230,11 +253,18 @@ static void next_window(void *);
 static void prev_window(void *);
 static void raise_window(void *);
 static void place_window(void *);
-static void spawn(const char **argv);
 
 static const char *xrun[] = { "xfrun4", NULL };
 static const char *term[] = { "xterm", NULL };
 static const char *lock[] = { "xscreensaver-command", "--lock", NULL };
+
+struct keymap {
+	uint16_t mod;
+	xcb_keysym_t sym;
+	xcb_keycode_t key;
+	void (*action)(void *);
+	void *arg;
+};
 
 static struct keymap kmap[] = {
 	{ MODKEY, XK_Tab, 0, next_window, NULL, },
@@ -261,8 +291,9 @@ static struct keymap kmap[] = {
 /* globals */
 
 enum wintype {
-	WIN_NORMAL,
-	WIN_DOCK,
+	WIN_TYPE_NORMAL,
+	WIN_TYPE_DOCK,
+	WIN_TYPE_ACTIVE,
 };
 
 enum winstatus {
@@ -288,86 +319,14 @@ static xcb_atom_t a_name;
 static xcb_atom_t a_state;
 static xcb_atom_t a_desktop;
 static xcb_atom_t a_client_list;
+static xcb_atom_t a_systray;
 
 static time_t prev_time;
 
 static char tray_class[16];
 static char dock_class[16];
 
-/* <panel stuff> */
-
-enum panel_area { /* in order of appearance */
-	PANEL_AREA_TAGS,
-	PANEL_AREA_MENU,
-	PANEL_AREA_TITLE,
-	PANEL_AREA_DOCK,
-	PANEL_AREA_TIME,
-	PANEL_AREA_MAX,
-};
-
-struct panel_item {
-	int16_t x;
-	uint16_t w;
-	void (*action)(void *);
-	void *arg;
-	const char *name; /* FIXME: temporary */
-};
-
-static const char *cal[] = { "zenity", "--calendar", NULL };
-
-static struct panel_item panel_items[PANEL_AREA_MAX] = {
-	{ 0, 0, NULL, NULL, NULL, }, /* tags */
-	{ 0, 0, NULL, NULL, NULL, }, /* menu */
-	{ 0, 0, NULL, NULL, NULL, }, /* title */
-	{ 0, 0, NULL, NULL, NULL, }, /* dock */
-	{ 0, 0, spawn, (void *) cal, NULL, }, /* clock */
-};
-
-static uint16_t panel_vpad;
-static uint16_t title_max;
-/* </panel stuff> */
-
 /* ... and the mess begins */
-
-static const char *utf8chr(const char *str, char c, int *len, int *bytes)
-{
-	int i = 0, ii = 0, n = 0;
-
-	while (str[i] > 0) {
-ascii:
-		if (str[i] == c)
-			return &str[i];
-		i++;
-	}
-
-	n += i - ii;
-	while (str[i]) {
-		if (str[i] > 0) {
-			ii = i;
-			goto ascii;
-		} else {
-			switch (0xf0 & str[i]) {
-			case 0xe0:
-				i += 3;
-				break;
-			case 0xf0:
-				i += 4;
-				break;
-			default:
-				i += 2;
-				break;
-			}
-		}
-		n++;
-	}
-
-	if (bytes)
-		*bytes = i;
-	if (len)
-		*len = n;
-
-	return NULL;
-}
 
 static void text_exts(const char *text, int len, uint16_t *w, uint16_t *h)
 {
@@ -483,56 +442,55 @@ static int get_prop_str(xcb_window_t win, enum xcb_atom_enum_t atom,
 }
 
 #ifndef VERBOSE
-#define panel_items_stat(void) ;
+#define panel_items_stat(scr) ;
 #else
-static void panel_items_stat(void)
+static void panel_items_stat(struct screen *scr)
 {
+	const char *name;
 	int i;
 
 	for (i = 0; i < PANEL_AREA_MAX; i++) {
 		switch (i) {
 		case PANEL_AREA_TAGS:
-			panel_items[i].name = "PANEL_AREA_TAGS";
+			name = "PANEL_AREA_TAGS";
 			break;
 		case PANEL_AREA_MENU:
-			panel_items[i].name = "PANEL_AREA_MENU";
+			name = "PANEL_AREA_MENU";
 			break;
 		case PANEL_AREA_TITLE:
-			panel_items[i].name = "PANEL_AREA_TITLE";
+			name = "PANEL_AREA_TITLE";
 			break;
 		case PANEL_AREA_DOCK:
-			panel_items[i].name = "PANEL_AREA_DOCK";
+			name = "PANEL_AREA_DOCK";
 			break;
 		case PANEL_AREA_TIME:
-			panel_items[i].name = "PANEL_AREA_TIME";
+			name = "PANEL_AREA_TIME";
 			break;
 		}
 
-		mm("%s: %d,%d (%d)\n", panel_items[i].name, panel_items[i].x,
-		   panel_items[i].x + panel_items[i].w,
-		   panel_items[i].w);
+		ii("%s: %d,%d (%d)\n", name, scr->items[i].x,
+		   scr->items[i].x + scr->items[i].w,
+		   scr->items[i].w);
 	}
 }
 #endif
 
 #define TITLE_STR_MAX 128
 
-static void print_title(xcb_window_t win)
+static void print_title(struct screen *scr, xcb_window_t win)
 {
 	char title[TITLE_STR_MAX];
 	uint16_t len;
 	uint16_t w, h;
 
 	if (!win) {
-		draw_panel_text(screen, NULL, panel_items[PANEL_AREA_TITLE].x,
-				panel_items[PANEL_AREA_TITLE].w, NULL, 0);
+		draw_panel_text(scr, NULL, scr->items[PANEL_AREA_TITLE].x,
+				scr->items[PANEL_AREA_TITLE].w, NULL, 0);
 	}
 
 	len = get_prop_str(win, XCB_ATOM_WM_NAME, title, sizeof(title));
 	if (!len || title[0] == '\0')
 		return;
-
-	panel_items_stat();
 
 	if (len >= title_max) {
 		len = title_max;
@@ -541,8 +499,8 @@ static void print_title(xcb_window_t win)
 		title[len] = '.';
 	}
 
-	draw_panel_text(screen, &active_color, panel_items[PANEL_AREA_TITLE].x,
-			panel_items[PANEL_AREA_TITLE].w,
+	draw_panel_text(scr, &active_color, scr->items[PANEL_AREA_TITLE].x,
+			scr->items[PANEL_AREA_TITLE].w,
 			(XftChar8 *) title, len);
 }
 
@@ -565,36 +523,33 @@ static enum winstatus window_status(xcb_window_t win)
 	return status;
 }
 
+/* FIXME: check how many times it is being called ... */
 static void update_clients_list(void)
 {
-	struct list_head *ccur, *tcur;
+	struct list_head *cur;
 
-	tt("NET_CLIENT_LIST %d\n", a_client_list);
+	ii("NET_CLIENT_LIST %d\n", a_client_list);
 
-	xcb_delete_property(dpy, screen->ptr->root, a_client_list);
-	list_walk(tcur, &screen->tags) {
-		struct tag *tag = list2tag(tcur);
-		list_walk(ccur, &tag->clients) {
-			struct client *cli = list2client(ccur);
-			if (window_status(cli->win) == WIN_STATUS_UNKNOWN)
-				continue;
-			dd("append client %p, window %p\n", cli, cli->win);
-			xcb_change_property(dpy, XCB_PROP_MODE_APPEND,
-					    screen->ptr->root, a_client_list,
-					    XCB_ATOM_WINDOW, 32, 1, &cli->win);
-		}
+	xcb_delete_property(dpy, rootscr->root, a_client_list);
+	list_walk(cur, &clients) {
+		struct client *cli = glob2client(cur);
+		if (window_status(cli->win) == WIN_STATUS_UNKNOWN)
+			continue;
+		ii("append client %p, window %p\n", cli, cli->win);
+		xcb_change_property(dpy, XCB_PROP_MODE_APPEND, rootscr->root,
+				    a_client_list, XCB_ATOM_WINDOW, 32, 1,
+				    &cli->win);
 	}
 	xcb_flush(dpy);
 }
 
 #define ROOT_STR_MAX 64
 
-static void refresh_rules(struct screen *scr)
+static void refresh_rules(void)
 {
 	char name[ROOT_STR_MAX];
-	xcb_window_t win = scr->ptr->root;
 
-	get_prop_str(win, XCB_ATOM_WM_NAME, name, sizeof(name));
+	get_prop_str(rootscr->root, XCB_ATOM_WM_NAME, name, sizeof(name));
 	if (name[0] == '\0')
 		return;
 
@@ -633,39 +588,46 @@ static int window_docked(xcb_window_t win)
 	if (class[0] == '\0')
 		return 0;
 
-	mm("class %s\n", class);
+	dd("class %s\n", class);
 	if (match_class(class, tray_class)) {
-		mm("got tray window\n");
+		dd("got tray window\n");
 		return 1;
 	} else if (match_class(class, dock_class)) {
-		mm("got dock window\n");
+		dd("got dock window\n");
 		return 1;
 	} else if (match_class(class, dock_class)) {
-		mm("got dock window\n");
+		dd("got dock window\n");
 		return 1;
 	}
 
 	return 0;
 }
 
-static struct screen *root2screen(xcb_window_t root)
+#define trace_screen_metrics(scr)\
+	ii("%s: screen %d geo %dx%d+%d+%d\n", __func__, scr->id, scr->w,\
+	   scr->h, scr->x, scr->y)
+
+static struct screen *coord2screen(int16_t x, int16_t y)
 {
 	struct list_head *cur;
 
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
-		if (scr->ptr->root == root)
+		if (scr->x <= x && x <= (scr->x + scr->w) &&
+		    scr->y <= y && y <= (scr->y + scr->h + panel_height)) {
 			return scr;
+		}
 	}
 	return NULL;
 }
 
-static struct client *win2client(struct screen *scr, xcb_window_t win, int dock)
+static struct client *scr2client(struct screen *scr, xcb_window_t win,
+				 enum wintype type)
 {
 	struct list_head *cur;
 	struct list_head *head;
 
-	if (dock)
+	if (type == WIN_TYPE_DOCK)
 		head = &scr->dock;
 	else
 		head = &scr->tag->clients;
@@ -677,6 +639,45 @@ static struct client *win2client(struct screen *scr, xcb_window_t win, int dock)
 	}
 	return NULL;
 }
+
+static struct client *win2client(xcb_window_t win)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &clients) {
+		struct client *cli = glob2client(cur);
+		if (cli->win == win)
+			return cli;
+	}
+
+	return NULL;
+}
+
+static int panel_window(xcb_window_t win)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if (scr->panel == win)
+			return 1;
+	}
+	return 0;
+}
+
+#if 0
+static struct client *find_window(xcb_window_t win, int16_t x, int16_t y)
+{
+	struct screen *scr;
+
+	scr = coord2screen(x, y);
+	if (!scr) {
+		return win2client(win);
+	} else {
+		scr2client(scr, win, WIN_TYPE_DOCK);
+	}
+}
+#endif
 
 #if 0
 static void trace_attrs(xcb_window_t win)
@@ -723,42 +724,39 @@ static void window_raise(xcb_window_t win)
 static void window_border_color(xcb_window_t win, uint32_t color)
 {
 	uint32_t val[1] = { color, };
-	xcb_change_window_attributes(dpy, win, XCB_CW_BORDER_PIXEL, val);
+	uint16_t mask = XCB_CW_BORDER_PIXEL;
+	xcb_change_window_attributes_checked(dpy, win, mask, val);
 }
 
 static void window_border_width(xcb_window_t win, uint16_t width)
 {
 	uint32_t val[1] = { width, };
-	xcb_configure_window(dpy, win, XCB_CONFIG_WINDOW_BORDER_WIDTH, val);
+	uint16_t mask = XCB_CONFIG_WINDOW_BORDER_WIDTH;
+	xcb_configure_window_checked(dpy, win, mask, val);
 }
 
-static void window_focus(struct tag *tag, xcb_window_t win, int focus)
+static void window_focus(struct screen *scr, xcb_window_t win, int focus)
 {
 	struct client *cli;
 
 	tt("win %p, focus %d\n", win, focus);
 
-	if (window_status(win) != WIN_STATUS_VISIBLE)
-		return;
-
 	if (!focus) {
 		window_border_color(win, border_normal);
 	} else {
 		window_border_color(win, border_active);
-		print_title(win);
-		tag->win = win;
+		print_title(scr, win);
+		scr->tag->win = win;
 	}
 
-	xcb_set_input_focus(dpy, XCB_NONE, win, XCB_CURRENT_TIME);
+	xcb_set_input_focus_checked(dpy, XCB_NONE, win, XCB_CURRENT_TIME);
 }
 
-static void switch_window(xcb_window_t root, struct client *cli, enum dir dir)
+static void switch_window(struct screen *scr, enum dir dir)
 {
-	struct screen *scr;
 	struct list_head *cur;
+	struct client *cli;
 	uint8_t found;
-
-	scr = root2screen(root);
 
 	if (list_empty(&scr->tag->clients))
 		return;
@@ -767,11 +765,11 @@ static void switch_window(xcb_window_t root, struct client *cli, enum dir dir)
 
 	tt("tag %s, win %p\n", scr->tag->name, scr->tag->win);
 
+	cli = scr2client(scr, scr->tag->win, WIN_TYPE_NORMAL);
 	if (!cli)
-		cli = win2client(scr, scr->tag->win, WIN_NORMAL);
+		return;
 
 	found = 0;
-
 	if (dir == DIR_NEXT) {
 		list_walk(cur, &cli->head) {
 			cli = list2client(cur);
@@ -817,149 +815,156 @@ static void switch_window(xcb_window_t root, struct client *cli, enum dir dir)
 
 out:
 	window_raise(cli->win);
-	window_focus(scr->tag, scr->tag->win, 0);
-	window_focus(scr->tag, cli->win, 1);
+	window_focus(scr, scr->tag->win, 0);
+	window_focus(scr, cli->win, 1);
 	xcb_warp_pointer(dpy, XCB_NONE, cli->win, 0, 0, 0, 0, cli->w / 2,
 			 cli->h / 2);
 	xcb_flush(dpy);
 }
 
-static void client_moveresize(struct screen *scr, struct client *cli,
-			      int x, int y, int w, int h, int dock)
+static void client_moveresize(struct client *cli, int16_t x, int16_t y,
+			      uint16_t w, uint16_t h)
 {
 	uint32_t val[4];
 	uint16_t mask;
 
-	cli->x = x;
-	cli->y = y;
-	cli->w = w;
-	cli->h = h;
+	if (!(cli->flags & CLI_FLG_DOCK)) {
+		/* correct window location */
+		if (x < cli->scr->x || x > cli->scr->x + cli->scr->w)
+			x = cli->scr->x;
+		if (y < cli->scr->y || y > cli->scr->y + cli->scr->h)
+			y = cli->scr->y;
 
-	if (!dock) {
 		/* fit into monitor space */
-		if (cli->w > scr->w)
-			cli->w = scr->w - 2 * BORDER_WIDTH;
-		else if (cli->w < WIN_WIDTH_MIN)
-			cli->w = scr->w / 2 - 2 * BORDER_WIDTH;
-		if (cli->h > scr->h)
-			cli->h = scr->h - 2 * BORDER_WIDTH;
-		else if (cli->h < WIN_HEIGHT_MIN)
-			cli->h = scr->h / 2 - 2 * BORDER_WIDTH;
+		if (w > cli->scr->w)
+			w = cli->scr->w - 2 * BORDER_WIDTH;
+		else if (w < WIN_WIDTH_MIN)
+			w = cli->scr->w / 2 - 2 * BORDER_WIDTH;
+		if (h > cli->scr->h)
+			h = cli->scr->h - 2 * BORDER_WIDTH;
+		else if (h < WIN_HEIGHT_MIN)
+			h = cli->scr->h / 2 - 2 * BORDER_WIDTH;
 
-		if (cli->h + cli->y >= scr->h)
-			cli->h = scr->h - cli->y - 2 * BORDER_WIDTH;
-
-		if (cli->x > scr->w)
-			cli->x = 0;
-		if (cli->y > scr->h)
-			cli->y = 0;
-
-		if (scr->flags & SCR_FLG_PANEL_TOP)
-			cli->y += panel_height;
+		if (cli->scr->flags & SCR_FLG_PANEL_TOP)
+			y += panel_height;
 	}
 
-	val[0] = cli->x;
-	val[1] = cli->y;
-	val[2] = cli->w;
-	val[3] = cli->h;
+	val[0] = cli->x = x;
+	val[1] = cli->y = y;
+	val[2] = cli->w = w;
+	val[3] = cli->h = h;
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
 	xcb_configure_window(dpy, cli->win, mask, val);
 
-	tt("cli %p, win %p, geo %dx%d+%d+%d\n", cli, cli->win,
+	tt("cli %p, win %p, geo %ux%u+%d+%d\n", cli, cli->win,
 	   cli->w, cli->h, cli->x, cli->y);
 }
 
+#define DEBUG
 static void place_window(void *arg)
 {
 	int16_t x, y;
 	uint16_t w, h;
 	struct client *cli;
 
-	tt("\n");
+	ii("%s: screen %d, win %p, where %d\n", __func__, curscr->id,
+	   curscr->tag->win, (enum winpos) arg);
 
-	cli = win2client(screen, screen->tag->win, WIN_NORMAL);
+	cli = scr2client(curscr, curscr->tag->win, WIN_TYPE_NORMAL);
 	if (!cli)
 		return;
 
 	switch ((enum winpos) arg) {
 	case WIN_POS_FILL:
 		dd("WIN_POS_FILL\n");
-		x = y = 0;
-		w = screen->w - 2 * BORDER_WIDTH - WINDOW_PAD;
-		h = screen->h - 2 * BORDER_WIDTH - WINDOW_PAD;
+		x = curscr->x;
+		y = curscr->y;
+		w = curscr->w - 2 * BORDER_WIDTH - WINDOW_PAD;
+		h = curscr->h - 2 * BORDER_WIDTH - WINDOW_PAD;
 		break;
 	case WIN_POS_LEFT_FILL:
 		dd("WIN_POS_LEFT_FILL\n");
-		x = y = 0;
+		x = curscr->x;
+		y = curscr->y;
 		goto halfw;
 	case WIN_POS_RIGHT_FILL:
 		dd("WIN_POS_RIGHT_FILL\n");
-		x = screen->w / 2;
-		y = 0;
+		x = curscr->x + curscr->w / 2;
+		y = curscr->x;
 		goto halfw;
 	case WIN_POS_TOP_FILL:
 		dd("WIN_POS_TOP_FILL\n");
-		x = y = 0;
+		x = curscr->x;
+		y = curscr->y;
 		goto halfh;
 	case WIN_POS_BOTTOM_FILL:
 		dd("WIN_POS_BOTTOM_FILL\n");
-		x = 0;
-		y = screen->h / 2;
+		x = curscr->x;
+		y = curscr->y + curscr->h / 2;
 		goto halfh;
 	case WIN_POS_TOP_LEFT:
 		dd("WIN_POS_TOP_LEFT\n");
-		x = y = 0;
+		x = curscr->x;
+		y = curscr->y;
 		goto halfwh;
 	case WIN_POS_TOP_RIGHT:
 		dd("WIN_POS_TOP_RIGHT\n");
-		x = screen->w / 2;
-		y = 0;
+		x = curscr->x + curscr->w / 2;
+		y = curscr->y;
 		goto halfwh;
 	case WIN_POS_BOTTOM_LEFT:
 		dd("WIN_POS_BOTTOM_LEFT\n");
-		x = 0;
-		y = screen->h / 2;
+		x = curscr->x;
+		y = curscr->y + curscr->h / 2;
 		goto halfwh;
 	case WIN_POS_BOTTOM_RIGHT:
 		dd("WIN_POS_BOTTOM_RIGHT\n");
-		x = screen->w / 2;
-		y = screen->h / 2;
+		x = curscr->x + curscr->w / 2;
+		y = curscr->y + curscr->h / 2;
 		goto halfwh;
 	default:
 		return;
 	}
 
 out:
-	client_moveresize(screen, cli, x, y, w, h, 0);
+	client_moveresize(cli, x, y, w, h);
 	xcb_flush(dpy);
 	return;
 halfwh:
-	w = screen->w / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
-	h = screen->h / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
+	w = curscr->w / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
+	h = curscr->h / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
 	goto out;
 halfw:
-	w = screen->w / 2 - 2 * BORDER_WIDTH;
-	h = screen->h - 2 * BORDER_WIDTH;
+	w = curscr->w / 2 - 2 * BORDER_WIDTH;
+	h = curscr->h - 2 * BORDER_WIDTH;
 	goto out;
 halfh:
-	w = screen->w - 2 * BORDER_WIDTH - WINDOW_PAD;
-	h = screen->h / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
+	w = curscr->w - 2 * BORDER_WIDTH - WINDOW_PAD;
+	h = curscr->h / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
 	goto out;
 }
 
 static void next_window(void *arg)
 {
-	tt("\n");
+	struct screen *scr;
+	int16_t x, y;
 
-	switch_window(((xcb_key_press_event_t *) arg)->root, NULL, DIR_NEXT);
+	x = ((xcb_key_press_event_t *) arg)->root_x;
+	y = ((xcb_key_press_event_t *) arg)->root_y;
+	scr = coord2screen(x, y);
+	switch_window(scr, DIR_NEXT);
 }
 
 static void prev_window(void *arg)
 {
-	tt("\n");
+	struct screen *scr;
+	int16_t x, y;
 
-	switch_window(((xcb_key_press_event_t *) arg)->root, NULL, DIR_PREV);
+	x = ((xcb_key_press_event_t *) arg)->root_x;
+	y = ((xcb_key_press_event_t *) arg)->root_y;
+	scr = coord2screen(x, y);
+	switch_window(scr, DIR_PREV);
 }
 
 static void raise_window(void *arg)
@@ -970,22 +975,19 @@ static void raise_window(void *arg)
 
 	tt("\n");
 
-	scr = root2screen(e->root);
+	scr = coord2screen(e->root_x, e->root_y);
 
 	if (list_empty(&scr->tag->clients))
 		return;
 
-	cli = win2client(scr, scr->tag->win, WIN_NORMAL);
+	cli = scr2client(scr, scr->tag->win, WIN_TYPE_NORMAL);
 	window_raise(cli->win);
 	xcb_flush(dpy);
 }
 
-static void panel_raise(struct screen *scr, xcb_window_t root)
+static void panel_raise(struct screen *scr)
 {
-	if (!scr)
-		scr = root2screen(root);
-
-	if (scr->panel) {
+	if (scr && scr->panel) {
 		window_raise(scr->panel);
 		struct list_head *cur;
 		list_walk(cur, &scr->dock) {
@@ -1009,19 +1011,19 @@ static void print_tag(struct screen *scr, struct tag *tag, XftColor *color,
 	}
 }
 
-static void show_windows(struct tag *tag)
+static void show_windows(struct screen *scr)
 {
 	struct list_head *cur;
 
-	list_walk(cur, &tag->clients) {
+	list_walk(cur, &scr->tag->clients) {
 		struct client *cli = list2client(cur);
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 		xcb_map_window_checked(dpy, cli->win);
 	}
 
-	if (tag->win) {
-		tt("tag->win=%p\n", tag->win);
-		window_focus(tag, tag->win, 1);
+	if (scr->tag->win) {
+		tt("tag->win=%p\n", scr->tag->win);
+		window_focus(scr, scr->tag->win, 1);
 	}
 	xcb_flush(dpy);
 }
@@ -1062,7 +1064,7 @@ static void switch_tag(struct screen *scr, enum dir dir)
 
 	tag->flags |= TAG_FLG_ACTIVE;
 	print_tag(scr, tag, &active_color, 1);
-	show_windows(tag);
+	show_windows(scr);
 	scr->tag = tag;
 
 }
@@ -1071,10 +1073,10 @@ static void walk_tags(void *arg)
 {
 	tt("\n");
 
-	if (list_single(&screen->tags))
+	if (list_single(&curscr->tags))
 		return;
 
-	switch_tag(screen, (enum dir) arg);
+	switch_tag(curscr, (enum dir) arg);
 }
 
 #if 0
@@ -1093,12 +1095,24 @@ static xcb_window_t trace_hints(struct screen *scr, xcb_window_t win)
 }
 #endif
 
+static void trace_screens(void)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		ii("screen %d, geo %ux%u+%d+%d, pos %d,%d\n", scr->id,
+		   scr->w, scr->h, scr->x, scr->y, scr->x + scr->w,
+		   scr->y + scr->h);
+	}
+}
+
 static void trace_windows(struct tag *tag)
 {
 	struct list_head *cur;
 
 	list_walk(cur, &tag->clients)
-		mm("tag %s, win %p\n", tag->name, (list2client(cur))->win);
+		dd("tag %s, win %p\n", tag->name, (list2client(cur))->win);
 }
 
 static void retag_window(void *arg)
@@ -1107,54 +1121,54 @@ static void retag_window(void *arg)
 
 	tt("\n");
 
-	if (list_single(&screen->tags))
+	if (list_single(&curscr->tags))
 		return;
 
-	cli = win2client(screen, screen->tag->win, WIN_NORMAL);
+	cli = scr2client(curscr, curscr->tag->win, WIN_TYPE_NORMAL);
 	if (!cli)
 		return;
 
 	list_del(&cli->head);
 	walk_tags(arg);
-	list_add(&screen->tag->clients, &cli->head);
-	screen->tag->win = cli->win;
-	window_focus(screen->tag, screen->tag->win, 1);
-	window_raise(screen->tag->win);
+	list_add(&curscr->tag->clients, &cli->head);
+	curscr->tag->win = cli->win;
+	window_focus(curscr, curscr->tag->win, 1);
+	window_raise(curscr->tag->win);
 	xcb_flush(dpy);
 }
 
 #if 0
-static void client_resize(struct client *cli, int w, int h)
+static void resize_window(xcb_window_t win, uint16_t w, uint16_t h)
 {
 	int val[2], mask;
 
-	cli->w = w;
-	cli->h = h;
-
-	/* fit into monitor space */
-	if (cli->w > cli->scr->w)
-		cli->w = cli->scr->w;
-	if (cli->h > cli->scr->h)
-		cli->h = cli->scr->h;
-
 	mask = XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
-	val[0] = cli->w;
-	val[1] = cli->h;
-	xcb_configure_window(dpy, cli->win, mask, val);
+	val[0] = w;
+	val[1] = h;
+	xcb_configure_window(dpy, win, mask, val);
 	xcb_flush(dpy);
+}
 
-	dd("cli %p geo %dx%d+%d+%d, name %s\n", cli, cli->w, cli->h,
-	   cli->x, cli->y, cli->name);
+static void move_window(xcb_window_t win, int16_t x, int16_t y)
+{
+	int val[2], mask;
+
+	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+	val[0] = x;
+	val[1] = y;
+	xcb_configure_window(dpy, win, mask, val);
+	xcb_flush(dpy);
+	ii("window %p moved to %d,%d\n", win, x, y);
 }
 #endif
 
-static struct tag *idx2tag(struct screen *scr, uint8_t idx)
+static struct tag *id2tag(struct screen *scr, uint8_t id)
 {
 	struct list_head *cur;
 
 	list_walk(cur, &scr->tags) {
 		struct tag *tag = list2tag(cur);
-		if (tag->idx == idx)
+		if (tag->id == id)
 			return tag;
 	}
 	return NULL;
@@ -1163,7 +1177,7 @@ static struct tag *idx2tag(struct screen *scr, uint8_t idx)
 static struct tag *client_tag(struct screen *scr, xcb_window_t win)
 {
 	int len;
-	uint8_t idx;
+	uint8_t id;
 	char class[CLASS_STR_MAX];
 	char path[BASE_PATH_MAX], *ptr;
 	struct stat st;
@@ -1172,9 +1186,9 @@ static struct tag *client_tag(struct screen *scr, xcb_window_t win)
 	if (class[0] == '\0')
 		return NULL;
 
-	mm("class: %s\n", class);
+	dd("class: %s\n", class);
 
-	snprintf(path, sizeof(path), "%s/%d/", basedir, scr->idx);
+	snprintf(path, sizeof(path), "%s/%d/", basedir, scr->id);
 	if (stat(path, &st) < 0)
 		return NULL;
 
@@ -1182,26 +1196,26 @@ static struct tag *client_tag(struct screen *scr, xcb_window_t win)
 	ptr = path + len;
 	len = sizeof(path) - 1 - len;
 
-	for (idx = 0; idx < scr->ntags; idx++) {
-		snprintf(ptr, len, "%d/%s", idx, class);
+	for (id = 0; id < scr->ntags; id++) {
+		snprintf(ptr, len, "%d/%s", id, class);
 		if (stat(path, &st) < 0)
 			continue;
 
-		mm("class %s, tag %d\n", class, idx);
-		return idx2tag(scr, idx);
+		dd("class %s, tag %d\n", class, id);
+		return id2tag(scr, id);
 	}
 
 	return NULL;
 }
 
-static int calc_title_max(void)
+static int calc_title_max(struct screen *scr)
 {
 	int16_t w, h, i;
 	char *tmp;
 
 	i = 1;
 	w = 0;
-	while (w < panel_items[PANEL_AREA_TITLE].w) {
+	while (w < scr->items[PANEL_AREA_TITLE].w) {
 		tmp = calloc(1, i + 1);
 		memset(tmp, 'w', i);
 		text_exts(tmp, strlen(tmp), &w, &h);
@@ -1209,28 +1223,29 @@ static int calc_title_max(void)
 		i++;
 	}
 	title_max = i - 2;
-	mm("title_max=%u\n", title_max);
+	dd("title_max=%u\n", title_max);
 }
 
-#define DOCKWIN_GAP (BORDER_WIDTH * 3)
-#define DOCKWIN_OFFSET (2 * DOCKWIN_GAP)
+#define DOCKWIN_GAP (BORDER_WIDTH * 2)
+#define DOCKWIN_OFFSET (6 * DOCKWIN_GAP)
 
-static void dock_del(struct screen *scr, struct client *cli)
+static void dock_del(struct client *cli)
 {
 	struct list_head *cur;
+	struct screen *scr = cli->scr;
 	int16_t x;
 
 	list_del(&cli->head);
 	free(cli);
-	x = panel_items[PANEL_AREA_TIME].x - DOCKWIN_OFFSET;
-	list_walk(cur, &scr->dock) {
+	x = scr->items[PANEL_AREA_TIME].x - DOCKWIN_OFFSET;
+	list_walk(cur, &cli->scr->dock) {
 		cli = list2client(cur);
 		x -= (cli->w + DOCKWIN_GAP + BORDER_WIDTH);
-		client_moveresize(scr, cli, x, cli->y, cli->w, cli->h, 1);
+		client_moveresize(cli, x, cli->y, cli->w, cli->h);
 	}
 
-	panel_items[PANEL_AREA_TITLE].w = x - panel_items[PANEL_AREA_TITLE].x;
-	calc_title_max();
+	scr->items[PANEL_AREA_TITLE].w = x - scr->items[PANEL_AREA_TITLE].x;
+	calc_title_max(scr);
 }
 
 static void dock_add(struct screen *scr, struct client *cli)
@@ -1240,11 +1255,14 @@ static void dock_add(struct screen *scr, struct client *cli)
 	int16_t x, y;
 
 	list_add(&scr->dock, &cli->head);
+	list_add(&clients, &cli->list);
 
+	cli->scr = defscr;
+	cli->flags |= CLI_FLG_DOCK;
 	cli->w = panel_height + panel_height / 3;
 	cli->h = panel_height - 3 * DOCKWIN_GAP - 1;
 
-	x = panel_items[PANEL_AREA_TIME].x - DOCKWIN_OFFSET;
+	x = scr->items[PANEL_AREA_TIME].x - DOCKWIN_OFFSET;
 
 	if (scr->flags & SCR_FLG_PANEL_TOP)
 		y = DOCKWIN_GAP;
@@ -1254,56 +1272,75 @@ static void dock_add(struct screen *scr, struct client *cli)
 	list_walk(cur, &scr->dock) {
 		struct client *cli = list2client(cur);
 		x -= (cli->w + DOCKWIN_GAP + BORDER_WIDTH);
-		client_moveresize(scr, cli, x, y, cli->w, cli->h, 1);
+		client_moveresize(cli, x, y, cli->w, cli->h);
 	}
 
-	panel_items[PANEL_AREA_TITLE].w = x - panel_items[PANEL_AREA_TITLE].x;
-	calc_title_max();
+	scr->items[PANEL_AREA_TITLE].w = x - scr->items[PANEL_AREA_TITLE].x;
+	calc_title_max(scr);
 	window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 	window_border_color(cli->win, border_docked);
 	xcb_map_window(dpy, cli->win);
 	xcb_flush(dpy);
 }
 
-static void client_add(struct screen *scr, xcb_window_t win, int docked)
+static void client_add(xcb_window_t win)
 {
 	uint8_t ntag;
 	struct tag *tag;
+	struct screen *scr;
 	struct client *cli;
 	uint32_t val[1];
 	int dy, dh;
-	xcb_get_property_cookie_t c;
 	xcb_get_geometry_reply_t *g;
-	xcb_get_window_attributes_cookie_t ac;
+	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
 
 	tt("win %p\n", win);
 
-	if (win == screen->ptr->root)
+	if (win == rootscr->root)
 		return;
-	else if (win == screen->panel)
-		return;
-	else if (win2client(scr, win, WIN_DOCK)) {
-		dd("already on dock list\n");
-		return; /* already added */
-	}
-	else if (win2client(scr, win, WIN_NORMAL)) {
-		ii("already on clients list\n");
-		xcb_map_window(dpy, win);
-		xcb_flush(dpy);
-		return; /* already added */
+
+	a = NULL;
+	/* get initial geometry */
+	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
+	if (!g) {
+		ee("xcb_get_geometry() failed\n");
+		goto out;
 	}
 
-	refresh_rules(scr);
+	scr = coord2screen(g->x, g->y);
+	if (!scr) {
+		if (panel_window(win)) {
+			goto out;
+		} else if (win2client(win)) {
+			xcb_map_window(dpy, win);
+			xcb_flush(dpy);
+			goto out; /* window is already added */
+		}
+		scr = defscr;
+	} else {
+		if (scr->panel == win) {
+			goto out; /* don't handle it here */
+		} else if (scr2client(scr, win, WIN_TYPE_DOCK)) {
+			ii("already on dock list\n");
+			goto out; /* already added */
+		} else if (scr2client(scr, win, WIN_TYPE_NORMAL)) {
+			ii("already on clients list\n");
+			xcb_map_window(dpy, win);
+			xcb_flush(dpy);
+			goto out; /* already added */
+		}
+	}
 
-	ac = xcb_get_window_attributes(dpy, win);
-	a = xcb_get_window_attributes_reply(dpy, ac, NULL);
+	refresh_rules();
+
+	c = xcb_get_window_attributes(dpy, win);
+	a = xcb_get_window_attributes_reply(dpy, c, NULL);
 	if (!a) {
 		ee("xcb_get_window_attributes() failed\n");
 		return;
 	}
 
-	g = NULL;
 	if (a->override_redirect) {
 		dd("ignore redirected window %p\n", win);
 		goto out;
@@ -1318,11 +1355,13 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 		goto out;
 	}
 
+	cli->scr = scr;
 	cli->win = win;
 	window_raise(win);
 	window_border_width(cli->win, BORDER_WIDTH);
+	window_border_color(cli->win, border_normal);
 
-	if (docked || window_docked(win)) {
+	if (window_docked(win)) {
 		dock_add(scr, cli);
 		goto out;
 	}
@@ -1331,13 +1370,6 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 	val[0] = XCB_EVENT_MASK_ENTER_WINDOW |
 		 XCB_EVENT_MASK_PROPERTY_CHANGE;
 	xcb_change_window_attributes(dpy, win, XCB_CW_EVENT_MASK, val);
-
-	/* get initial geometry */
-	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
-	if (!g) {
-		ee("xcb_get_geometry() failed\n");
-		goto out;
-	}
 
 	if (!g->depth && !a->colormap) {
 		dd("win %p, root %p, colormap=%p, class=%u, depth=%u\n",
@@ -1354,33 +1386,32 @@ static void client_add(struct screen *scr, xcb_window_t win, int docked)
 	if (!tag->win) {
 		list_add(&tag->clients, &cli->head);
 	} else { /* attempt to list windows in order of appearance */
-		struct client *cur = win2client(scr, tag->win, 0);
-		if (cur) {
-			dd("cur %p\n", cur->win);
+		struct client *cur = scr2client(scr, tag->win, 0);
+		if (cur)
 			list_add(&cur->head, &cli->head);
-		} else
+		else
 			list_add(&tag->clients, &cli->head);
 	}
-	tag->win = win;
-	client_moveresize(scr, cli, g->x, g->y, g->width, g->height, 0);
+	/* also add to global list of clients */
+	list_add(&clients, &cli->list);
+
+	client_moveresize(cli, g->x, g->y, g->width, g->height);
 
 	if (scr->tag == tag) {
+		if (tag->win)
+			window_focus(scr, scr->tag->win, 0);
+
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
-		xcb_map_window(dpy, win);
-#if 0
-		xcb_warp_pointer(dpy, XCB_NONE, win, 0, 0, 0, 0,
-				 cli->w / 2, cli->h / 2);
-#endif
-		print_title(cli->win);
+		xcb_map_window(dpy, cli->win);
+		window_focus(scr, cli->win, 1);
+		print_title(scr, cli->win);
 	} else {
-		window_state(win, XCB_ICCCM_WM_STATE_ICONIC);
-		xcb_unmap_window(dpy, win);
+		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
+		xcb_unmap_window(dpy, cli->win);
 	}
 
-	dd("cli %p, win %p, geo %dx%d+%d+%d\n", cli, win,
-	   cli->w, cli->h, cli->x, cli->y);
-	tt("scr tag %s, win=%p\n", tag->name, tag->win);
-	tt("    tag %s, win=%p\n", tag->name, tag->win);
+	dd("screen %d, tag %s, cli %p, win %p, geo %ux%u+%d+%d\n", scr->id,
+	   scr->tag->name, cli, cli->win, cli->w, cli->h, cli->x, cli->y);
 
 	update_clients_list();
 out:
@@ -1389,46 +1420,58 @@ out:
 	free(g);
 }
 
-static void client_del(xcb_window_t root, xcb_window_t win)
+static void client_del(xcb_window_t win)
 {
 	struct client *cli;
-	struct screen *scr;
 
-	scr = root2screen(root);
-
-	cli = win2client(scr, win, WIN_DOCK);
-	if (cli) {
-		dock_del(scr, cli);
-		return;
-	}
-
-	cli = win2client(scr, win, WIN_NORMAL);
+	cli = win2client(win);
 	if (!cli) {
 		tt("win %p was not managed\n", win);
 		xcb_unmap_subwindows_checked(dpy, win);
 		goto out;
 	}
 
-	switch_window(root, cli, DIR_NEXT);
-	list_del(&cli->head);
-	free(cli);
+	if (cli->flags & CLI_FLG_DOCK) {
+		dock_del(cli);
+		return;
+	}
 
-	if (list_empty(&scr->tag->clients))
-		print_title(0);
+	switch_window(cli->scr, DIR_NEXT);
+	list_del(&cli->head);
+	list_del(&cli->list);
+
+	if (list_empty(&cli->scr->tag->clients))
+		print_title(cli->scr, 0);
+
+	free(cli);
 out:
 	tt("pid %d, deleted win %p\n", getpid(), win);
 	update_clients_list();
 }
 
-static void clients_scan(struct screen *scr)
+static int screen_panel(xcb_window_t win)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if (scr->panel == win)
+			return 1;
+	}
+	return 0;
+}
+
+static void clients_scan(void)
 {
 	int i, n;
 	xcb_query_tree_cookie_t c;
 	xcb_query_tree_reply_t *tree;
 	xcb_window_t *wins;
 
+	list_init(&clients);
+
 	/* walk through windows tree */
-	c = xcb_query_tree(dpy, scr->ptr->root);
+	c = xcb_query_tree(dpy, rootscr->root);
 	tree = xcb_query_tree_reply(dpy, c, 0);
 	if (!tree)
 		panic("xcb_query_tree_reply() failed\n");
@@ -1437,12 +1480,12 @@ static void clients_scan(struct screen *scr)
 	wins = xcb_query_tree_children(tree);
 
 	/* map clients onto the current screen */
-	mm("%d clients found\n", n);
+	ii("%d clients found\n", n);
 	for (i = 0; i < n; i++) {
-		mm("++ handle win %p\n", wins[i]);
-		if (wins[i] == screen->panel)
+		dd("++ handle win %p\n", wins[i]);
+		if (screen_panel(wins[i]))
 			continue;
-		client_add(scr, wins[i], 0);
+		client_add(wins[i]);
 	}
 
 	free(tree);
@@ -1453,8 +1496,8 @@ static void print_menu(struct screen *scr)
 {
 	uint16_t x, w;
 
-	x = panel_items[PANEL_AREA_MENU].x;
-	w = panel_items[PANEL_AREA_MENU].w;
+	x = scr->items[PANEL_AREA_MENU].x;
+	w = scr->items[PANEL_AREA_MENU].w;
 
 	draw_panel_text(scr, &normal_color, x, w, (XftChar8 *) MENU_ICON,
 		        sizeof(MENU_ICON) - 1);
@@ -1468,6 +1511,11 @@ static void print_time(struct screen *scr, int force)
 	int16_t x;
 	uint16_t w;
 
+	ii("print_time screen %d, %p ? %p\n", scr->id, scr, defscr);
+
+	if (scr != defscr)
+		return;
+
 	t = time(NULL);
 	if (t == prev_time && !force)
 		return;
@@ -1479,8 +1527,8 @@ static void print_time(struct screen *scr, int force)
 	if (strftime(str, TIME_STR_MAX, TIME_STR_FMT, tm) == 0)
 		strncpy(str, TIME_STR_DEF, TIME_STR_MAX);
 
-	x = panel_items[PANEL_AREA_TIME].x;
-	w = panel_items[PANEL_AREA_TIME].w;
+	x = scr->items[PANEL_AREA_TIME].x;
+	w = scr->items[PANEL_AREA_TIME].w;
 
 	draw_panel_text(scr, &normal_color, x, w, (XftChar8 *) str,
 			sizeof(str) - 1);
@@ -1527,11 +1575,11 @@ static void select_tag(struct screen *scr, int x)
 	if (scr->tag && scr->tag != prev) {
 		if (prev)
 			hide_windows(prev);
-		show_windows(scr->tag);
+		show_windows(scr);
 	}
 }
 
-static int tag_add(struct screen *scr, const char *name, int idx, int pos)
+static int tag_add(struct screen *scr, const char *name, uint8_t id, uint16_t pos)
 {
 	XftColor *color;
 	struct tag *tag;
@@ -1544,22 +1592,22 @@ static int tag_add(struct screen *scr, const char *name, int idx, int pos)
 	}
 
 	scr->ntags++;
-	tag->idx = idx;
+	tag->scr = scr;
+	tag->id = id;
 	tag->nlen = strlen(name);
-	tag->name = calloc(1, tag->nlen);
+	tag->name = strdup(name);
 	if (!tag->name) {
-		ee("calloc(%d) failed\n", tag->nlen);
+		ee("strdup(%s) failed\n", name);
 		free(tag);
 		return;
 	}
 
-	memcpy(tag->name, name, tag->nlen);
 	list_init(&tag->clients);
 	list_add(&scr->tags, &tag->head);
 
 	text_exts(name, tag->nlen, &tag->w, &h);
 
-	if (pos != panel_items[PANEL_AREA_TAGS].x) {
+	if (pos != scr->items[PANEL_AREA_TAGS].x) {
 		color = &normal_color;
 		tag->flags &= ~TAG_FLG_ACTIVE;
 	} else {
@@ -1579,68 +1627,42 @@ static int tag_add(struct screen *scr, const char *name, int idx, int pos)
 /*
  * Tags dir structure:
  *
- * /<basedir>/<screennumber>/<tagnumber>/<items>
- * <items> are files:
- *   .name       reserved to store tag name
- *   <winclass>  window with <winclass> will be created on given tag
- *
- * Example:
- *
- * $HOME/.yawm/twomonitors/
- *			   0/
- *			     0/.name --> "main"
- *			     1/.name --> "work"
- *			       XTerm
- *			     2/.name --> "compile"
- *			     3/.name --> "chat"
- *			       XChat
- *			   1/
- *			     0/.name --> "main"
- *			     1/.name --> "work"
- *			     2/.name --> "browser"
- *			       Firefox
+ * /<basedir>/<screennumber>/tags/<tagname>/<winclass>
  */
 static int init_tags(struct screen *scr)
 {
 	struct list_head *cur;
-	int fd, i, pos, len;
-	struct stat st;
-	char path[BASE_PATH_MAX], name[TAG_NAME_MAX + 2], *ptr;
+	int16_t i;
+	uint16_t pos;
+	char path[BASE_PATH_MAX];
+	DIR *dir;
+	struct dirent *ent;
 
-	pos = panel_items[PANEL_AREA_TAGS].x;
+	i = 0;
+	pos = scr->items[PANEL_AREA_TAGS].x;
 	if (!basedir) {
 		ww("no user defined tags\n");
 		goto out;
 	}
 
-	snprintf(path, sizeof(path), "%s/%d/", basedir, scr->idx);
-	if (stat(path, &st) < 0) {
-		ww("no user defined tags for screen %d\n", scr->idx);
+	snprintf(path, sizeof(path), "%s/%d/tags", basedir, scr->id);
+	dir = opendir(path);
+	if (!dir) {
+		ii("no user defined tags for screen %d\n", scr->id);
 		goto out;
 	}
 
-	len = strlen(path);
-	ptr = path + len;
-	len = sizeof(path) - 1 - len;
-
-	mm("%d/%d remaining\n", len, BASE_PATH_MAX);
-
-	memset(name, 0, sizeof(name));
-	for (i = 0; i < TAGS_MAX; i++) {
-		snprintf(ptr, len, "%d/.name", i);
-		fd = open(path, O_RDONLY);
-		if (fd < 0)
+	while ((ent = readdir(dir))) {
+		if (ent->d_name[0] == '.' || ent->d_name[1] == '.')
 			continue;
-		read(fd, name, TAG_NAME_MAX);
-		mm("scr%d, tag%d: %s\n", scr->idx, i, name);
-		close(fd);
-		pos = tag_add(scr, name, i, pos);
-		memset(name, 0, TAG_NAME_MAX);
+		ii("tag %s, offset %d\n", ent->d_name, pos);
+		pos = tag_add(scr, ent->d_name, i++, pos);
 	}
 
+	closedir(dir);
 out:
-	if (pos == panel_items[PANEL_AREA_TAGS].x) /* add default tag */
-		pos = tag_add(scr, "*", 0, pos);
+	if (i == 0) /* add default tag */
+		pos = tag_add(scr, "*", 0, scr->items[PANEL_AREA_TAGS].x);
 
 	return pos - panel_vpad / 2;
 }
@@ -1662,7 +1684,7 @@ static void redraw_panel_items(struct screen *scr)
 	}
 
 	print_menu(scr);
-	print_title(scr->tag->win);
+	print_title(scr, scr->tag->win);
 	print_time(scr, 1);
 }
 
@@ -1672,31 +1694,61 @@ static int update_panel_items(struct screen *scr)
 	uint16_t h, w;
 
 	text_exts(TIME_STR_DEF, TIME_STR_MAX, &w, &h);
-	panel_items[PANEL_AREA_TIME].x = scr->w - w;
-	panel_items[PANEL_AREA_TIME].w = w;
+	scr->items[PANEL_AREA_TIME].x = scr->w - w;
+	scr->items[PANEL_AREA_TIME].w = w;
 
 	panel_vpad = panel_height - (panel_height - FONT_SIZE_FT) / 2;
 
 	x = FONT_SIZE_FT;
-	panel_items[PANEL_AREA_TAGS].x = x;
-	panel_items[PANEL_AREA_TAGS].w = init_tags(scr);
-	x += panel_items[PANEL_AREA_TAGS].w + 1;
+	scr->items[PANEL_AREA_TAGS].x = x;
+	scr->items[PANEL_AREA_TAGS].w = init_tags(scr);
+	x += scr->items[PANEL_AREA_TAGS].w + 1;
 
 	text_exts(MENU_ICON, sizeof(MENU_ICON) - 1, &w, &h);
-	panel_items[PANEL_AREA_MENU].x = x;
-	panel_items[PANEL_AREA_MENU].w = w + panel_vpad;
-	x += panel_items[PANEL_AREA_MENU].w + 1;
+	scr->items[PANEL_AREA_MENU].x = x;
+	scr->items[PANEL_AREA_MENU].w = w + panel_vpad;
+	x += scr->items[PANEL_AREA_MENU].w + 1;
 
-	w = panel_items[PANEL_AREA_TIME].x - 1 - x - panel_vpad;
-	panel_items[PANEL_AREA_TITLE].w = w;
-	panel_items[PANEL_AREA_TITLE].x = x;
-	calc_title_max();
+	w = scr->items[PANEL_AREA_TIME].x - 1 - x - panel_vpad;
+	scr->items[PANEL_AREA_TITLE].w = w;
+	scr->items[PANEL_AREA_TITLE].x = x;
+	calc_title_max(scr);
 
 	print_menu(scr);
 	print_time(scr, 1); /* last element on panel */
-
-	panel_items_stat();
 }
+
+#if 0
+/*
+ * Panel items:
+ *
+ * /<basedir>/<screennumber>/{title,menu,clock}/action
+ * 'action' --> any executable, args: <cur_win_id> <cur_win_x> <cur_win_y>
+ */
+
+static void init_panel_items(struct screen *scr)
+{
+	char path[BASE_PATH_MAX];
+	DIR *dir;
+	struct dirent *ent;
+	int i;
+
+	snprintf(path, sizeof(path), "%s/%d/tags", basedir, scr->id);
+	dir = opendir(path);
+	if (!dir) {
+		ee("opendir(%s) failed\n", path);
+		return;
+	}
+
+	while ((ent = readdir(dir))) {
+		if (strncmp("tags", sizeof("tags") - 1, ent->d_name) == 0) {
+
+		}
+	}
+
+	closedir(dir);
+}
+#endif
 
 static void init_panel(struct screen *scr)
 {
@@ -1705,21 +1757,21 @@ static void init_panel(struct screen *scr)
 
 	scr->panel = xcb_generate_id(dpy);
 
-	tt("scr %d, panel %p\n", scr->idx, scr->panel);
-
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
 	val[0] = panel_bg;
 	val[1] = XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_VISIBILITY_CHANGE;
 
 	if (scr->flags & SCR_FLG_PANEL_TOP)
-		y = 0;
+		y = scr->y;
 	else
-		y = scr->h - panel_height;
+		y = (scr->h + scr->y) - panel_height;
 
-	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, scr->panel, scr->ptr->root,
-			  0, y, scr->w, panel_height, 0,
+	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, scr->panel, rootscr->root,
+			  scr->x, y, scr->w, panel_height, 0,
 			  XCB_WINDOW_CLASS_INPUT_OUTPUT,
-			  scr->ptr->root_visual, mask, val);
+			  rootscr->root_visual, mask, val);
+	xcb_flush(dpy); /* flush this operation otherwise panel will be
+			   misplaced in multiscreen setup */
 
         xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, scr->panel,
 			    XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
@@ -1744,32 +1796,135 @@ static void init_panel(struct screen *scr)
 				  DefaultColormap(xdpy, xscr));
 
 	update_panel_items(scr);
+
+	ii("screen %d, panel %p geo %ux%u+%d+%d\n", scr->id, scr->panel,
+	   scr->w, panel_height, scr->x, y);
 }
 
-#define pointer_inside(area, ex)\
-	(ex >= panel_items[area].x &&\
-	 ex <= panel_items[area].x + panel_items[area].w)
+static void update_panel_title(xcb_window_t win)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		struct client *cli;
+
+		if (scr->tag->win != win)
+			continue;
+
+		cli = list2client(scr->tag->clients.next);
+		if (cli) {
+			scr->tag->win = cli->win;
+			print_title(scr, cli->win);
+		} else {
+			scr->tag->win = 0;
+			print_title(scr, 0);
+		}
+	}
+}
+
+#define pointer_inside(scr, area, ex)\
+	(ex >= scr->items[area].x &&\
+	 ex <= scr->items[area].x + scr->items[area].w)
 
 #ifndef VERBOSE
-#define dump_coords(x) ;
+#define dump_coords(scr, x) ;
 #else
-static void dump_coords(int x)
+static void dump_coords(struct screen *scr, int x)
 {
 	int i;
 
 	for (i = 0; i < PANEL_AREA_MAX; i++) {
-		mm("%d: %d >= %d <= %d (w = %d)\n", i, panel_items[i].x, x,
-		   panel_items[i].w + panel_items[i].x, panel_items[i].w);
-		if pointer_inside(i, x)
-			mm("^^^ inside %s\n", panel_items[i].name);
+		ii("%d: %d >= %d <= %d (w = %d)\n", i, scr->items[i].x, x,
+		   scr->items[i].w + scr->items[i].x, scr->items[i].w);
+		if pointer_inside(scr, i, x)
+			ii("inside element %d\n", i);
 	}
 }
 #endif
 
-static void motion_clean(void)
+static void handle_panel_press(xcb_button_press_event_t *e)
+{
+	curscr = coord2screen(e->root_x, e->root_y);
+
+	ii("screen %d, press at %d,%d\n", curscr->id, e->event_x, e->event_y);
+
+	dump_coords(curscr, e->event_x);
+	if pointer_inside(curscr, PANEL_AREA_TAGS, e->event_x) {
+		select_tag(curscr, e->event_x);
+	} else if pointer_inside(curscr, PANEL_AREA_MENU, e->event_x) {
+		struct list_head *cur;
+		ii("menu, tag %s\n", curscr->tag->name);
+		list_walk(cur, &curscr->tag->clients)
+			ii("  win %p, geo %ux%u+%d+%d\n",
+			   list2client(cur)->win, list2client(cur)->w,
+			   list2client(cur)->h, list2client(cur)->x,
+			   list2client(cur)->y);
+	} else if pointer_inside(curscr, PANEL_AREA_TITLE, e->event_x) {
+		ii("title\n");
+	} else if pointer_inside(curscr, PANEL_AREA_DOCK, e->event_x) {
+		ii("dock\n");
+	} else if (pointer_inside(curscr, PANEL_AREA_TIME, e->event_x)) {
+		ii("clock\n");
+		if (curscr->items[PANEL_AREA_TIME].action) {
+			void *arg = curscr->items[PANEL_AREA_TIME].arg;
+			curscr->items[PANEL_AREA_TIME].action(arg);
+		}
+	}
+}
+
+static void handle_button_release(xcb_button_release_event_t *e)
 {
 	mouse_x = mouse_y = mouse_button = 0;
 	xcb_ungrab_pointer(dpy, XCB_CURRENT_TIME);
+	xcb_flush(dpy);
+}
+
+static void handle_button_press(xcb_button_press_event_t *e)
+{
+	te("XCB_BUTTON_PRESS: root %p, pos %d,%d; event %p, pos %d,%d; "
+	   "child %p\n", e->root, e->root_x, e->root_y, e->event, e->event_x,
+	   e->event_y, e->child);
+
+	curscr = coord2screen(e->root_x, e->root_y);
+	trace_screen_metrics(curscr);
+
+	switch (e->detail) {
+	case MOUSE_BTN_LEFT:
+		dd("MOUSE_BTN_LEFT\n");
+		if (curscr && curscr->panel == e->event) {
+			handle_panel_press(e);
+			return;
+		} else if (curscr) {
+			print_title(curscr, e->event);
+		}
+		break;
+	case MOUSE_BTN_MID:
+		dd("MOUSE_BTN_MID\n");
+		break;
+	case MOUSE_BTN_RIGHT:
+		dd("MOUSE_BTN_RIGHT\n");
+		panel_items_stat(curscr);
+		break;
+	default:
+		break;
+	}
+
+	/* prepare for motion event handling */
+
+	if (e->event != e->root || !e->child)
+		return;
+
+	window_raise(e->child);
+	panel_raise(curscr);
+
+	/* subscribe to motion events */
+
+	xcb_grab_pointer(dpy, 0, e->root,
+			 XCB_EVENT_MASK_BUTTON_MOTION |
+			 XCB_EVENT_MASK_BUTTON_RELEASE,
+			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
+			 e->root, XCB_NONE, XCB_CURRENT_TIME);
 	xcb_flush(dpy);
 }
 
@@ -1779,19 +1934,18 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	uint32_t val[2];
 	int16_t dx, dy;
 	struct client *cli;
-	struct screen *scr;
 
-	if (!e->child) {
-		motion_clean();
+	curscr = coord2screen(e->root_x, e->root_y);
+	trace_screen_metrics(curscr);
+	if (curscr && curscr->panel == e->child) {
+		return;
+	} else if (!e->child) {
+		handle_button_release(NULL);
 		return;
 	}
 
-	scr = root2screen(e->root);
-
-	if (e->child == scr->panel)
-		return;
-
-	cli = win2client(scr, e->child, WIN_NORMAL);
+	/* window is being moved so search in global list */
+	cli = win2client(e->child);
 	if (!cli) {
 		ww("window %p is not managed\n", e->child);
 		return;
@@ -1811,85 +1965,40 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	val[1] = cli->y;
 	xcb_configure_window(dpy, cli->win, mask, val);
 	xcb_flush(dpy);
-}
 
-static void handle_panel_press(xcb_button_press_event_t *e)
-{
-	struct screen *scr = root2screen(e->root);
-
-	if (!scr)
-		scr = screen;
-
-	dump_coords(e->event_x);
-	if pointer_inside(PANEL_AREA_TAGS, e->event_x) {
-		select_tag(scr, e->event_x);
-	} else if pointer_inside(PANEL_AREA_MENU, e->event_x) {
-		struct list_head *cur;
-		ii("menu, tag %s\n", scr->tag->name);
-		list_walk(cur, &scr->tag->clients)
-			ii("  win %p, geo %ux%u+%d+%d\n",
-			   list2client(cur)->win, list2client(cur)->w,
-			   list2client(cur)->h, list2client(cur)->x,
-			   list2client(cur)->y);
-	} else if pointer_inside(PANEL_AREA_TITLE, e->event_x) {
-		ii("title\n");
-	} else if pointer_inside(PANEL_AREA_DOCK, e->event_x) {
-		ii("dock\n");
-	} else if (pointer_inside(PANEL_AREA_TIME, e->event_x)) {
-		ii("clock\n");
-		if (panel_items[PANEL_AREA_TIME].action) {
-			void *arg = panel_items[PANEL_AREA_TIME].arg;
-			panel_items[PANEL_AREA_TIME].action(arg);
+	ii("client's screen %d\n", cli->scr->id);
+	if (cli->scr != curscr || curscr->tag->win != cli->win) { /* retag */
+		{
+		struct client *tmp = scr2client(cli->scr, e->child, WIN_TYPE_NORMAL);
+		if (!tmp)
+			ee("client for win %p not found\n", e->child);
+		}
+		list_del(&cli->head);
+		list_add(&curscr->tag->clients, &cli->head);
+		cli->scr = curscr;
+		curscr->tag->win = cli->win;
+		ii("win %p now on tag %s screen %d\n", e->child,
+		   curscr->tag->name, curscr->id);
+		{
+		struct client *tmp = scr2client(curscr, e->child, WIN_TYPE_NORMAL);
+		if (!tmp)
+			ee("client for win %p not found\n", e->child);
 		}
 	}
-}
-
-static void handle_button_press(xcb_button_press_event_t *e)
-{
-	switch (e->detail) {
-	case MOUSE_BTN_LEFT:
-		dd("MOUSE_BTN_LEFT\n");
-		if (screen->panel == e->event)
-			handle_panel_press(e);
-		break;
-	case MOUSE_BTN_MID:
-		dd("MOUSE_BTN_MID\n");
-		break;
-	case MOUSE_BTN_RIGHT:
-		dd("MOUSE_BTN_RIGHT\n");
-		break;
-	default:
-		break;
-	}
-
-	/* prepare for motion event handling */
-
-	dd("root %p, event %p, child %p\n", e->root, e->event, e->child);
-	if (e->event != e->root || !e->child)
-		return;
-
-	window_raise(e->child);
-	panel_raise(NULL, e->root);
-
-	/* subscribe to motion events */
-
-	xcb_grab_pointer(dpy, 0, e->root,
-			 XCB_EVENT_MASK_BUTTON_MOTION |
-			 XCB_EVENT_MASK_BUTTON_RELEASE,
-			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
-			 e->root, XCB_NONE, XCB_CURRENT_TIME);
-	xcb_flush(dpy);
 }
 
 static void handle_key_press(xcb_key_press_event_t *e)
 {
 	struct keymap *ptr = kmap;
 
-	mm("key %p, state %p\n", e->detail, e->state);
+	curscr = coord2screen(e->root_x, e->root_y);
+
+	ii("screen %d, key %p, state %p, pos %d,%d\n", curscr->id, e->detail,
+	   e->state, e->root_x, e->root_y);
 
 	while (ptr->mod) {
 		if (ptr->key == e->detail && ptr->mod == e->state) {
-			mm("%p pressed\n", ptr->key);
+			ii("%p pressed\n", ptr->key);
 			if (ptr->action && !ptr->arg)
 				ptr->action(e);
 			else
@@ -1907,7 +2016,7 @@ static void handle_visibility(xcb_visibility_notify_event_t *e)
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
 		if (scr->panel == e->window) {
-			panel_raise(scr, scr->ptr->root);
+			panel_raise(scr);
 			redraw_panel_items(scr);
 			return;
 		}
@@ -1917,56 +2026,60 @@ static void handle_visibility(xcb_visibility_notify_event_t *e)
 #if 0
 static void handle_create_notify(xcb_create_notify_event_t *e)
 {
-#if 0
-	xcb_map_window(dpy, e->window);
-	window_border_width(e->window, BORDER_WIDTH);
-#endif
-#if 0
-	struct screen *scr;
-
-	if (!window_docked(e->window))
-		return;
-
-	scr = root2screen(e->parent);
-	if (scr)
-		client_add(scr, e->window, 1);
-#endif
 }
 #endif
 
 static void handle_unmap_notify(xcb_unmap_notify_event_t *e)
 {
+	int16_t x, y;
+
 	if (window_status(e->window) == WIN_STATUS_UNKNOWN) {
 		dd("window is gone %p\n", e->window);
-		client_del(e->event, e->window);
+		client_del(e->window);
 		return;
 	}
 }
 
 static void handle_enter_notify(xcb_enter_notify_event_t *e)
 {
-	uint8_t found = 0;
 	struct list_head *cur;
-	struct screen *scr;
 	struct client *cli;
+	struct screen *scr;
 
-	scr = root2screen(e->root);
+	scr = coord2screen(e->root_x, e->root_y);
 
-	tt("pid %d, tag %s, win %p\n", getpid(), scr->tag->name, scr->tag->win);
+	tt("cur screen %d, tag %s, win %p ? %p\n", curscr->id, curscr->tag->name,
+	   curscr->tag->win, e->event);
 
-	cli = win2client(scr, e->event, WIN_NORMAL);
-	if (!cli) /* not on current tag list */
+	if (curscr && curscr->panel == e->event)
 		return;
+	else if (curscr && curscr != scr)
+		update_panel_title(e->event);
 
-	if (scr->tag->win)
-		window_focus(scr->tag, scr->tag->win, 0);
+	curscr = scr;
 
-	window_focus(scr->tag, e->event, 1);
+	if (curscr->tag->win)
+		window_focus(curscr, curscr->tag->win, 0);
+
+	window_focus(curscr, e->event, 1);
 
 	if (e->mode == MODKEY)
 		window_raise(e->event);
 
 	xcb_flush(dpy);
+}
+
+static void handle_property_notify(xcb_property_notify_event_t *e)
+{
+	ii("XCB_PROPERTY_NOTIFY: win %p, atom %d\n", e->window, e->atom);
+
+	switch (((xcb_property_notify_event_t *) e)->atom) {
+	case XCB_ATOM_WM_NAME:
+		ii("screen %d\n", curscr ? curscr->id : -1);
+		if (curscr)
+			print_title(curscr, e->window);
+		break;
+	}
 }
 
 #if 0
@@ -1999,7 +2112,7 @@ static void handle_configure_notify(xcb_configure_notify_event_t *e)
 
 	scr = root2screen(e->event);
 	if (!scr)
-		scr = screen;
+		scr = curscr;
 
 	ii("win %p above %p\n", e->window, e->above_sibling);
 	if (e->above_sibling) {
@@ -2032,87 +2145,24 @@ static void print_atom_name(xcb_atom_t atom)
         }
 }
 
+#define SYSTEM_TRAY_REQUEST_DOCK 0
+#define SYSTEM_TRAY_BEGIN_MESSAGE 1
+#define SYSTEM_TRAY_CANCEL_MESSAGE 2
+
 static void handle_client_message(xcb_client_message_event_t *e)
 {
 	print_atom_name(e->type);
 
-	if (e->type == 370) {
-		tt("win %p, action %d\n", e->window, e->data.data32[0]);
-		print_atom_name(e->data.data32[1]);
+	ii("win %p, action %d\n", e->window, e->data.data32[0]);
+	print_atom_name(e->data.data32[1]);
+
+	if (e->type == a_systray && e->format == 32 &&
+	    e->data.data32[1] == SYSTEM_TRAY_REQUEST_DOCK) {
+		xcb_window_t win = e->data.data32[2];
+		ii("win %x\n", win);
 	}
 }
 #endif
-
-static void screen_keys(struct screen *scr)
-{
-	xcb_get_modifier_mapping_cookie_t c;
-	xcb_get_modifier_mapping_reply_t *r;
-	xcb_keycode_t *mod;
-	struct keymap *ptr = kmap;
-	int i;
-
-	c = xcb_get_modifier_mapping(dpy);
-	r = xcb_get_modifier_mapping_reply(dpy, c, NULL);
-	if (!r)
-		panic("xcb_get_modifier_mapping_reply() failed\n");
-
-	mod = xcb_get_modifier_mapping_keycodes(r);
-	if (!mod)
-		panic("\nxcb_get_modifier_mapping_keycodes() failed\n");
-
-	for (i = 0; i < r->keycodes_per_modifier; i++) {
-		mm("%d: key code %x ? %x\n", i, mod[i], SHIFT);
-	}
-
-	free(r);
-
-	xcb_ungrab_key(dpy, XCB_GRAB_ANY, scr->ptr->root, XCB_MOD_MASK_ANY);
-
-	while (ptr->mod) {
-		mm("mod %x, key %x\n", ptr->mod, ptr->key);
-		xcb_grab_key(dpy, 1, scr->ptr->root, ptr->mod, ptr->key,
-			     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-		ptr++;
-	}
-}
-
-static void screen_add(xcb_screen_t *ptr, int idx)
-{
-	struct screen *scr;
-
-	if (!ptr)
-		panic("xcb_screen_t pointer is null\n")
-
-	scr = calloc(1, sizeof(*scr));
-	if (!scr)
-		panic("calloc(%lu) failed\n", sizeof(*scr));
-
-	/* initialize monitor */
-	scr->idx = idx;
-	scr->ptr = ptr;
-	scr->x = 0;
-	scr->y = 0;
-	scr->w = ptr->width_in_pixels;
-	scr->h = ptr->height_in_pixels;
-	scr->flags |= SCR_FLG_PANEL;
-	strncpy(scr->menustr, "::", sizeof("::") - 1);
-
-	list_init(&scr->dock);
-	list_init(&scr->tags);
-
-	if (scr->flags & SCR_FLG_PANEL) {
-		init_panel(scr);
-		if (!list_empty(&scr->tags)) {
-			ii("current tag %p %s\n", list2tag(scr->tags.next),
-			   (list2tag(scr->tags.next))->name);
-		}
-	}
-
-	screen_keys(scr);
-	list_add(&screens, &scr->head);
-
-	ii("scr %p, size %dx%d, %u tags\n", scr, scr->w, scr->h, scr->ntags);
-}
 
 static void print_configure_mask(uint32_t mask)
 {
@@ -2222,7 +2272,7 @@ static int handle_events(void)
 	if (!e)
 		return 0;
 
-	te("got event %d (%d)\n", e->response_type, XCB_EVENT_RESPONSE_TYPE(e));
+	mm("got event %d (%d)\n", e->response_type, XCB_EVENT_RESPONSE_TYPE(e));
 
 	switch (e->response_type & ~0x80) {
 	case 0: break; /* NO EVENT */
@@ -2248,18 +2298,15 @@ static int handle_events(void)
 		mouse_x = ((xcb_button_press_event_t *) e)->root_x;
 		mouse_y = ((xcb_button_press_event_t *) e)->root_y;
 		mouse_button = ((xcb_button_press_event_t *) e)->detail;
-		te("XCB_BUTTON_PRESS: root %p, event %p, child %p\n",
-		   ((xcb_button_press_event_t *) e)->root,
-		   ((xcb_button_press_event_t *) e)->event,
-		   ((xcb_button_press_event_t *) e)->child);
 		handle_button_press((xcb_button_press_event_t *) e);
 		break;
 	case XCB_BUTTON_RELEASE:
-		te("XCB_BUTTON_RELEASE\n");
-		motion_clean();
+		te("XCB_BUTTON_RELEASE: pos %d,%d, event %p, child %p\n",
+		   e->root_x, e->root_y, e->event, e->child);
+		handle_button_release((xcb_button_release_event_t *) e);
 		break;
 	case XCB_MOTION_NOTIFY:
-		te("XCB_MOTION_NOTIFY\n");
+		mm("XCB_MOTION_NOTIFY\n");
 		handle_motion_notify((xcb_motion_notify_event_t *) e);
 		break;
 	case XCB_CLIENT_MESSAGE:
@@ -2277,7 +2324,7 @@ static int handle_events(void)
 		handle_configure_request((xcb_configure_request_event_t *) e);
 		break;
 	case XCB_CONFIGURE_NOTIFY:
-		te("XCB_CONFIGURE_NOTIFY: event %p, window %p, above %p\n",
+		mm("XCB_CONFIGURE_NOTIFY: event %p, window %p, above %p\n",
 		   ((xcb_configure_notify_event_t *) e)->event,
 		   ((xcb_configure_notify_event_t *) e)->window,
 		   ((xcb_configure_notify_event_t *) e)->above_sibling);
@@ -2289,8 +2336,7 @@ static int handle_events(void)
 		te("XCB_DESTROY_NOTIFY: event %p, win %p\n",
 		   ((xcb_destroy_notify_event_t *) e)->event,
 		   ((xcb_destroy_notify_event_t *) e)->window);
-		client_del(((xcb_destroy_notify_event_t *) e)->event,
-			   ((xcb_destroy_notify_event_t *) e)->window);
+		client_del(((xcb_destroy_notify_event_t *) e)->window);
 		break;
 	case XCB_ENTER_NOTIFY:
 		te("XCB_ENTER_NOTIFY: root %p, event %p, child %p\n",
@@ -2327,17 +2373,10 @@ static int handle_events(void)
 		te("XCB_MAP_REQUEST: parent %p, win %p\n",
 		   ((xcb_map_request_event_t *) e)->parent,
 		   ((xcb_map_request_event_t *) e)->window);
-		client_add(screen, ((xcb_map_notify_event_t *) e)->window, 0);
+		client_add(((xcb_map_notify_event_t *) e)->window);
 		break;
 	case XCB_PROPERTY_NOTIFY:
-		te("XCB_PROPERTY_NOTIFY: win %p, atom %d\n",
-		   ((xcb_property_notify_event_t *) e)->window,
-		   ((xcb_property_notify_event_t *) e)->atom);
-		switch (((xcb_property_notify_event_t *) e)->atom) {
-		case XCB_ATOM_WM_NAME:
-			print_title(((xcb_property_notify_event_t *) e)->window);
-			break;
-		}
+		handle_property_notify((xcb_property_notify_event_t *) e);
 		break;
 	case XCB_UNMAP_NOTIFY:
 		te("XCB_UNMAP_NOTIFY: event %p, window %p\n",
@@ -2372,26 +2411,6 @@ static xcb_atom_t get_atom_by_name(const char *str, int len)
 	return a;
 }
 
-static void init_root(xcb_window_t win)
-{
-	xcb_void_cookie_t c;
-	uint32_t val = XCB_EVENT_MASK_BUTTON_PRESS;
-
-	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
-		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_LEFT, MODKEY));
-	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
-		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_MID, MODKEY));
-	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
-		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_RIGHT, MODKEY));
-
-	/* subscribe events */
-	val = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT |
-	      XCB_EVENT_MASK_STRUCTURE_NOTIFY |
-	      XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
-	xcb_change_window_attributes(dpy, win, XCB_CW_EVENT_MASK, &val);
-	xcb_flush(dpy);
-}
-
 #define atom_by_name(name) get_atom_by_name(name, sizeof(name) - 1)
 
 static void init_font(void)
@@ -2415,31 +2434,188 @@ static void init_font(void)
 
 static void init_keys(void)
 {
+	xcb_get_modifier_mapping_cookie_t c;
+	xcb_get_modifier_mapping_reply_t *r;
+	xcb_keycode_t *mod;
 	xcb_key_symbols_t *syms;
 	xcb_keycode_t *key;
-	struct keymap *ptr = kmap;
+	struct keymap *ptr;
+	int i;
+
+	c = xcb_get_modifier_mapping(dpy);
+	r = xcb_get_modifier_mapping_reply(dpy, c, NULL);
+	if (!r)
+		panic("xcb_get_modifier_mapping_reply() failed\n");
+
+	mod = xcb_get_modifier_mapping_keycodes(r);
+	if (!mod)
+		panic("\nxcb_get_modifier_mapping_keycodes() failed\n");
+
+	for (i = 0; i < r->keycodes_per_modifier; i++)
+		dd("%d: key code %x ? %x\n", i, mod[i], SHIFT);
+
+	free(r);
+
+	xcb_ungrab_key(dpy, XCB_GRAB_ANY, rootscr->root, XCB_MOD_MASK_ANY);
+
+	ptr = kmap;
+	while (ptr->mod) {
+		dd("mod %p, sym %p, key %p\n", ptr->mod, ptr->sym, ptr->key);
+		xcb_grab_key(dpy, 1, rootscr->root, ptr->mod, ptr->key,
+			     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+		ptr++;
+	}
 
 	syms = xcb_key_symbols_alloc(dpy);
 	if (!syms)
 		panic("xcb_key_symbols_alloc() failed\n");
 
+	ptr = kmap;
 	while (ptr->mod) {
 		key = xcb_key_symbols_get_keycode(syms, ptr->sym);
 		if (!key)
 			panic("xcb_key_symbols_get_keycode(sym=%p) failed\n",
 			      ptr->sym);
 		ptr->key = *key;
-		mm("grab mod %p + key %p\n", ptr->mod, ptr->key);
+		dd("grab mod %p + key %p\n", ptr->mod, ptr->key);
 		ptr++;
 	}
 
 	xcb_key_symbols_free(syms);
 }
 
+static void screen_add(uint8_t id, int16_t x, int16_t y, uint16_t w, uint16_t h)
+{
+	struct screen *scr;
+
+	scr = calloc(1, sizeof(*scr));
+	if (!scr)
+		panic("calloc(%lu) failed\n", sizeof(*scr));
+
+	scr->id = id;
+	scr->x = x;
+	scr->y = y;
+	scr->w = w;
+	scr->h = h;
+
+	list_init(&scr->dock);
+	list_init(&scr->tags);
+	init_panel(scr);
+
+	if (!list_empty(&scr->tags)) {
+		ii("current tag %p %s\n", list2tag(scr->tags.next),
+			(list2tag(scr->tags.next))->name);
+	}
+
+	list_add(&screens, &scr->head);
+
+	if (scr->x == 0)
+		defscr = scr; /* make such screen default */
+
+	ii("screen %d (%p), size %dx%d+%d+%d, %u tags\n", id, scr, scr->w,
+	   scr->h, scr->x, scr->y, scr->ntags);
+}
+
+static void init_crtc(uint8_t id, xcb_randr_get_output_info_reply_t *out,
+		      xcb_timestamp_t ts)
+{
+	xcb_randr_get_crtc_info_cookie_t c;
+	xcb_randr_get_crtc_info_reply_t *r;
+
+	c = xcb_randr_get_crtc_info(dpy, out->crtc, ts);
+	r = xcb_randr_get_crtc_info_reply(dpy, c, NULL);
+	if (!r)
+		return;
+
+	ii("crtc%d geo %ux%u+%d+%d\n", id, r->width, r->height, r->x, r->y);
+	/* one screen per output; share same root window via common
+	 * xcb_screen_t structure
+	 */
+	screen_add(id, r->x, r->y, r->width, r->height);
+
+	free(r);
+}
+
+static void init_output(int id, xcb_randr_output_t out, xcb_timestamp_t ts)
+{
+	char name[1024];
+	int len;
+	xcb_randr_get_output_info_cookie_t c;
+	xcb_randr_get_output_info_reply_t *r;
+
+	c = xcb_randr_get_output_info(dpy, out, ts);
+	r = xcb_randr_get_output_info_reply(dpy, c, NULL);
+	if (!r)
+		return;
+
+	len = xcb_randr_get_output_info_name_length(r);
+	if (len > sizeof(name))
+		len = sizeof(name);
+	snprintf(name, len, "%s", xcb_randr_get_output_info_name(r));
+	ii("output %s%d, %dx%d\n", name, id, r->mm_width, r->mm_height);
+	ii("connection %d\n", r->connection);
+
+	if (r->connection != XCB_RANDR_CONNECTION_CONNECTED) {
+		ii("not connected\n");
+		goto out;
+	}
+
+	init_crtc(id, r, ts);
+out:
+	free(r);
+}
+
+static void init_outputs(void)
+{
+	xcb_randr_get_screen_resources_current_cookie_t c;
+	xcb_randr_get_screen_resources_current_reply_t *r;
+	xcb_randr_output_t *out;
+	int i, len;
+
+	list_init(&screens);
+
+	c = xcb_randr_get_screen_resources_current(dpy, rootscr->root);
+	r = xcb_randr_get_screen_resources_current_reply(dpy, c, NULL);
+	if (!r) {
+		ii("RandR extension is not present\n");
+		return;
+	}
+
+	len = xcb_randr_get_screen_resources_current_outputs_length(r);
+	out = xcb_randr_get_screen_resources_current_outputs(r);
+	ii("found %d screens\n", len);
+
+	/* FIXME: need to implement clone detection */
+	for (i = 0; i < len; i++)
+		init_output(i, out[i], r->config_timestamp);
+
+	free(r);
+}
+
+static void init_rootwin(void)
+{
+	xcb_window_t win = rootscr->root;
+	xcb_void_cookie_t c;
+	uint32_t val = XCB_EVENT_MASK_BUTTON_PRESS;
+
+	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
+		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_LEFT, MODKEY));
+	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
+		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_MID, MODKEY));
+	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
+		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_RIGHT, MODKEY));
+
+	/* subscribe events */
+	val = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT |
+	      XCB_EVENT_MASK_STRUCTURE_NOTIFY |
+	      XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
+	xcb_change_window_attributes(dpy, win, XCB_CW_EVENT_MASK, &val);
+	xcb_flush(dpy);
+}
+
 int main()
 {
 	struct pollfd pfd;
-	xcb_screen_t *scr;
 	const char *logfile;
 
 	logfile = getenv("YAWM_LOG");
@@ -2480,36 +2656,52 @@ int main()
 		return 1;
 	}
 
+	rootscr = xcb_setup_roots_iterator(xcb_get_setup(dpy)).data;
+	if (!rootscr)
+		panic("no screens found\n");
+
+	ii("root %p, size %dx%d\n", rootscr->root, rootscr->width_in_pixels,
+	   rootscr->height_in_pixels);
+
 	init_keys();
+	init_rootwin();
+	init_outputs();
+
+	if (list_empty(&screens)) { /*randr failed or not supported */
+		screen_add(0, 0, 0, rootscr->width_in_pixels,
+			   rootscr->height_in_pixels);
+	}
+
+	if (!defscr)
+		defscr = list2screen(screens.next); /* use first one */
+	if (!curscr)
+		curscr = defscr;
+
+	trace_screens();
 
 	a_name = atom_by_name("_NEW_WM_NAME");
 	a_state = atom_by_name("WM_STATE");
 	a_desktop = atom_by_name("_NET_WM_DESKTOP");
 	a_client_list = atom_by_name("_NET_CLIENT_LIST");
-
-	list_init(&screens);
-
-	screen_add(xcb_setup_roots_iterator(xcb_get_setup(dpy)).data, 0);
-	screen = list2screen(screens.next);
-
-	init_root(screen->ptr->root);
+	a_systray = atom_by_name("_NET_SYSTEM_TRAY_OPCODE");
 
 	strncpy(tray_class, "yawmtray", sizeof(tray_class) - 1);
 	strncpy(dock_class, "yawmdock", sizeof(tray_class) - 1);
 	ii("default tray class: %s, dock class: %s\n", tray_class, dock_class);
 
-	clients_scan(screen);
+	clients_scan();
 
 	pfd.fd = xcb_get_file_descriptor(dpy);
 	pfd.events = POLLIN;
 	pfd.revents = 0;
 
-	mm("enter events loop\n");
+	ii("defscr %d, curscr %d\n", defscr->id, curscr->id);
+	ii("enter events loop\n");
 
 	while (1) {
 		int rc = poll(&pfd, 1, TIME_REFRESH_INTERVAL);
 		if (rc == 0) { /* timeout */
-			print_time(screen, 0);
+			print_time(defscr, 0);
 		} else if (rc < 0) {
 			if (errno == EINTR)
 				continue;
