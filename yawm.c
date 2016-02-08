@@ -613,8 +613,8 @@ static struct screen *coord2screen(int16_t x, int16_t y)
 
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
-		if (scr->x <= x && x <= (scr->x + scr->w) &&
-		    scr->y <= y && y <= (scr->y + scr->h + panel_height)) {
+		if (scr->x <= x && x <= (scr->x + scr->w - 1) &&
+		    scr->y <= y && y <= (scr->y + scr->h + panel_height - 1)) {
 			return scr;
 		}
 	}
@@ -861,7 +861,6 @@ static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 	   cli->w, cli->h, cli->x, cli->y);
 }
 
-#define DEBUG
 static void place_window(void *arg)
 {
 	int16_t x, y;
@@ -1283,6 +1282,24 @@ static void dock_add(struct screen *scr, struct client *cli)
 	xcb_flush(dpy);
 }
 
+static struct screen *pointer2screen(void)
+{
+	struct screen *scr;
+	xcb_query_pointer_cookie_t c;
+	xcb_query_pointer_reply_t *r;
+
+	scr = NULL;
+	c = xcb_query_pointer(dpy, rootscr->root);
+        r = xcb_query_pointer_reply(dpy, c, NULL);
+        if (r) {
+		scr = coord2screen(r->root_x, r->root_y);
+		ii("screen %d by %d,%d\n", scr->id, r->root_x, r->root_y);
+		free(r);
+	}
+
+        return scr;
+}
+
 static void client_add(xcb_window_t win)
 {
 	uint8_t ntag;
@@ -1309,6 +1326,8 @@ static void client_add(xcb_window_t win)
 	}
 
 	scr = coord2screen(g->x, g->y);
+	if (!scr)
+		scr = pointer2screen();
 	if (!scr) {
 		if (panel_window(win)) {
 			goto out;
@@ -2302,7 +2321,10 @@ static int handle_events(void)
 		break;
 	case XCB_BUTTON_RELEASE:
 		te("XCB_BUTTON_RELEASE: pos %d,%d, event %p, child %p\n",
-		   e->root_x, e->root_y, e->event, e->child);
+		   ((xcb_button_press_event_t *) e)->root_x,
+		   ((xcb_button_press_event_t *) e)->root_y,
+		   ((xcb_button_press_event_t *) e)->event,
+		   ((xcb_button_press_event_t *) e)->child);
 		handle_button_release((xcb_button_release_event_t *) e);
 		break;
 	case XCB_MOTION_NOTIFY:
