@@ -232,6 +232,7 @@ struct list_head clients; /* keep track of all clients */
 
 enum winpos {
 	WIN_POS_FILL = 1,
+	WIN_POS_CENTER,
 	WIN_POS_TOP_LEFT,
 	WIN_POS_TOP_RIGHT,
 	WIN_POS_BOTTOM_LEFT,
@@ -276,6 +277,7 @@ static struct keymap kmap[] = {
 	{ SHIFT, XK_F6, 0, place_window, (void *) WIN_POS_TOP_RIGHT, },
 	{ SHIFT, XK_F7, 0, place_window, (void *) WIN_POS_BOTTOM_LEFT, },
 	{ SHIFT, XK_F8, 0, place_window, (void *) WIN_POS_BOTTOM_RIGHT, },
+	{ SHIFT, XK_F10, 0, place_window, (void *) WIN_POS_CENTER, },
 	{ MODKEY, XK_F5, 0, place_window, (void *) WIN_POS_LEFT_FILL, },
 	{ MODKEY, XK_F6, 0, place_window, (void *) WIN_POS_RIGHT_FILL, },
 	{ MODKEY, XK_F7, 0, place_window, (void *) WIN_POS_TOP_FILL, },
@@ -882,6 +884,10 @@ static void place_window(void *arg)
 		w = curscr->w - 2 * BORDER_WIDTH - WINDOW_PAD;
 		h = curscr->h - 2 * BORDER_WIDTH - WINDOW_PAD;
 		break;
+	case WIN_POS_CENTER:
+		x = curscr->x + curscr->w / 2 - curscr->w / 4;
+		y = curscr->y + curscr->h / 2 - curscr->h / 4;
+		goto halfwh;
 	case WIN_POS_LEFT_FILL:
 		dd("WIN_POS_LEFT_FILL\n");
 		x = curscr->x;
