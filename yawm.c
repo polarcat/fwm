@@ -1299,7 +1299,6 @@ static struct screen *pointer2screen(void)
         r = xcb_query_pointer_reply(dpy, c, NULL);
         if (r) {
 		scr = coord2screen(r->root_x, r->root_y);
-		ii("screen %d by %d,%d\n", scr->id, r->root_x, r->root_y);
 		free(r);
 	}
 
@@ -1961,6 +1960,9 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	struct client *cli;
 
 	curscr = coord2screen(e->root_x, e->root_y);
+	if (!curscr)
+		return;
+
 	trace_screen_metrics(curscr);
 	if (curscr && curscr->panel == e->child) {
 		return;
