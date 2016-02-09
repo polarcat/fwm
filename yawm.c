@@ -1897,11 +1897,22 @@ static void handle_panel_press(xcb_button_press_event_t *e)
 	}
 }
 
+static void refresh_titles(void)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		print_title(scr, 0);
+	}
+}
+
 static void handle_button_release(xcb_button_release_event_t *e)
 {
 	mouse_x = mouse_y = mouse_button = 0;
 	xcb_ungrab_pointer(dpy, XCB_CURRENT_TIME);
 	xcb_flush(dpy);
+	refresh_titles();
 }
 
 static void handle_button_press(xcb_button_press_event_t *e)
@@ -1993,24 +2004,13 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	xcb_configure_window(dpy, cli->win, mask, val);
 	xcb_flush(dpy);
 
-	ii("client's screen %d\n", cli->scr->id);
 	if (cli->scr != curscr || curscr->tag->win != cli->win) { /* retag */
-		{
-		struct client *tmp = scr2client(cli->scr, e->child, WIN_TYPE_NORMAL);
-		if (!tmp)
-			ee("client for win %p not found\n", e->child);
-		}
 		list_del(&cli->head);
 		list_add(&curscr->tag->clients, &cli->head);
 		cli->scr = curscr;
 		curscr->tag->win = cli->win;
 		ii("win %p now on tag %s screen %d\n", e->child,
 		   curscr->tag->name, curscr->id);
-		{
-		struct client *tmp = scr2client(curscr, e->child, WIN_TYPE_NORMAL);
-		if (!tmp)
-			ee("client for win %p not found\n", e->child);
-		}
 	}
 }
 
