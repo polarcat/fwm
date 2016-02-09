@@ -2481,20 +2481,14 @@ static void init_keys(void)
 	if (!mod)
 		panic("\nxcb_get_modifier_mapping_keycodes() failed\n");
 
+#ifdef DEBUG
 	for (i = 0; i < r->keycodes_per_modifier; i++)
 		dd("%d: key code %x ? %x\n", i, mod[i], SHIFT);
+#endif
 
 	free(r);
 
 	xcb_ungrab_key(dpy, XCB_GRAB_ANY, rootscr->root, XCB_MOD_MASK_ANY);
-
-	ptr = kmap;
-	while (ptr->mod) {
-		dd("mod %p, sym %p, key %p\n", ptr->mod, ptr->sym, ptr->key);
-		xcb_grab_key(dpy, 1, rootscr->root, ptr->mod, ptr->key,
-			     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-		ptr++;
-	}
 
 	syms = xcb_key_symbols_alloc(dpy);
 	if (!syms)
@@ -2507,7 +2501,9 @@ static void init_keys(void)
 			panic("xcb_key_symbols_get_keycode(sym=%p) failed\n",
 			      ptr->sym);
 		ptr->key = *key;
-		dd("grab mod %p + key %p\n", ptr->mod, ptr->key);
+		xcb_grab_key(dpy, 1, rootscr->root, ptr->mod, ptr->key,
+			     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+		dd("grab mod %p + key %p (%p)\n", ptr->mod, ptr->key, ptr->sym);
 		ptr++;
 	}
 
