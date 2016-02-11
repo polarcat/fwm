@@ -130,9 +130,6 @@ static uint32_t panel_height = 24; /* need to adjust with font height */
 
 #define MENU_ICON "::"
 
-#define TIME_STR_FMT "%Y-%m-%d/%V %H:%M"
-#define TIME_STR_DEF "0000-00-00/00 00:00"
-#define TIME_STR_MAX sizeof(TIME_STR_DEF)
 #define TIME_REFRESH_INTERVAL 30000 /* ms */
 
 #define MODKEY XCB_MOD_MASK_4
@@ -148,7 +145,7 @@ enum panel_area { /* in order of appearance */
 	PANEL_AREA_MENU,
 	PANEL_AREA_TITLE,
 	PANEL_AREA_DOCK,
-	PANEL_AREA_TIME,
+	PANEL_AREA_TEXT,
 	PANEL_AREA_MAX,
 };
 
@@ -323,8 +320,6 @@ static xcb_atom_t a_desktop;
 static xcb_atom_t a_client_list;
 static xcb_atom_t a_systray;
 
-static time_t prev_time;
-
 static char tray_class[16];
 static char dock_class[16];
 
@@ -464,9 +459,6 @@ static void panel_items_stat(struct screen *scr)
 			break;
 		case PANEL_AREA_DOCK:
 			name = "PANEL_AREA_DOCK";
-			break;
-		case PANEL_AREA_TIME:
-			name = "PANEL_AREA_TIME";
 			break;
 		}
 
@@ -859,8 +851,8 @@ static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
 	xcb_configure_window(dpy, cli->win, mask, val);
 
-	tt("cli %p, win %p, geo %ux%u+%d+%d\n", cli, cli->win,
-	   cli->w, cli->h, cli->x, cli->y);
+	tt("screen %d, cli %p, win %p, geo %ux%u+%d+%d\n", cli->scr->id, cli,
+	   cli->win, cli->w, cli->h, cli->x, cli->y);
 }
 
 static void place_window(void *arg)
@@ -1232,7 +1224,6 @@ static int calc_title_max(struct screen *scr)
 }
 
 #define DOCKWIN_GAP (BORDER_WIDTH * 2)
-#define DOCKWIN_OFFSET (6 * DOCKWIN_GAP)
 
 static void dock_del(struct client *cli)
 {
@@ -1244,7 +1235,7 @@ static void dock_del(struct client *cli)
 	list_del(&cli->list);
 	free(cli);
 
-	x = scr->items[PANEL_AREA_TIME].x - DOCKWIN_OFFSET;
+	x = scr->items[PANEL_AREA_DOCK].x;
 	list_walk(cur, &scr->dock) {
 		cli = list2client(cur);
 		x -= (cli->w + DOCKWIN_GAP + BORDER_WIDTH);
@@ -1264,17 +1255,17 @@ static void dock_add(struct screen *scr, struct client *cli)
 	list_add(&scr->dock, &cli->head);
 	list_add(&clients, &cli->list);
 
-	cli->scr = defscr;
+	cli->scr = scr;
 	cli->flags |= CLI_FLG_DOCK;
 	cli->w = panel_height + panel_height / 3;
 	cli->h = panel_height - 3 * DOCKWIN_GAP - 1;
 
-	x = scr->items[PANEL_AREA_TIME].x - DOCKWIN_OFFSET;
+	x = scr->items[PANEL_AREA_DOCK].x;
 
 	if (scr->flags & SCR_FLG_PANEL_TOP)
 		y = DOCKWIN_GAP;
 	else
-		y = scr->h + DOCKWIN_GAP;
+		y = scr->y + scr->h + DOCKWIN_GAP;
 
 	list_walk(cur, &scr->dock) {
 		struct client *cli = list2client(cur);
@@ -1529,38 +1520,6 @@ static void print_menu(struct screen *scr)
 		        sizeof(MENU_ICON) - 1);
 }
 
-static void print_time(struct screen *scr, int force)
-{
-	time_t t;
-	struct tm *tm;
-	char str[TIME_STR_MAX];
-	int16_t x;
-	uint16_t w;
-
-	ii("print_time screen %d, %p ? %p\n", scr->id, scr, defscr);
-
-	if (scr != defscr)
-		return;
-
-	t = time(NULL);
-	if (t == prev_time && !force)
-		return;
-
-	tm = localtime(&t);
-	if (!tm)
-		return;
-
-	if (strftime(str, TIME_STR_MAX, TIME_STR_FMT, tm) == 0)
-		strncpy(str, TIME_STR_DEF, TIME_STR_MAX);
-
-	x = scr->items[PANEL_AREA_TIME].x;
-	w = scr->items[PANEL_AREA_TIME].w;
-
-	draw_panel_text(scr, &normal_color, x, w, (XftChar8 *) str,
-			sizeof(str) - 1);
-	prev_time = t;
-}
-
 static int tag_clicked(struct tag *tag, int16_t x)
 {
 	if (x >= tag->x && x <= tag->x + tag->w)
@@ -1711,7 +1670,6 @@ static void redraw_panel_items(struct screen *scr)
 
 	print_menu(scr);
 	print_title(scr, scr->tag->win);
-	print_time(scr, 1);
 }
 
 static int update_panel_items(struct screen *scr)
@@ -1719,9 +1677,11 @@ static int update_panel_items(struct screen *scr)
 	int16_t x;
 	uint16_t h, w;
 
-	text_exts(TIME_STR_DEF, TIME_STR_MAX, &w, &h);
-	scr->items[PANEL_AREA_TIME].x = scr->w - w;
-	scr->items[PANEL_AREA_TIME].w = w;
+	scr->items[PANEL_AREA_TEXT].x = scr->x + scr->w - FONT_SIZE_FT;
+	scr->items[PANEL_AREA_TEXT].w = 0;
+
+	scr->items[PANEL_AREA_DOCK].x = scr->items[PANEL_AREA_TEXT].x;
+	scr->items[PANEL_AREA_DOCK].w = w;
 
 	panel_vpad = panel_height - (panel_height - FONT_SIZE_FT) / 2;
 
@@ -1735,13 +1695,12 @@ static int update_panel_items(struct screen *scr)
 	scr->items[PANEL_AREA_MENU].w = w + panel_vpad;
 	x += scr->items[PANEL_AREA_MENU].w + 1;
 
-	w = scr->items[PANEL_AREA_TIME].x - 1 - x - panel_vpad;
+	w = scr->items[PANEL_AREA_DOCK].x - 1 - x - panel_vpad;
 	scr->items[PANEL_AREA_TITLE].w = w;
 	scr->items[PANEL_AREA_TITLE].x = x;
 	calc_title_max(scr);
 
 	print_menu(scr);
-	print_time(scr, 1); /* last element on panel */
 }
 
 #if 0
@@ -1890,12 +1849,6 @@ static void handle_panel_press(xcb_button_press_event_t *e)
 		ii("title\n");
 	} else if pointer_inside(curscr, PANEL_AREA_DOCK, e->event_x) {
 		ii("dock\n");
-	} else if (pointer_inside(curscr, PANEL_AREA_TIME, e->event_x)) {
-		ii("clock\n");
-		if (curscr->items[PANEL_AREA_TIME].action) {
-			void *arg = curscr->items[PANEL_AREA_TIME].arg;
-			curscr->items[PANEL_AREA_TIME].action(arg);
-		}
 	}
 }
 
@@ -2098,6 +2051,31 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	xcb_flush(dpy);
 }
 
+#ifndef DEBUG
+#define print_atom_name(a) do {} while(0)
+#else
+static void print_atom_name(xcb_atom_t atom)
+{
+	int len;
+        char *name, *tmp;
+        xcb_get_atom_name_reply_t *r;
+	xcb_get_atom_name_cookie_t c;
+
+	c = xcb_get_atom_name(dpy, atom);
+        r = xcb_get_atom_name_reply(dpy, c, NULL);
+        if (r) {
+		len = xcb_get_atom_name_name_length(r);
+                if (len > 0) {
+			name = xcb_get_atom_name_name(r);
+			tmp = strndup(name, len);
+			ii("atom %d, name %s, len %d\n", atom, tmp, len);
+			free(tmp);
+		}
+                free(r);
+        }
+}
+#endif /* DEBUG */
+
 static void handle_property_notify(xcb_property_notify_event_t *e)
 {
 	ii("XCB_PROPERTY_NOTIFY: win %p, atom %d\n", e->window, e->atom);
@@ -2108,6 +2086,8 @@ static void handle_property_notify(xcb_property_notify_event_t *e)
 		if (curscr)
 			print_title(curscr, e->window);
 		break;
+	default:
+		print_atom_name(((xcb_property_notify_event_t *) e)->atom);
 	}
 }
 
@@ -2157,22 +2137,6 @@ static void handle_configure_notify(xcb_configure_notify_event_t *e)
 #endif
 
 #if 0
-static void print_atom_name(xcb_atom_t atom)
-{
-        char *name;
-        xcb_get_atom_name_reply_t *r;
-	xcb_get_atom_name_cookie_t c;
-
-	c = xcb_get_atom_name(dpy, atom);
-        r = xcb_get_atom_name_reply(dpy, c, NULL);
-        if (r) {
-                if (xcb_get_atom_name_name_length(r) > 0) {
-			name = xcb_get_atom_name_name(r);
-			tt("atom %d, name %s\n", atom, name);
-		}
-                free(r);
-        }
-}
 
 #define SYSTEM_TRAY_REQUEST_DOCK 0
 #define SYSTEM_TRAY_BEGIN_MESSAGE 1
@@ -2729,7 +2693,7 @@ int main()
 	while (1) {
 		int rc = poll(&pfd, 1, TIME_REFRESH_INTERVAL);
 		if (rc == 0) { /* timeout */
-			print_time(defscr, 0);
+			/* TODO: some user-defined periodic task */
 		} else if (rc < 0) {
 			if (errno == EINTR)
 				continue;
