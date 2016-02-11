@@ -1241,9 +1241,11 @@ static void dock_del(struct client *cli)
 	int16_t x;
 
 	list_del(&cli->head);
+	list_del(&cli->list);
 	free(cli);
+
 	x = scr->items[PANEL_AREA_TIME].x - DOCKWIN_OFFSET;
-	list_walk(cur, &cli->scr->dock) {
+	list_walk(cur, &scr->dock) {
 		cli = list2client(cur);
 		x -= (cli->w + DOCKWIN_GAP + BORDER_WIDTH);
 		client_moveresize(cli, x, cli->y, cli->w, cli->h);
