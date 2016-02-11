@@ -926,6 +926,7 @@ static void place_window(void *arg)
 
 out:
 	client_moveresize(cli, x, y, w, h);
+	window_raise(cli->win);
 	xcb_flush(dpy);
 	return;
 halfwh:
