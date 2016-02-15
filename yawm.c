@@ -74,6 +74,7 @@
 
 /* defaults */
 
+static uint8_t baselen;
 static char *basedir;
 
 static uint32_t border_docked = 0x505050;
@@ -119,10 +120,13 @@ static uint32_t panel_height = 24; /* need to adjust with font height */
 #define TAGS_LINE_MAX 128
 #define TITLE_LINE_MAX 128
 
-#define TAG_NAME_MAX 32
-#define BASE_PATH_MAX 255
-#define BASE_PATH_MIN (sizeof("/0/0xffffffffffffffff") - 1)
-#define TAGS_MAX 8 /* let's be sane here */
+#ifndef TAG_NAME_MAX
+#define TAG_NAME_MAX 15
+#endif
+
+#if TAG_NAME_MAX > 15
+#error "TAG_NAME_MAX is too big, max is 15"
+#endif
 
 #define MOUSE_BTN_LEFT 1
 #define MOUSE_BTN_MID 2
@@ -1055,16 +1059,14 @@ static void switch_tag(struct screen *scr, enum dir dir)
 			tag = list2tag(scr->tag->head.prev);
 	}
 
-	scr->tag->win = 0;
 	scr->tag->flags &= ~TAG_FLG_ACTIVE;
 	print_tag(scr, scr->tag, &normal_color, 0);
 	hide_windows(scr->tag);
 
+	scr->tag = tag;
 	tag->flags |= TAG_FLG_ACTIVE;
 	print_tag(scr, tag, &active_color, 1);
 	show_windows(scr);
-	scr->tag = tag;
-
 }
 
 static void walk_tags(void *arg)
@@ -1177,7 +1179,7 @@ static struct tag *client_tag(struct screen *scr, xcb_window_t win)
 	int len;
 	uint8_t id;
 	char class[CLASS_STR_MAX];
-	char path[BASE_PATH_MAX], *ptr;
+	char path[baselen], *ptr;
 	struct stat st;
 
 	get_prop_str(win, XCB_ATOM_WM_CLASS, class, sizeof(class));
@@ -1613,42 +1615,45 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id, uint16_t po
 /*
  * Tags dir structure:
  *
- * /<basedir>/<screennumber>/tags/<tagname>/<winclass>
+ * /<basedir>/<screennumber>/tags/<tagnumber>/{.name,<winclass1>,<winclassN>}
  */
+
+#define TAG_BASE_STR "/255/tags/255/.name"
+
 static int init_tags(struct screen *scr)
 {
 	struct list_head *cur;
-	int16_t i;
+	uint8_t i;
 	uint16_t pos;
-	char path[BASE_PATH_MAX];
-	DIR *dir;
-	struct dirent *ent;
+	char path[baselen + sizeof(TAG_BASE_STR)];
+	char name[TAG_NAME_MAX + 1] = { 0 };
+	int len, fd;
 
-	i = 0;
 	pos = scr->items[PANEL_AREA_TAGS].x;
 	if (!basedir) {
-		ww("no user defined tags\n");
+		ww("base directory is not set\n");
 		goto out;
 	}
 
-	snprintf(path, sizeof(path), "%s/%d/tags", basedir, scr->id);
-	dir = opendir(path);
-	if (!dir) {
-		ii("no user defined tags for screen %d\n", scr->id);
-		goto out;
-	}
-
-	while ((ent = readdir(dir))) {
-		if (ent->d_name[0] == '.' || ent->d_name[1] == '.')
+	/* not very optimal but ok for in init routine */
+	for (i = 0; i < UCHAR_MAX; i++ ) {
+		snprintf(path, baselen + sizeof(TAG_BASE_STR),
+			 "%s/%d/tags/%d/.name", basedir, scr->id, i);
+		fd = open(path, O_RDONLY);
+		if (fd < 0)
 			continue;
-		ii("tag %s, offset %d\n", ent->d_name, pos);
-		pos = tag_add(scr, ent->d_name, i++, pos);
+		read(fd, name, sizeof(name) - 1);
+		close(fd);
+		if (name[0] == '\0')
+			snprintf(name, sizeof(name), "%d", i);
+		ii("screen %d tag %d name %s\n", scr->id, i, name);
+		pos = tag_add(scr, name,i,  pos);
+		memset(name, 0, TAG_NAME_MAX);
 	}
 
-	closedir(dir);
 out:
-	if (i == 0) /* add default tag */
-		pos = tag_add(scr, "*", 0, scr->items[PANEL_AREA_TAGS].x);
+	if (pos == scr->items[PANEL_AREA_TAGS].x) /* add default tag */
+		pos = tag_add(scr, "*", 0, pos);
 
 	return pos - panel_vpad / 2;
 }
@@ -2624,10 +2629,12 @@ int main()
 	}
 
 	basedir = getenv("YAWM_HOME");
-	if (!basedir)
-		basedir = "/tmp/yawm";
-
-	ii("basedir: %s\n", basedir);
+	if (!basedir) {
+		ww("YAWM_HOME is not set use default layout\n");
+	} else {
+		ii("basedir: %s\n", basedir);
+		baselen = strlen(basedir);
+	}
 
 	if (signal(SIGCHLD, spawn_cleanup) == SIG_ERR)
 		panic("SIGCHLD handler failed\n");
@@ -2692,7 +2699,7 @@ int main()
 	ii("enter events loop\n");
 
 	while (1) {
-		int rc = poll(&pfd, 1, TIME_REFRESH_INTERVAL);
+		int rc = poll(&pfd, 1, -1);
 		if (rc == 0) { /* timeout */
 			/* TODO: some user-defined periodic task */
 		} else if (rc < 0) {
