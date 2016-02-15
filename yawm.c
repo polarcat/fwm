@@ -2611,6 +2611,49 @@ static void init_rootwin(void)
 	xcb_flush(dpy);
 }
 
+static int init_homedir(void)
+{
+	const char *home;
+	int mode = S_IRWXU;
+
+	home = getenv("HOME");
+	if (!home)
+		return -1;
+
+	baselen = strlen(home) + sizeof("/.yawm");
+	basedir = calloc(1, baselen);
+	if (!basedir) {
+		ee("calloc(%d) failed, use built-in config\n", baselen);
+		return -1;
+	}
+
+	if (chdir(home) < 0) {
+		ee("chdir(%s) failed\n", home);
+		goto err;
+	}
+
+	if (mkdir(".yawm", mode) < 0 && errno != EEXIST) {
+		ee("mkdir(%s/.yawm) failed\n", home);
+		goto err;
+	}
+
+	snprintf(basedir, baselen, "%s/.yawm", home);
+	ii("basedir: %s\n", basedir);
+
+	if (chdir(basedir) < 0) { /* sanity check */
+		ee("chdir(%s) failed\n", basedir);
+		goto err;
+	}
+
+	return 0;
+
+err:
+	free(basedir);
+	basedir = NULL;
+	baselen = 0;
+	return -1;
+}
+
 int main()
 {
 	struct pollfd pfd;
@@ -2628,13 +2671,8 @@ int main()
 		ii("logfile: %s\n", logfile);
 	}
 
-	basedir = getenv("YAWM_HOME");
-	if (!basedir) {
-		ww("YAWM_HOME is not set use default layout\n");
-	} else {
-		ii("basedir: %s\n", basedir);
-		baselen = strlen(basedir);
-	}
+	if (init_homedir() < 0)
+		ww("home directory no initialized\n");
 
 	if (signal(SIGCHLD, spawn_cleanup) == SIG_ERR)
 		panic("SIGCHLD handler failed\n");
