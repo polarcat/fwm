@@ -541,39 +541,6 @@ static void update_clients_list(void)
 	xcb_flush(dpy);
 }
 
-#define ROOT_STR_MAX 64
-
-static void refresh_rules(void)
-{
-	char name[ROOT_STR_MAX];
-
-	get_prop_str(rootscr->root, XCB_ATOM_WM_NAME, name, sizeof(name));
-	if (name[0] == '\0')
-		return;
-
-	if (strncmp(name, "tray", sizeof("tray") - 1) == 0) {
-		const char *arg = &name[sizeof("tray")];
-		if (arg) {
-			int len = strlen(arg);
-			if (len > 0 && len < sizeof(tray_class)) {
-				strncpy(tray_class, arg, strlen(arg));
-				tray_class[len] = '\0';
-			}
-		}
-	} else if (strncmp(name, "dock", sizeof("dock") - 1) == 0) {
-		const char *arg = &name[sizeof("dock")];
-		if (arg) {
-			int len = strlen(arg);
-			if (len > 0 && len < sizeof(dock_class)) {
-				strncpy(dock_class, arg, strlen(arg));
-				dock_class[len] = '\0';
-			}
-		}
-	}
-
-	dd("root %s\n", name);
-}
-
 #define match_class(a, b) strncmp(a, b, sizeof(b) - 1) == 0
 
 #define CLASS_STR_MAX 32
@@ -1352,8 +1319,6 @@ static void client_add(xcb_window_t win)
 		}
 	}
 
-	refresh_rules();
-
 	c = xcb_get_window_attributes(dpy, win);
 	a = xcb_get_window_attributes_reply(dpy, c, NULL);
 	if (!a) {
@@ -1567,16 +1532,31 @@ static void select_tag(struct screen *scr, int x)
 	}
 }
 
-static int tag_add(struct screen *scr, const char *name, uint8_t id, uint16_t pos)
+static struct tag *tag_get(struct screen *scr, const char *name, uint8_t id)
 {
-	XftColor *color;
+	struct list_head *cur;
 	struct tag *tag;
-	uint16_t h;
+
+	list_walk(cur, &scr->tags) {
+		tag = list2tag(cur);
+		if (tag->id == id) {
+			if (tag->name && strcmp(tag->name, name) == 0)
+				return tag;
+			else if (tag->name)
+				free(tag->name);
+
+			draw_panel_text(scr, NULL, tag->x, tag->w, NULL, 0);
+
+			tag->nlen = strlen(name);
+			tag->name = strdup(name);
+			return tag;
+		}
+	}
 
 	tag = calloc(1, sizeof(*tag));
 	if (!tag) {
 		ee("calloc() failed\n");
-		return;
+		return NULL;
 	}
 
 	scr->ntags++;
@@ -1587,11 +1567,29 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id, uint16_t po
 	if (!tag->name) {
 		ee("strdup(%s) failed\n", name);
 		free(tag);
-		return;
+		return NULL;
 	}
 
 	list_init(&tag->clients);
 	list_add(&scr->tags, &tag->head);
+
+	return tag;
+}
+
+static int tag_add(struct screen *scr, const char *name, uint8_t id,
+		   uint16_t pos)
+{
+	XftColor *color;
+	struct tag *tag;
+	uint16_t h;
+
+	ii("0 screen %d tag %d name %s\n", scr->id, id, name);
+
+	tag = tag_get(scr, name, id);
+	if (!tag)
+		return;
+
+	ii("1 screen %d tag %d name %s\n", scr->id, tag->id, tag->name);
 
 	text_exts(name, tag->nlen, &tag->w, &h);
 
@@ -1627,7 +1625,8 @@ static int init_tags(struct screen *scr)
 	uint16_t pos;
 	char path[baselen + sizeof(TAG_BASE_STR)];
 	char name[TAG_NAME_MAX + 1] = { 0 };
-	int len, fd;
+	int fd;
+	struct stat st;
 
 	pos = scr->items[PANEL_AREA_TAGS].x;
 	if (!basedir) {
@@ -1636,14 +1635,25 @@ static int init_tags(struct screen *scr)
 	}
 
 	/* not very optimal but ok for in init routine */
-	for (i = 0; i < UCHAR_MAX; i++ ) {
+	for (i = 0; i < 3; i++ ) {
+		st.st_mode = 0;
+		snprintf(path, baselen + sizeof(TAG_BASE_STR), "%s/%d/tags/%d",
+			 basedir, scr->id, i);
+		ii("check path %s\n", path);
+		if (stat(path, &st) < 0)
+			continue;
+		if ((st.st_mode & S_IFMT) != S_IFDIR)
+			continue;
+
+		ii("path %s ok\n", path);
+
 		snprintf(path, baselen + sizeof(TAG_BASE_STR),
 			 "%s/%d/tags/%d/.name", basedir, scr->id, i);
 		fd = open(path, O_RDONLY);
-		if (fd < 0)
-			continue;
-		read(fd, name, sizeof(name) - 1);
-		close(fd);
+		if (fd > 0) {
+			read(fd, name, sizeof(name) - 1);
+			close(fd);
+		}
 		if (name[0] == '\0')
 			snprintf(name, sizeof(name), "%d", i);
 		ii("screen %d tag %d name %s\n", scr->id, i, name);
@@ -1683,6 +1693,9 @@ static int update_panel_items(struct screen *scr)
 	int16_t x;
 	uint16_t h, w;
 
+	/* clean panel */
+	fill_rect(scr->panel, scr->gc, scr->x, 0, scr->w, panel_height);
+
 	scr->items[PANEL_AREA_TEXT].x = scr->x + scr->w - FONT_SIZE_FT;
 	scr->items[PANEL_AREA_TEXT].w = 0;
 
@@ -1707,7 +1720,58 @@ static int update_panel_items(struct screen *scr)
 	calc_title_max(scr);
 
 	print_menu(scr);
+	print_title(scr, scr->tag->win);
 }
+
+#define ROOT_STR_MAX 64
+#define match_cstr(str, cstr) strncmp(str, cstr, sizeof(cstr) - 1) == 0
+
+static void refresh_rules(void)
+{
+	char name[ROOT_STR_MAX];
+
+	get_prop_str(rootscr->root, XCB_ATOM_WM_NAME, name, sizeof(name));
+	if (name[0] == '\0')
+		return;
+
+	if (match_cstr(name, "tray")) {
+		const char *arg = &name[sizeof("tray")];
+		if (arg) {
+			int len = strlen(arg);
+			if (len > 0 && len < sizeof(tray_class)) {
+				strncpy(tray_class, arg, strlen(arg));
+				tray_class[len] = '\0';
+			}
+		}
+	} else if (match_cstr(name, "dock")) {
+		const char *arg = &name[sizeof("dock")];
+		if (arg) {
+			int len = strlen(arg);
+			if (len > 0 && len < sizeof(dock_class)) {
+				strncpy(dock_class, arg, strlen(arg));
+				dock_class[len] = '\0';
+			}
+		}
+	} else if (match_cstr(name, "refresh-panel")) {
+		const char *arg = &name[sizeof("refresh-panel")];
+		if (arg) {
+			int id = atoi(arg);
+			struct list_head *cur;
+			list_walk(cur, &screens) {
+				struct screen *scr = list2screen(cur);
+				if (scr->id == id) {
+					ii("refresh panel at screen %d\n", id);
+					update_panel_items(scr);
+					break;
+				}
+			}
+		}
+	}
+
+	dd("root %s\n", name);
+}
+
+#undef match_cstr
 
 #if 0
 /*
@@ -2086,10 +2150,12 @@ static void handle_property_notify(xcb_property_notify_event_t *e)
 {
 	ii("XCB_PROPERTY_NOTIFY: win %p, atom %d\n", e->window, e->atom);
 
-	switch (((xcb_property_notify_event_t *) e)->atom) {
+	switch (e->atom) {
 	case XCB_ATOM_WM_NAME:
 		ii("screen %d\n", curscr ? curscr->id : -1);
-		if (curscr)
+		if (e->window == rootscr->root)
+			refresh_rules();
+		else if (curscr)
 			print_title(curscr, e->window);
 		break;
 	default:
@@ -2605,6 +2671,7 @@ static void init_rootwin(void)
 
 	/* subscribe events */
 	val = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT |
+	      XCB_EVENT_MASK_PROPERTY_CHANGE |
 	      XCB_EVENT_MASK_STRUCTURE_NOTIFY |
 	      XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
 	xcb_change_window_attributes(dpy, win, XCB_CW_EVENT_MASK, &val);
