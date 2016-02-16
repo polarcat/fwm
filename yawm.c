@@ -85,6 +85,8 @@ static uint32_t panel_height = 24; /* need to adjust with font height */
 
 /* defines */
 
+typedef uint8_t strlen_t;
+
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
@@ -142,6 +144,12 @@ static uint32_t panel_height = 24; /* need to adjust with font height */
 
 /* data structures */
 
+struct sprop { /* string property */
+	char *str;
+	strlen_t len;
+	xcb_get_property_reply_t *ptr; /* to free */
+};
+
 static void spawn(const char **argv);
 
 enum panel_area { /* in order of appearance */
@@ -161,7 +169,7 @@ struct panel_item {
 };
 
 static uint16_t panel_vpad;
-static uint16_t title_max;
+static strlen_t title_max;
 
 struct screen { /* per output abstraction */
 	uint8_t id;
@@ -209,7 +217,7 @@ struct tag {
 	int flags;
 
 	char *name; /* visible name */
-	int nlen; /* name length */
+	strlen_t nlen; /* name length */
 };
 
 #define list2tag(item) list_entry(item, struct tag, head)
@@ -324,9 +332,6 @@ static xcb_atom_t a_desktop;
 static xcb_atom_t a_client_list;
 static xcb_atom_t a_systray;
 
-static char tray_class[16];
-static char dock_class[16];
-
 /* ... and the mess begins */
 
 static void text_exts(const char *text, int len, uint16_t *w, uint16_t *h)
@@ -410,36 +415,20 @@ static void clean(void)
 		ee("%s, err=%d\n", #func, error__->error_code);\
 }
 
-static int get_prop_str(xcb_window_t win, enum xcb_atom_enum_t atom,
-			char *ret, int max)
+static void get_sprop(struct sprop *ret, xcb_window_t win,
+		      enum xcb_atom_enum_t atom)
 {
 	xcb_get_property_cookie_t c;
-	xcb_get_property_reply_t *r;
-	int len;
-	char *tmp;
 
-	c = xcb_get_property(dpy, 0, win, atom, XCB_ATOM_STRING, 0, max);
-	r = xcb_get_property_reply(dpy, c, NULL);
-	if (!r) {
-		ret[0] = '\0';
-		return 0;
+	c = xcb_get_property(dpy, 0, win, atom, XCB_ATOM_STRING, 0, UCHAR_MAX);
+	ret->ptr = xcb_get_property_reply(dpy, c, NULL);
+	if (!ret->ptr) {
+		ret->str = NULL;
+		ret->len = 0;
+	} else {
+		ret->str = xcb_get_property_value(ret->ptr);
+		ret->len = xcb_get_property_value_length(ret->ptr);
 	}
-	tmp = xcb_get_property_value(r);
-	len = xcb_get_property_value_length(r);
-	max--;
-	if (len == 0 || !tmp) {
-		ret[0] = '\0';
-	} else if (len >= max) {
-		ret[max] = '\0';
-		len = max - 1;
-		memcpy(ret, tmp, len);
-	} else if (len < max) {
-		ret[len] = '\0';
-		memcpy(ret, tmp, len);
-	}
-	dd("len=%d, max=%d, str=%s\n", len, max, tmp);
-	free(r);
-	return len;
 }
 
 #ifndef VERBOSE
@@ -473,12 +462,9 @@ static void panel_items_stat(struct screen *scr)
 }
 #endif
 
-#define TITLE_STR_MAX 128
-
 static void print_title(struct screen *scr, xcb_window_t win)
 {
-	char title[TITLE_STR_MAX];
-	uint16_t len;
+	struct sprop title;
 	uint16_t w, h;
 
 	if (!win) {
@@ -486,20 +472,21 @@ static void print_title(struct screen *scr, xcb_window_t win)
 				scr->items[PANEL_AREA_TITLE].w, NULL, 0);
 	}
 
-	len = get_prop_str(win, XCB_ATOM_WM_NAME, title, sizeof(title));
-	if (!len || title[0] == '\0')
+	get_sprop(&title, win, XCB_ATOM_WM_NAME);
+	if (!title.ptr || !title.len)
 		return;
 
-	if (len >= title_max) {
-		len = title_max;
-		title[len - 2] = '.';
-		title[len - 1] = '.';
-		title[len] = '.';
+	if (title.len >= title_max) {
+		title.len = title_max;
+		title.str[title.len - 2] = '.';
+		title.str[title.len - 1] = '.';
+		title.str[title.len] = '.';
 	}
 
 	draw_panel_text(scr, &active_color, scr->items[PANEL_AREA_TITLE].x,
 			scr->items[PANEL_AREA_TITLE].w,
-			(XftChar8 *) title, len);
+			(XftChar8 *) title.str, title.len);
+	free(title.ptr);
 }
 
 static enum winstatus window_status(xcb_window_t win)
@@ -526,14 +513,14 @@ static void update_clients_list(void)
 {
 	struct list_head *cur;
 
-	ii("NET_CLIENT_LIST %d\n", a_client_list);
+	dd("NET_CLIENT_LIST %d\n", a_client_list);
 
 	xcb_delete_property(dpy, rootscr->root, a_client_list);
 	list_walk(cur, &clients) {
 		struct client *cli = glob2client(cur);
 		if (window_status(cli->win) == WIN_STATUS_UNKNOWN)
 			continue;
-		ii("append client %p, window %p\n", cli, cli->win);
+		dd("append client %p, window %p\n", cli, cli->win);
 		xcb_change_property(dpy, XCB_PROP_MODE_APPEND, rootscr->root,
 				    a_client_list, XCB_ATOM_WINDOW, 32, 1,
 				    &cli->win);
@@ -541,31 +528,42 @@ static void update_clients_list(void)
 	xcb_flush(dpy);
 }
 
-#define match_class(a, b) strncmp(a, b, sizeof(b) - 1) == 0
-
-#define CLASS_STR_MAX 32
+/*
+ * Dock dir structure:
+ *
+ * /<basedir>/dock/{<winclass1>,<winclassN>}
+ */
 
 static int window_docked(xcb_window_t win)
 {
-	char class[CLASS_STR_MAX];
+	struct sprop class;
+	char *path;
+	struct stat st;
+	int rc;
 
-	get_prop_str(win, XCB_ATOM_WM_CLASS, class, sizeof(class));
-	if (class[0] == '\0')
+	get_sprop(&class, win, XCB_ATOM_WM_CLASS);
+	if (!class.ptr) {
+		ww("unable to detect window class\n");
 		return 0;
+	}
+	ii("win %p, class %s\n", win, class.str);
 
-	dd("class %s\n", class);
-	if (match_class(class, tray_class)) {
-		dd("got tray window\n");
-		return 1;
-	} else if (match_class(class, dock_class)) {
-		dd("got dock window\n");
-		return 1;
-	} else if (match_class(class, dock_class)) {
-		dd("got dock window\n");
-		return 1;
+	rc = 0;
+	class.len += baselen + sizeof("/dock/");
+	path = calloc(1, class.len);
+	if (!path)
+		goto out;
+
+	snprintf(path, class.len, "%s/dock/%s", basedir, class.str);
+	if (stat(path, &st) == 0) {
+		rc = 1;
+		ii("win %p is docked window\n", win);
 	}
 
-	return 0;
+out:
+	free(class.ptr);
+	free(path);
+	return rc;
 }
 
 #define trace_screen_metrics(scr)\
@@ -906,7 +904,7 @@ halfwh:
 	goto out;
 halfw:
 	w = curscr->w / 2 - 2 * BORDER_WIDTH;
-	h = curscr->h - 2 * BORDER_WIDTH;
+	h = curscr->h - 2 * BORDER_WIDTH - WINDOW_PAD;
 	goto out;
 halfh:
 	w = curscr->w - 2 * BORDER_WIDTH - WINDOW_PAD;
@@ -1074,14 +1072,6 @@ static void trace_screens(void)
 	}
 }
 
-static void trace_windows(struct tag *tag)
-{
-	struct list_head *cur;
-
-	list_walk(cur, &tag->clients)
-		dd("tag %s, win %p\n", tag->name, (list2client(cur))->win);
-}
-
 static void retag_window(void *arg)
 {
 	struct client *cli;
@@ -1129,49 +1119,41 @@ static void move_window(xcb_window_t win, int16_t x, int16_t y)
 }
 #endif
 
-static struct tag *id2tag(struct screen *scr, uint8_t id)
-{
-	struct list_head *cur;
-
-	list_walk(cur, &scr->tags) {
-		struct tag *tag = list2tag(cur);
-		if (tag->id == id)
-			return tag;
-	}
-	return NULL;
-}
-
 static struct tag *client_tag(struct screen *scr, xcb_window_t win)
 {
-	int len;
-	uint8_t id;
-	char class[CLASS_STR_MAX];
-	char path[baselen], *ptr;
+	struct sprop class;
+	char *path;
 	struct stat st;
+	struct list_head *cur;
+	struct tag *tag;
 
-	get_prop_str(win, XCB_ATOM_WM_CLASS, class, sizeof(class));
-	if (class[0] == '\0')
+	get_sprop(&class, win, XCB_ATOM_WM_CLASS);
+	if (!class.ptr) {
+		ww("unable to detect window class\n");
 		return NULL;
+	}
+	dd("win %p, class %s\n", win, class.str);
 
-	dd("class: %s\n", class);
+	tag = NULL;
+	class.len += baselen + sizeof("/255/tags/255/");
+	path = calloc(1, class.len);
+	if (!path)
+		goto out;
 
-	snprintf(path, sizeof(path), "%s/%d/", basedir, scr->id);
-	if (stat(path, &st) < 0)
-		return NULL;
-
-	len = strlen(path);
-	ptr = path + len;
-	len = sizeof(path) - 1 - len;
-
-	for (id = 0; id < scr->ntags; id++) {
-		snprintf(ptr, len, "%d/%s", id, class);
+	list_walk(cur, &scr->tags) {
+		tag = list2tag(cur);
+		snprintf(path, class.len, "%s/%d/tags/%d/%s", basedir,
+			 scr->id, tag->id, class.str);
 		if (stat(path, &st) < 0)
 			continue;
 
-		dd("class %s, tag %d\n", class, id);
-		return id2tag(scr, id);
+		dd("win %p, class %s, tag %d\n", win, class.str, tag->id);
+		return tag;
 	}
 
+out:
+	free(class.ptr);
+	free(path);
 	return NULL;
 }
 
@@ -1280,8 +1262,6 @@ static void client_add(xcb_window_t win)
 	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
 
-	tt("win %p\n", win);
-
 	if (win == rootscr->root)
 		return;
 
@@ -1293,9 +1273,15 @@ static void client_add(xcb_window_t win)
 		goto out;
 	}
 
-	scr = coord2screen(g->x, g->y);
-	if (!scr)
+	if (g->x == 0 && g->y == 0) {
 		scr = pointer2screen();
+	} else {
+		/* preserve current location of already existed windows */
+		scr = coord2screen(g->x, g->y);
+		if (!scr)
+			scr = pointer2screen();
+	}
+
 	if (!scr) {
 		if (panel_window(win)) {
 			goto out;
@@ -1318,6 +1304,8 @@ static void client_add(xcb_window_t win)
 			goto out; /* already added */
 		}
 	}
+
+	dd("screen %d, win %p, xy %d,%d\n", scr->id, win, g->x, g->y);
 
 	c = xcb_get_window_attributes(dpy, win);
 	a = xcb_get_window_attributes_reply(dpy, c, NULL);
@@ -1616,14 +1604,13 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
  * /<basedir>/<screennumber>/tags/<tagnumber>/{.name,<winclass1>,<winclassN>}
  */
 
-#define TAG_BASE_STR "/255/tags/255/.name"
-
 static int init_tags(struct screen *scr)
 {
 	struct list_head *cur;
-	uint8_t i;
 	uint16_t pos;
-	char path[baselen + sizeof(TAG_BASE_STR)];
+	uint8_t i;
+	strlen_t len = baselen + sizeof("/255/tags/255/.name");
+	char path[len];
 	char name[TAG_NAME_MAX + 1] = { 0 };
 	int fd;
 	struct stat st;
@@ -1635,20 +1622,15 @@ static int init_tags(struct screen *scr)
 	}
 
 	/* not very optimal but ok for in init routine */
-	for (i = 0; i < 3; i++ ) {
+	for (i = 0; i < UCHAR_MAX; i++ ) {
 		st.st_mode = 0;
-		snprintf(path, baselen + sizeof(TAG_BASE_STR), "%s/%d/tags/%d",
-			 basedir, scr->id, i);
-		ii("check path %s\n", path);
+		sprintf(path, "%s/%d/tags/%d", basedir, scr->id, i);
 		if (stat(path, &st) < 0)
 			continue;
 		if ((st.st_mode & S_IFMT) != S_IFDIR)
 			continue;
 
-		ii("path %s ok\n", path);
-
-		snprintf(path, baselen + sizeof(TAG_BASE_STR),
-			 "%s/%d/tags/%d/.name", basedir, scr->id, i);
+		sprintf(path, "%s/%d/tags/%d/.name", basedir, scr->id, i);
 		fd = open(path, O_RDONLY);
 		if (fd > 0) {
 			read(fd, name, sizeof(name) - 1);
@@ -1656,7 +1638,7 @@ static int init_tags(struct screen *scr)
 		}
 		if (name[0] == '\0')
 			snprintf(name, sizeof(name), "%d", i);
-		ii("screen %d tag %d name %s\n", scr->id, i, name);
+		dd("screen %d tag %d name %s\n", scr->id, i, name);
 		pos = tag_add(scr, name,i,  pos);
 		memset(name, 0, TAG_NAME_MAX);
 	}
@@ -1728,32 +1710,14 @@ static int update_panel_items(struct screen *scr)
 
 static void refresh_rules(void)
 {
-	char name[ROOT_STR_MAX];
+	struct sprop name;
 
-	get_prop_str(rootscr->root, XCB_ATOM_WM_NAME, name, sizeof(name));
-	if (name[0] == '\0')
+	get_sprop(&name, rootscr->root, XCB_ATOM_WM_NAME);
+	if (!name.ptr)
 		return;
 
-	if (match_cstr(name, "tray")) {
-		const char *arg = &name[sizeof("tray")];
-		if (arg) {
-			int len = strlen(arg);
-			if (len > 0 && len < sizeof(tray_class)) {
-				strncpy(tray_class, arg, strlen(arg));
-				tray_class[len] = '\0';
-			}
-		}
-	} else if (match_cstr(name, "dock")) {
-		const char *arg = &name[sizeof("dock")];
-		if (arg) {
-			int len = strlen(arg);
-			if (len > 0 && len < sizeof(dock_class)) {
-				strncpy(dock_class, arg, strlen(arg));
-				dock_class[len] = '\0';
-			}
-		}
-	} else if (match_cstr(name, "refresh-panel")) {
-		const char *arg = &name[sizeof("refresh-panel")];
+	if (match_cstr(name.str, "refresh-panel")) {
+		const char *arg = &name.str[sizeof("refresh-panel")];
 		if (arg) {
 			int id = atoi(arg);
 			struct list_head *cur;
@@ -1768,7 +1732,8 @@ static void refresh_rules(void)
 		}
 	}
 
-	dd("root %s\n", name);
+	dd("root %s\n", name.str);
+	free(name.ptr);
 }
 
 #undef match_cstr
@@ -2100,8 +2065,10 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 
 	scr = coord2screen(e->root_x, e->root_y);
 
-	tt("cur screen %d, tag %s, win %p ? %p\n", curscr->id, curscr->tag->name,
+	dd("cur screen %d, tag %s, win %p ? %p\n", curscr->id, curscr->tag->name,
 	   curscr->tag->win, e->event);
+	dd("new screen %d, tag %s, win %p ? %p\n", scr->id, scr->tag->name,
+	   scr->tag->win, e->event);
 
 	if (curscr && curscr->panel == e->event)
 		return;
@@ -2126,29 +2093,29 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 #else
 static void print_atom_name(xcb_atom_t atom)
 {
-	int len;
-        char *name, *tmp;
-        xcb_get_atom_name_reply_t *r;
+	strlen_t len;
+	char *name, *tmp;
+	xcb_get_atom_name_reply_t *r;
 	xcb_get_atom_name_cookie_t c;
 
 	c = xcb_get_atom_name(dpy, atom);
-        r = xcb_get_atom_name_reply(dpy, c, NULL);
-        if (r) {
+	r = xcb_get_atom_name_reply(dpy, c, NULL);
+	if (r) {
 		len = xcb_get_atom_name_name_length(r);
-                if (len > 0) {
+		if (len > 0) {
 			name = xcb_get_atom_name_name(r);
 			tmp = strndup(name, len);
 			ii("atom %d, name %s, len %d\n", atom, tmp, len);
 			free(tmp);
 		}
-                free(r);
-        }
+		free(r);
+	}
 }
 #endif /* DEBUG */
 
 static void handle_property_notify(xcb_property_notify_event_t *e)
 {
-	ii("XCB_PROPERTY_NOTIFY: win %p, atom %d\n", e->window, e->atom);
+	te("XCB_PROPERTY_NOTIFY: win %p, atom %d\n", e->window, e->atom);
 
 	switch (e->atom) {
 	case XCB_ATOM_WM_NAME:
@@ -2461,7 +2428,7 @@ static int handle_events(void)
 	return 1;
 }
 
-static xcb_atom_t get_atom_by_name(const char *str, int len)
+static xcb_atom_t get_atom_by_name(const char *str, strlen_t len)
 {
 	xcb_intern_atom_cookie_t c;
 	xcb_intern_atom_reply_t *r;
@@ -2602,8 +2569,8 @@ static void init_crtc(uint8_t id, xcb_randr_get_output_info_reply_t *out,
 
 static void init_output(int id, xcb_randr_output_t out, xcb_timestamp_t ts)
 {
-	char name[1024];
-	int len;
+	char name[UCHAR_MAX];
+	strlen_t len;
 	xcb_randr_get_output_info_cookie_t c;
 	xcb_randr_get_output_info_reply_t *r;
 
@@ -2789,10 +2756,6 @@ int main()
 	a_desktop = atom_by_name("_NET_WM_DESKTOP");
 	a_client_list = atom_by_name("_NET_CLIENT_LIST");
 	a_systray = atom_by_name("_NET_SYSTEM_TRAY_OPCODE");
-
-	strncpy(tray_class, "yawmtray", sizeof(tray_class) - 1);
-	strncpy(dock_class, "yawmdock", sizeof(tray_class) - 1);
-	ii("default tray class: %s, dock class: %s\n", tray_class, dock_class);
 
 	clients_scan();
 
