@@ -74,9 +74,6 @@
 
 /* defaults */
 
-static uint8_t baselen;
-static char *basedir;
-
 static uint32_t border_docked = 0x505050;
 static uint32_t border_active = 0x905030;
 static uint32_t border_normal = 0x303030;
@@ -149,8 +146,6 @@ struct sprop { /* string property */
 	strlen_t len;
 	xcb_get_property_reply_t *ptr; /* to free */
 };
-
-static void spawn(const char **argv);
 
 enum panel_area { /* in order of appearance */
 	PANEL_AREA_TAGS,
@@ -272,32 +267,62 @@ struct keymap {
 	uint16_t mod;
 	xcb_keysym_t sym;
 	xcb_keycode_t key;
+	char *keyname;
+	const char *actname;
 	void (*action)(void *);
 	void *arg;
+	struct list_head head;
+	uint16_t alloc;
 };
 
-static struct keymap kmap[] = {
-	{ MODKEY, XK_Tab, 0, next_window, NULL, },
-	{ MODKEY, XK_BackSpace, 0, prev_window, NULL, },
-	{ MODKEY, XK_Return, 0, raise_window, NULL, },
-	{ MODKEY, XK_r, 0, spawn, (void *) xrun, },
-	{ MODKEY, XK_t, 0, spawn, (void *) term, },
-	{ SHIFT, XK_F5, 0, place_window, (void *) WIN_POS_TOP_LEFT, },
-	{ SHIFT, XK_F6, 0, place_window, (void *) WIN_POS_TOP_RIGHT, },
-	{ SHIFT, XK_F7, 0, place_window, (void *) WIN_POS_BOTTOM_LEFT, },
-	{ SHIFT, XK_F8, 0, place_window, (void *) WIN_POS_BOTTOM_RIGHT, },
-	{ SHIFT, XK_F10, 0, place_window, (void *) WIN_POS_CENTER, },
-	{ MODKEY, XK_F5, 0, place_window, (void *) WIN_POS_LEFT_FILL, },
-	{ MODKEY, XK_F6, 0, place_window, (void *) WIN_POS_RIGHT_FILL, },
-	{ MODKEY, XK_F7, 0, place_window, (void *) WIN_POS_TOP_FILL, },
-	{ MODKEY, XK_F8, 0, place_window, (void *) WIN_POS_BOTTOM_FILL, },
-	{ MODKEY, XK_F9, 0, place_window, (void *) WIN_POS_FILL, },
-	{ MODKEY, XK_Home, 0, retag_window, (void *) DIR_NEXT, },
-	{ MODKEY, XK_End, 0, retag_window, (void *) DIR_PREV, },
-	{ MODKEY, XK_Page_Up, 0, walk_tags, (void *) DIR_NEXT, },
-	{ MODKEY, XK_Page_Down, 0, walk_tags, (void *) DIR_PREV, },
-	{ 0, 0, 0, NULL, NULL, },
+/* built-in default actions */
+static struct keymap kmap_def[] = {
+	{ MODKEY, XK_Tab, 0, "mod_tab", "_window_next",
+	  next_window, NULL,
+	},
+	{ MODKEY, XK_BackSpace, 0, "mod_backspace", "_window_prev",
+	  prev_window, NULL,
+	},
+	{ MODKEY, XK_Return, 0, "mod_return", "_raise_window",
+	  raise_window, NULL,
+	},
+	{ MODKEY, XK_Home, 0, "mod_home", "_retag_next",
+	  retag_window, (void *) DIR_NEXT,
+	},
+	{ MODKEY, XK_End, 0, "mod_end", "_retag_prev",
+	  retag_window, (void *) DIR_PREV,
+	},
+	{ MODKEY, XK_Page_Up, 0, "mod_pageup", "_tag_next",
+	  walk_tags, (void *) DIR_NEXT,
+	},
+	{ MODKEY, XK_Page_Down, 0, "mod_pagedown", "_tag_prev",
+	  walk_tags, (void *) DIR_PREV,
+	},
+	{ SHIFT, XK_F5, 0, "shift_f5", "_top_left",
+	  place_window, (void *) WIN_POS_TOP_LEFT, },
+	{ SHIFT, XK_F6, 0, "shift_f6", "_top_right",
+	  place_window, (void *) WIN_POS_TOP_RIGHT, },
+	{ SHIFT, XK_F7, 0, "shift_f7", "_bottom_left",
+	  place_window, (void *) WIN_POS_BOTTOM_LEFT, },
+	{ SHIFT, XK_F8, 0, "shift_f8", "_bottom_right",
+	  place_window, (void *) WIN_POS_BOTTOM_RIGHT, },
+	{ SHIFT, XK_F10, 0, "shift_f10", "_center",
+	  place_window, (void *) WIN_POS_CENTER, },
+	{ MODKEY, XK_F5, 0, "mod_f5", "_left_fill",
+	  place_window, (void *) WIN_POS_LEFT_FILL, },
+	{ MODKEY, XK_F6, 0, "mod_f6", "_right_fill",
+	  place_window, (void *) WIN_POS_RIGHT_FILL, },
+	{ MODKEY, XK_F7, 0, "mod_f7", "_top_fill",
+	  place_window, (void *) WIN_POS_TOP_FILL, },
+	{ MODKEY, XK_F8, 0, "mod_f8", "_bottom_fill",
+	  place_window, (void *) WIN_POS_BOTTOM_FILL, },
+	{ MODKEY, XK_F9, 0, "mod_f9", "_full_screen",
+	  place_window, (void *) WIN_POS_FILL, },
 };
+
+#define list2keymap(item) list_entry(item, struct keymap, head)
+
+static struct list_head keymap;
 
 /* globals */
 
@@ -331,6 +356,11 @@ static xcb_atom_t a_state;
 static xcb_atom_t a_desktop;
 static xcb_atom_t a_client_list;
 static xcb_atom_t a_systray;
+
+static strlen_t actname_max = UCHAR_MAX - 1;
+
+static uint8_t baselen;
+static char *basedir;
 
 /* ... and the mess begins */
 
@@ -376,6 +406,7 @@ static void spawn_cleanup(int sig)
 	}
 }
 
+#if 0
 static void spawn(const char **argv)
 {
 	if (fork() != 0)
@@ -388,6 +419,25 @@ static void spawn(const char **argv)
 	execvp(argv[0], argv);
 	exit(0);
 }
+#else
+static void spawn(void *arg)
+{
+	struct keymap *kmap = arg;
+	int len = baselen + sizeof("/keys/") + UCHAR_MAX;
+	char path[len];
+
+
+	if (fork() != 0)
+		return;
+
+	close(xcb_get_file_descriptor(dpy));
+	close(ConnectionNumber(xdpy));
+	setsid();
+	snprintf(path, len, "%s/keys/%s", basedir, kmap->keyname);
+	system(path);
+	exit(0);
+}
+#endif
 
 static void clean(void)
 {
@@ -1705,10 +1755,177 @@ static int update_panel_items(struct screen *scr)
 	print_title(scr, scr->tag->win);
 }
 
+static void grab_key(xcb_key_symbols_t *syms, struct keymap *kmap)
+{
+	xcb_void_cookie_t c;
+	xcb_generic_error_t *e;
+	xcb_keycode_t *key;
+
+	key = xcb_key_symbols_get_keycode(syms, kmap->sym);
+	if (!key) {
+		ee("xcb_key_symbols_get_keycode(sym=%p) failed\n", kmap->sym);
+		return;
+	}
+
+	kmap->key = *key;
+	free(key);
+
+	c = xcb_grab_key_checked(dpy, 1, rootscr->root, kmap->mod, kmap->key,
+				 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+	e = xcb_request_check(dpy, c);
+        if (e) {
+		ee("xcb_grab_key_checked() failed, err=%d\n", e->error_code);
+		kmap->key = 0;
+	}
+
+#ifdef DEBUG
+	if (!e) {
+		ii("grab mod %p + key %p (sym=%p)\n", kmap->mod, kmap->key,
+		   kmap->sym);
+	}
+#endif
+}
+
+static void map_key(const char *path, xcb_key_symbols_t *syms, uint16_t mod,
+		    xcb_keysym_t sym, char *action, const char *keyname)
+{
+	int fd, n;
+	struct keymap *kmap;
+	struct list_head *cur;
+
+	fd = open(path, O_RDONLY);
+	if (!fd) {
+		ee("open(%s) failed\n");
+		return;
+	}
+
+	n = read(fd, action, actname_max);
+	if (n < 1) {
+		ee("read(%s) failed\n", path);
+		goto out;
+	}
+	action[n] = '\0';
+
+	/* first check if we just re-bind existing action */
+	list_walk(cur, &keymap) {
+		kmap = list2keymap(cur);
+		if (strcmp(kmap->actname, action) != 0)
+			continue;
+
+		kmap->mod = mod;
+		kmap->sym = sym;
+
+		grab_key(syms, kmap);
+		if (!kmap->key) {
+			ww("nack re-map %s to %s\n", kmap->actname, keyname);
+		} else {
+			if (kmap->alloc)
+				free(kmap->keyname);
+			kmap->alloc = 1;
+			kmap->keyname = strdup("keyname");
+			dd("re-map %s to %s\n", kmap->actname, keyname);
+		}
+		goto out;
+	}
+
+	/* not really, add new spawn binding */
+	kmap = calloc(1, sizeof(kmap));
+	if (!kmap)
+		goto out;
+
+	kmap->mod = mod;
+	kmap->sym = sym;
+
+	grab_key(syms, kmap);
+	if (!kmap->key) {
+		free(kmap);
+	} else {
+		kmap->alloc = 1;
+		kmap->keyname = strdup(keyname);
+		kmap->actname = "spawn";
+		kmap->action = spawn;
+		list_add(&keymap, &kmap->head);
+		ii("map %s to %s\n", kmap->actname, keyname);
+	}
+out:
+	close(fd);
+}
+
+static void init_keys(void)
+{
+	int tmp;
+	int len = baselen + sizeof("/keys/") + UCHAR_MAX;
+	char path[len], *ptr;
+	char buf[actname_max];
+	struct stat st;
+	xcb_key_symbols_t *syms;
+	uint8_t i;
+#if 0
+	xcb_keycode_t *mod;
+	xcb_get_modifier_mapping_cookie_t c;
+	xcb_get_modifier_mapping_reply_t *r;
+
+	c = xcb_get_modifier_mapping(dpy);
+	r = xcb_get_modifier_mapping_reply(dpy, c, NULL);
+	if (!r) {
+		ee("xcb_get_modifier_mapping_reply() failed\n");
+		return;
+	}
+
+	mod = xcb_get_modifier_mapping_keycodes(r);
+	if (!mod) {
+		ee("xcb_get_modifier_mapping_keycodes() failed\n");
+		return;
+	}
+
+	for (i = 0; i < r->keycodes_per_modifier; i++)
+		ii("%d: key code %x ? %x\n", i, mod[i], SHIFT);
+
+	free(r);
+#endif
+
+	syms = xcb_key_symbols_alloc(dpy);
+	if (!syms) {
+		ee("xcb_key_symbols_alloc() failed\n");
+		return;
+	}
+
+	snprintf(path, len, "%s/keys/", basedir);
+	tmp = strlen(path);
+	ptr = path + tmp;
+	len -= tmp;
+	for (i = 33; i < 127; i++) {
+		snprintf(ptr, len, "mod_%c", i);
+		if (stat(path, &st) < 0)
+			continue;
+		map_key(path, syms, MODKEY, i, buf, ptr);
+	}
+	for (i = 1; i < 13; i++) {
+		snprintf(ptr, len, "mod_f%u", i);
+		if (stat(path, &st) < 0)
+			continue;
+		map_key(path, syms, MODKEY, XK_F1 + (i - 1), buf, ptr);
+	}
+	for (i = 1; i < 13; i++) {
+		snprintf(ptr, len, "shift_f%u", i);
+		if (stat(path, &st) < 0)
+			continue;
+		map_key(path, syms, SHIFT, XK_F1 + (i - 1), buf, ptr);
+	}
+	for (i = 0; i < ARRAY_SIZE(kmap_def); i++) {
+		snprintf(ptr, len, "%s", kmap_def[i].keyname);
+		if (stat(path, &st) < 0)
+			continue;
+		ii("path: %s\n", path);
+	}
+
+	xcb_key_symbols_free(syms);
+}
+
 #define ROOT_STR_MAX 64
 #define match_cstr(str, cstr) strncmp(str, cstr, sizeof(cstr) - 1) == 0
 
-static void refresh_rules(void)
+static void handle_user_request(void)
 {
 	struct sprop name;
 
@@ -1716,7 +1933,9 @@ static void refresh_rules(void)
 	if (!name.ptr)
 		return;
 
-	if (match_cstr(name.str, "refresh-panel")) {
+	if (match_cstr(name.str, "reload-keys")) {
+		init_keys();
+	} else if (match_cstr(name.str, "refresh-panel")) {
 		const char *arg = &name.str[sizeof("refresh-panel")];
 		if (arg) {
 			int id = atoi(arg);
@@ -2006,23 +2225,25 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 
 static void handle_key_press(xcb_key_press_event_t *e)
 {
-	struct keymap *ptr = kmap;
+	struct list_head *cur;
 
 	curscr = coord2screen(e->root_x, e->root_y);
 
 	ii("screen %d, key %p, state %p, pos %d,%d\n", curscr->id, e->detail,
 	   e->state, e->root_x, e->root_y);
 
-	while (ptr->mod) {
-		if (ptr->key == e->detail && ptr->mod == e->state) {
-			ii("%p pressed\n", ptr->key);
-			if (ptr->action && !ptr->arg)
-				ptr->action(e);
+	list_walk(cur, &keymap) {
+		struct keymap *kmap = list2keymap(cur);
+		if (kmap->key == e->detail && kmap->mod == e->state) {
+			dd("%p pressed, action %s\n", kmap->key, kmap->actname);
+			if (kmap->action == spawn)
+				kmap->action(kmap);
+			else if (kmap->arg)
+				kmap->action(kmap->arg);
 			else
-				ptr->action(ptr->arg);
+				kmap->action(e);
 			return;
 		}
-		ptr++;
 	}
 }
 
@@ -2121,7 +2342,7 @@ static void handle_property_notify(xcb_property_notify_event_t *e)
 	case XCB_ATOM_WM_NAME:
 		ii("screen %d\n", curscr ? curscr->id : -1);
 		if (e->window == rootscr->root)
-			refresh_rules();
+			handle_user_request();
 		else if (curscr)
 			print_title(curscr, e->window);
 		break;
@@ -2467,52 +2688,50 @@ static void init_font(void)
 			   &active, &active_color);
 }
 
-static void init_keys(void)
+static void init_keys_def(void)
 {
-	xcb_get_modifier_mapping_cookie_t c;
-	xcb_get_modifier_mapping_reply_t *r;
-	xcb_keycode_t *mod;
+	strlen_t tmp;
+	uint8_t i;
+	char path[baselen + sizeof("/keys/") + UCHAR_MAX];
+	int fd;
 	xcb_key_symbols_t *syms;
-	xcb_keycode_t *key;
-	struct keymap *ptr;
-	int i;
 
-	c = xcb_get_modifier_mapping(dpy);
-	r = xcb_get_modifier_mapping_reply(dpy, c, NULL);
-	if (!r)
-		panic("xcb_get_modifier_mapping_reply() failed\n");
-
-	mod = xcb_get_modifier_mapping_keycodes(r);
-	if (!mod)
-		panic("\nxcb_get_modifier_mapping_keycodes() failed\n");
-
-#ifdef DEBUG
-	for (i = 0; i < r->keycodes_per_modifier; i++)
-		dd("%d: key code %x ? %x\n", i, mod[i], SHIFT);
-#endif
-
-	free(r);
+	list_init(&keymap);
 
 	xcb_ungrab_key(dpy, XCB_GRAB_ANY, rootscr->root, XCB_MOD_MASK_ANY);
 
 	syms = xcb_key_symbols_alloc(dpy);
-	if (!syms)
-		panic("xcb_key_symbols_alloc() failed\n");
-
-	ptr = kmap;
-	while (ptr->mod) {
-		key = xcb_key_symbols_get_keycode(syms, ptr->sym);
-		if (!key)
-			panic("xcb_key_symbols_get_keycode(sym=%p) failed\n",
-			      ptr->sym);
-		ptr->key = *key;
-		xcb_grab_key(dpy, 1, rootscr->root, ptr->mod, ptr->key,
-			     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-		dd("grab mod %p + key %p (%p)\n", ptr->mod, ptr->key, ptr->sym);
-		ptr++;
+	if (!syms) {
+		ee("xcb_key_symbols_alloc() failed\n");
+		return;
 	}
 
-	xcb_key_symbols_free(syms);
+	for (i = 0; i < ARRAY_SIZE(kmap_def); i++) {
+		struct keymap *kmap = &kmap_def[i];
+
+		grab_key(syms, kmap);
+		if (!kmap->key) {
+			ww("nack map %s to %s\n", kmap->actname, kmap->keyname);
+			continue;
+		}
+
+		ii("map %s to %s\n", kmap->actname, kmap->keyname);
+		list_add(&keymap, &kmap->head);
+
+		if (!basedir)
+			continue;
+
+		tmp = strlen(kmap->actname);
+		if (tmp > actname_max)
+			actname_max = tmp;
+
+		sprintf(path, "%s/keys/%s", basedir, kmap->keyname);
+		fd = open(path, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
+		write(fd, kmap->actname, strlen(kmap->actname));
+		close(fd);
+	}
+
+	actname_max++;
 }
 
 static void screen_add(uint8_t id, int16_t x, int16_t y, uint16_t w, uint16_t h)
@@ -2583,16 +2802,11 @@ static void init_output(int id, xcb_randr_output_t out, xcb_timestamp_t ts)
 	if (len > sizeof(name))
 		len = sizeof(name);
 	snprintf(name, len, "%s", xcb_randr_get_output_info_name(r));
-	ii("output %s%d, %dx%d\n", name, id, r->mm_width, r->mm_height);
-	ii("connection %d\n", r->connection);
-
-	if (r->connection != XCB_RANDR_CONNECTION_CONNECTED) {
-		ii("not connected\n");
-		goto out;
-	}
-
 	init_crtc(id, r, ts);
 out:
+	ii("output %s%d, %dx%d: %s\n", name, id, r->mm_width, r->mm_height,
+	   r->connection != XCB_RANDR_CONNECTION_CONNECTED ? "not connected" :
+	   "connected");
 	free(r);
 }
 
@@ -2735,6 +2949,7 @@ int main()
 	ii("root %p, size %dx%d\n", rootscr->root, rootscr->width_in_pixels,
 	   rootscr->height_in_pixels);
 
+	init_keys_def();
 	init_keys();
 	init_rootwin();
 	init_outputs();
