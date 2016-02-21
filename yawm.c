@@ -2199,13 +2199,16 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	}
 
 	dx = e->root_x - mouse_x;
-	dy = e->root_y - mouse_y;
 
 	mouse_x = e->root_x;
 	mouse_y = e->root_y;
 
+	if (!(cli->flags & CLI_FLG_DOCK)) {
+		dy = e->root_y - mouse_y;
+		cli->y += dy;
+	}
+
 	cli->x += dx;
-	cli->y += dy;
 
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	val[0] = cli->x;
@@ -2213,7 +2216,8 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	xcb_configure_window(dpy, cli->win, mask, val);
 	xcb_flush(dpy);
 
-	if (cli->scr != curscr || curscr->tag->win != cli->win) { /* retag */
+	if ((cli->scr != curscr || curscr->tag->win != cli->win) &&
+	    !(cli->flags & CLI_FLG_DOCK)) { /* retag */
 		list_del(&cli->head);
 		list_add(&curscr->tag->clients, &cli->head);
 		cli->scr = curscr;
