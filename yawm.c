@@ -351,9 +351,7 @@ static int xscr;
 static Display *xdpy;
 static xcb_connection_t *dpy;
 
-static xcb_atom_t a_name;
 static xcb_atom_t a_state;
-static xcb_atom_t a_desktop;
 static xcb_atom_t a_client_list;
 static xcb_atom_t a_systray;
 
@@ -1248,9 +1246,8 @@ static void dock_del(struct client *cli)
 	calc_title_max(scr);
 }
 
-static void dock_add(struct screen *scr, struct client *cli)
+static void dock_add(struct screen *scr, struct client *cli, int tray)
 {
-	uint32_t mask, val[1] = { BORDER_WIDTH, };
 	struct list_head *cur;
 	int16_t x, y;
 
@@ -1259,8 +1256,12 @@ static void dock_add(struct screen *scr, struct client *cli)
 
 	cli->scr = scr;
 	cli->flags |= CLI_FLG_DOCK;
-	cli->w = panel_height + panel_height / 3;
 	cli->h = panel_height - 3 * DOCKWIN_GAP - 1;
+
+	if (tray)
+		cli->w = cli->h;
+	else
+		cli->w = panel_height + panel_height / 3;
 
 	x = scr->items[PANEL_AREA_DOCK].x;
 
@@ -1277,7 +1278,10 @@ static void dock_add(struct screen *scr, struct client *cli)
 
 	scr->items[PANEL_AREA_TITLE].w = x - scr->items[PANEL_AREA_TITLE].x;
 	calc_title_max(scr);
-	window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
+
+	if (!tray)
+		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
+
 	window_border_color(cli->win, border_docked);
 	xcb_map_window(dpy, cli->win);
 	xcb_flush(dpy);
@@ -1300,7 +1304,29 @@ static struct screen *pointer2screen(void)
         return scr;
 }
 
-static void client_add(xcb_window_t win)
+static uint8_t client_pointed(int16_t x, int16_t y, uint16_t w, uint16_t h)
+{
+	uint8_t ret;
+	xcb_query_pointer_cookie_t c;
+	xcb_query_pointer_reply_t *r;
+
+	c = xcb_query_pointer(dpy, rootscr->root);
+        r = xcb_query_pointer_reply(dpy, c, NULL);
+        if (!r)
+		return 0;
+
+	if (x <= r->win_x && r->win_x <= (x + w - 1) &&
+	    y <= r->win_y && r->win_y <= (y + h - 1)) {
+		ret = 1;
+	} else {
+		ret = 0;
+	}
+
+	free(r);
+	return ret;
+}
+
+static struct client *client_add(xcb_window_t win, int tray)
 {
 	uint8_t ntag;
 	struct tag *tag;
@@ -1313,8 +1339,9 @@ static void client_add(xcb_window_t win)
 	xcb_get_window_attributes_reply_t *a;
 
 	if (win == rootscr->root)
-		return;
+		return NULL;
 
+	cli = NULL;
 	a = NULL;
 	/* get initial geometry */
 	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
@@ -1355,13 +1382,14 @@ static void client_add(xcb_window_t win)
 		}
 	}
 
-	dd("screen %d, win %p, xy %d,%d\n", scr->id, win, g->x, g->y);
+	dd("screen %d, win %p, geo %ux%u+%d+%d\n", scr->id, win, g->width,
+	   g->height, g->x, g->y);
 
 	c = xcb_get_window_attributes(dpy, win);
 	a = xcb_get_window_attributes_reply(dpy, c, NULL);
 	if (!a) {
 		ee("xcb_get_window_attributes() failed\n");
-		return;
+		return NULL;
 	}
 
 	if (a->override_redirect) {
@@ -1384,15 +1412,15 @@ static void client_add(xcb_window_t win)
 	window_border_width(cli->win, BORDER_WIDTH);
 	window_border_color(cli->win, border_normal);
 
-	if (window_docked(win)) {
-		dock_add(scr, cli);
+	if (tray || window_docked(win)) {
+		dock_add(scr, cli, tray);
 		goto out;
 	}
 
 	/* subscribe events */
 	val[0] = XCB_EVENT_MASK_ENTER_WINDOW |
 		 XCB_EVENT_MASK_PROPERTY_CHANGE;
-	xcb_change_window_attributes(dpy, win, XCB_CW_EVENT_MASK, val);
+	xcb_change_window_attributes_checked(dpy, win, XCB_CW_EVENT_MASK, val);
 
 	if (!g->depth && !a->colormap) {
 		dd("win %p, root %p, colormap=%p, class=%u, depth=%u\n",
@@ -1421,13 +1449,8 @@ static void client_add(xcb_window_t win)
 	client_moveresize(cli, g->x, g->y, g->width, g->height);
 
 	if (scr->tag == tag) {
-		if (tag->win)
-			window_focus(scr, scr->tag->win, 0);
-
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 		xcb_map_window(dpy, cli->win);
-		window_focus(scr, cli->win, 1);
-		print_title(scr, cli->win);
 	} else {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
 		xcb_unmap_window(dpy, cli->win);
@@ -1436,15 +1459,23 @@ static void client_add(xcb_window_t win)
 	dd("screen %d, tag %s, cli %p, win %p, geo %ux%u+%d+%d\n", scr->id,
 	   scr->tag->name, cli, cli->win, cli->w, cli->h, cli->x, cli->y);
 
+	if (client_pointed(cli->x, cli->y, cli->w, cli->h)) {
+		window_focus(scr, cli->win, 1);
+		print_title(scr, cli->win);
+	}
+
 	update_clients_list();
 out:
 	xcb_flush(dpy);
 	free(a);
 	free(g);
+	return cli;
 }
 
 static void client_del(xcb_window_t win)
 {
+	uint8_t found;
+	struct list_head *cur;
 	struct client *cli;
 
 	cli = win2client(win);
@@ -1459,7 +1490,23 @@ static void client_del(xcb_window_t win)
 		return;
 	}
 
-	switch_window(cli->scr, DIR_NEXT);
+	/* find client under pointer */
+	found = 0;
+	list_walk(cur, &cli->scr->tag->clients) {
+		struct client *tmp = list2client(cur);
+		if (tmp->win == win)
+			continue;
+		if (client_pointed(tmp->x, tmp->y, tmp->w, tmp->h)) {
+			window_raise(tmp->win);
+			window_focus(tmp->scr, tmp->win, 1);
+			print_title(tmp->scr, tmp->win);
+			found = 1;
+		}
+	}
+
+	if (!found)
+		switch_window(cli->scr, DIR_NEXT);
+
 	list_del(&cli->head);
 	list_del(&cli->list);
 
@@ -1508,7 +1555,13 @@ static void clients_scan(void)
 		dd("++ handle win %p\n", wins[i]);
 		if (screen_panel(wins[i]))
 			continue;
-		client_add(wins[i]);
+		client_add(wins[i], 0);
+	}
+
+	if (curscr->tag->win) {
+		window_raise(curscr->tag->win);
+		window_focus(curscr, curscr->tag->win, 1);
+		print_title(curscr, curscr->tag->win);
 	}
 
 	free(tree);
@@ -2400,7 +2453,21 @@ static void handle_configure_notify(xcb_configure_notify_event_t *e)
 }
 #endif
 
-#if 0
+static void tray_add(xcb_window_t win)
+{
+	struct client *cli;
+
+	ii("%s: win %p\n", __func__, win);
+
+	cli = win2client(win);
+	if (!cli) {
+		cli = client_add(win, 1);
+		if (!cli) {
+			ee("client_add(%p) failed\n", win);
+			return;
+		}
+	}
+}
 
 #define SYSTEM_TRAY_REQUEST_DOCK 0
 #define SYSTEM_TRAY_BEGIN_MESSAGE 1
@@ -2410,16 +2477,15 @@ static void handle_client_message(xcb_client_message_event_t *e)
 {
 	print_atom_name(e->type);
 
-	ii("win %p, action %d\n", e->window, e->data.data32[0]);
+	dd("win %p, action %d, data %p, type %d (%d)\n", e->window,
+	   e->data.data32[0], e->data.data32[2], e->type, a_systray);
 	print_atom_name(e->data.data32[1]);
 
 	if (e->type == a_systray && e->format == 32 &&
 	    e->data.data32[1] == SYSTEM_TRAY_REQUEST_DOCK) {
-		xcb_window_t win = e->data.data32[2];
-		ii("win %x\n", win);
+		tray_add(e->data.data32[2]);
 	}
 }
-#endif
 
 static void print_configure_mask(uint32_t mask)
 {
@@ -2444,7 +2510,7 @@ static void print_configure_mask(uint32_t mask)
 #else
 static void print_configure_request(xcb_configure_request_event_t *e)
 {
-	dd("prop:\n"
+	ii("prop:\n"
 	   " response_type=%u\n"
 	   " stack_mode=%u\n"
 	   " sequence=%u\n"
@@ -2558,7 +2624,7 @@ static int handle_events(void)
 		handle_button_release((xcb_button_release_event_t *) e);
 		break;
 	case XCB_MOTION_NOTIFY:
-		mm("XCB_MOTION_NOTIFY\n");
+		te("XCB_MOTION_NOTIFY\n");
 		handle_motion_notify((xcb_motion_notify_event_t *) e);
 		break;
 	case XCB_CONFIGURE_REQUEST:
@@ -2595,7 +2661,7 @@ static int handle_events(void)
 		te("XCB_MAP_REQUEST: parent %p, win %p\n",
 		   ((xcb_map_request_event_t *) e)->parent,
 		   ((xcb_map_request_event_t *) e)->window);
-		client_add(((xcb_map_notify_event_t *) e)->window);
+		client_add(((xcb_map_notify_event_t *) e)->window, 0);
 		break;
 	case XCB_PROPERTY_NOTIFY:
 		handle_property_notify((xcb_property_notify_event_t *) e);
@@ -2606,6 +2672,12 @@ static int handle_events(void)
 		   ((xcb_unmap_notify_event_t *) e)->window);
 		handle_unmap_notify((xcb_unmap_notify_event_t *) e);
 		break;
+	case XCB_CLIENT_MESSAGE:
+		te("XCB_CLIENT_MESSAGE: win %p, type %d\n",
+		   ((xcb_client_message_event_t *) e)->window,
+		   ((xcb_client_message_event_t *) e)->type);
+		handle_client_message((xcb_client_message_event_t *) e);
+		break;
 #if 0
 	case XCB_CREATE_NOTIFY:
 		te("XCB_CREATE_NOTIFY: parent %p, window %p\n",
@@ -2613,14 +2685,8 @@ static int handle_events(void)
 		   ((xcb_create_notify_event_t *) e)->window);
 		handle_create_notify((xcb_create_notify_event_t *) e);
 		break;
-	case XCB_CLIENT_MESSAGE:
-		te("XCB_CLIENT_MESSAGE: win %p, type %d\n",
-		   ((xcb_client_message_event_t *) e)->window,
-		   ((xcb_client_message_event_t *) e)->type);
-		handle_client_message((xcb_client_message_event_t *) e);
-		break;
 	case XCB_CONFIGURE_NOTIFY:
-		mm("XCB_CONFIGURE_NOTIFY: event %p, window %p, above %p\n",
+		te("XCB_CONFIGURE_NOTIFY: event %p, window %p, above %p\n",
 		   ((xcb_configure_notify_event_t *) e)->event,
 		   ((xcb_configure_notify_event_t *) e)->window,
 		   ((xcb_configure_notify_event_t *) e)->above_sibling);
@@ -2837,6 +2903,56 @@ static void init_outputs(void)
 	free(r);
 }
 
+static void tray_notify(xcb_atom_t atom)
+{
+	xcb_client_message_event_t e = {
+		.response_type = XCB_CLIENT_MESSAGE,
+		.window = rootscr->root,
+		.type = XCB_ATOM_RESOURCE_MANAGER,
+		.format = 32,
+		.data.data32[0] = XCB_CURRENT_TIME,
+		.data.data32[1] = atom,
+		.data.data32[2] = defscr->panel,
+	};
+
+	xcb_send_event(dpy, 0, rootscr->root, 0xffffff, (void *) &e);
+}
+
+static void init_tray(void)
+{
+	xcb_get_selection_owner_cookie_t c;
+	xcb_get_selection_owner_reply_t *r;
+	xcb_atom_t a_tray, a_manager;
+	char *name = xcb_atom_name_by_screen("_NET_SYSTEM_TRAY", defscr->id);
+
+	if (!name) {
+		ee("failed to get systray atom name\n");
+		return;
+	}
+
+	a_tray = get_atom_by_name(name, strlen(name));
+	free(name);
+
+	ii("tray atom %d, manager atom %d\n", a_tray, a_manager);
+	print_atom_name(a_tray);
+	xcb_set_selection_owner(dpy, defscr->panel, a_tray, XCB_CURRENT_TIME);
+
+	/* verify selection */
+	c = xcb_get_selection_owner(dpy, a_tray);
+	r = xcb_get_selection_owner_reply(dpy, c, NULL);
+	if (!r) {
+		ee("xcb_get_selection_owner(%s) failed\n", name);
+		return;
+	}
+
+	if (r->owner != defscr->panel)
+		ww("systray owned by win %p scr %d\n", r->owner, defscr->id);
+	else
+		tray_notify(a_tray);
+
+	free(r);
+}
+
 static void init_rootwin(void)
 {
 	xcb_window_t win = rootscr->root;
@@ -2966,12 +3082,11 @@ int main()
 
 	trace_screens();
 
-	a_name = atom_by_name("_NEW_WM_NAME");
 	a_state = atom_by_name("WM_STATE");
-	a_desktop = atom_by_name("_NET_WM_DESKTOP");
 	a_client_list = atom_by_name("_NET_CLIENT_LIST");
 	a_systray = atom_by_name("_NET_SYSTEM_TRAY_OPCODE");
 
+	init_tray();
 	clients_scan();
 
 	pfd.fd = xcb_get_file_descriptor(dpy);
