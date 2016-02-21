@@ -607,7 +607,7 @@ static int window_docked(xcb_window_t win)
 	snprintf(path, class.len, "%s/dock/%s", basedir, class.str);
 	if (stat(path, &st) == 0) {
 		rc = 1;
-		ii("win %p is docked window\n", win);
+		ii("win %p is docked\n", win);
 	}
 
 out:
@@ -2543,14 +2543,6 @@ static int handle_events(void)
 			break;
                 }
 		break;
-	case XCB_CREATE_NOTIFY:
-		te("XCB_CREATE_NOTIFY: parent %p, window %p\n",
-		   ((xcb_create_notify_event_t *) e)->parent,
-		   ((xcb_create_notify_event_t *) e)->window);
-#if 0
-		handle_create_notify((xcb_create_notify_event_t *) e);
-#endif
-		break;
 	case XCB_BUTTON_PRESS:
 		mouse_x = ((xcb_button_press_event_t *) e)->root_x;
 		mouse_y = ((xcb_button_press_event_t *) e)->root_y;
@@ -2569,28 +2561,11 @@ static int handle_events(void)
 		mm("XCB_MOTION_NOTIFY\n");
 		handle_motion_notify((xcb_motion_notify_event_t *) e);
 		break;
-	case XCB_CLIENT_MESSAGE:
-		te("XCB_CLIENT_MESSAGE: win %p, type %d\n",
-		   ((xcb_client_message_event_t *) e)->window,
-		   ((xcb_client_message_event_t *) e)->type);
-#if 0
-		handle_client_message((xcb_client_message_event_t *) e);
-#endif
-		break;
 	case XCB_CONFIGURE_REQUEST:
 		te("XCB_CONFIGURE_REQUEST: win %p\n",
 		   ((xcb_configure_request_event_t *) e)->window);
 		print_configure_request((xcb_configure_request_event_t *) e);
 		handle_configure_request((xcb_configure_request_event_t *) e);
-		break;
-	case XCB_CONFIGURE_NOTIFY:
-		mm("XCB_CONFIGURE_NOTIFY: event %p, window %p, above %p\n",
-		   ((xcb_configure_notify_event_t *) e)->event,
-		   ((xcb_configure_notify_event_t *) e)->window,
-		   ((xcb_configure_notify_event_t *) e)->above_sibling);
-#if 0
-		handle_configure_notify((xcb_configure_notify_event_t *) e);
-#endif
 		break;
 	case XCB_DESTROY_NOTIFY:
 		te("XCB_DESTROY_NOTIFY: event %p, win %p\n",
@@ -2609,25 +2584,12 @@ static int handle_events(void)
 		   ((xcb_enter_notify_event_t *) e)->mode);
 		handle_enter_notify((xcb_enter_notify_event_t *) e);
 		break;
-	case XCB_EXPOSE:
-		te("XCB_EXPOSE: win %p\n", ((xcb_expose_event_t *) e)->window);
-		break;
-	case XCB_FOCUS_IN:
-		te("XCB_FOCUS_IN\n");
-		break;
 	case XCB_KEY_PRESS:
 		te("XCB_KEY_PRESS: root %p, win %p, child %p\n",
 		   ((xcb_key_press_event_t *) e)->root,
 		   ((xcb_key_press_event_t *) e)->event,
 		   ((xcb_key_press_event_t *) e)->child);
 		handle_key_press((xcb_key_press_event_t *) e);
-		break;
-	case XCB_MAPPING_NOTIFY:
-		te("XCB_MAPPING_NOTIFY\n");
-		break;
-	case XCB_MAP_NOTIFY:
-		te("XCB_MAP_NOTIFY: win %p\n",
-		   ((xcb_map_notify_event_t *) e)->window);
 		break;
 	case XCB_MAP_REQUEST:
 		te("XCB_MAP_REQUEST: parent %p, win %p\n",
@@ -2644,6 +2606,40 @@ static int handle_events(void)
 		   ((xcb_unmap_notify_event_t *) e)->window);
 		handle_unmap_notify((xcb_unmap_notify_event_t *) e);
 		break;
+#if 0
+	case XCB_CREATE_NOTIFY:
+		te("XCB_CREATE_NOTIFY: parent %p, window %p\n",
+		   ((xcb_create_notify_event_t *) e)->parent,
+		   ((xcb_create_notify_event_t *) e)->window);
+		handle_create_notify((xcb_create_notify_event_t *) e);
+		break;
+	case XCB_CLIENT_MESSAGE:
+		te("XCB_CLIENT_MESSAGE: win %p, type %d\n",
+		   ((xcb_client_message_event_t *) e)->window,
+		   ((xcb_client_message_event_t *) e)->type);
+		handle_client_message((xcb_client_message_event_t *) e);
+		break;
+	case XCB_CONFIGURE_NOTIFY:
+		mm("XCB_CONFIGURE_NOTIFY: event %p, window %p, above %p\n",
+		   ((xcb_configure_notify_event_t *) e)->event,
+		   ((xcb_configure_notify_event_t *) e)->window,
+		   ((xcb_configure_notify_event_t *) e)->above_sibling);
+		handle_configure_notify((xcb_configure_notify_event_t *) e);
+		break;
+	case XCB_EXPOSE:
+		te("XCB_EXPOSE: win %p\n", ((xcb_expose_event_t *) e)->window);
+		break;
+	case XCB_FOCUS_IN:
+		te("XCB_FOCUS_IN\n");
+		break;
+	case XCB_MAPPING_NOTIFY:
+		te("XCB_MAPPING_NOTIFY\n");
+		break;
+	case XCB_MAP_NOTIFY:
+		te("XCB_MAP_NOTIFY: win %p\n",
+		   ((xcb_map_notify_event_t *) e)->window);
+		break;
+#endif
 	default:
 		te("unhandled event type %d\n", type);
 		break;
