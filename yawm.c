@@ -2835,6 +2835,7 @@ static void screen_add(uint8_t id, int16_t x, int16_t y, uint16_t w, uint16_t h)
 static void init_crtc(uint8_t id, xcb_randr_get_output_info_reply_t *out,
 		      xcb_timestamp_t ts)
 {
+	struct list_head *cur;
 	xcb_randr_get_crtc_info_cookie_t c;
 	xcb_randr_get_crtc_info_reply_t *r;
 
@@ -2843,12 +2844,24 @@ static void init_crtc(uint8_t id, xcb_randr_get_output_info_reply_t *out,
 	if (!r)
 		return;
 
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if (r->width == scr->w && r->height == scr->h + panel_height &&
+		    r->x == scr->x, r->y == scr->y) {
+			ii("crtc%d geo %ux%u+%d+%d is a clone of screen %d\n",
+			   id, scr->id, scr->w, scr->h + panel_height, scr->x,
+			   scr->y);
+			goto out;
+		}
+	}
+
 	ii("crtc%d geo %ux%u+%d+%d\n", id, r->width, r->height, r->x, r->y);
 	/* one screen per output; share same root window via common
 	 * xcb_screen_t structure
 	 */
 	screen_add(id, r->x, r->y, r->width, r->height);
 
+out:
 	free(r);
 }
 
