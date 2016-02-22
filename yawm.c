@@ -2252,16 +2252,15 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	}
 
 	dx = e->root_x - mouse_x;
-
+	cli->x += dx;
 	mouse_x = e->root_x;
-	mouse_y = e->root_y;
 
 	if (!(cli->flags & CLI_FLG_DOCK)) {
 		dy = e->root_y - mouse_y;
 		cli->y += dy;
 	}
 
-	cli->x += dx;
+	mouse_y = e->root_y;
 
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	val[0] = cli->x;
