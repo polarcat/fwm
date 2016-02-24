@@ -1681,13 +1681,9 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
 	struct tag *tag;
 	uint16_t h;
 
-	ii("0 screen %d tag %d name %s\n", scr->id, id, name);
-
 	tag = tag_get(scr, name, id);
 	if (!tag)
 		return;
-
-	ii("1 screen %d tag %d name %s\n", scr->id, tag->id, tag->name);
 
 	text_exts(name, tag->nlen, &tag->w, &h);
 
@@ -1982,41 +1978,6 @@ static void init_keys(void)
 	xcb_key_symbols_free(syms);
 }
 
-#define ROOT_STR_MAX 64
-#define match_cstr(str, cstr) strncmp(str, cstr, sizeof(cstr) - 1) == 0
-
-static void handle_user_request(void)
-{
-	struct sprop name;
-
-	get_sprop(&name, rootscr->root, XCB_ATOM_WM_NAME);
-	if (!name.ptr)
-		return;
-
-	if (match_cstr(name.str, "reload-keys")) {
-		init_keys();
-	} else if (match_cstr(name.str, "refresh-panel")) {
-		const char *arg = &name.str[sizeof("refresh-panel")];
-		if (arg) {
-			int id = atoi(arg);
-			struct list_head *cur;
-			list_walk(cur, &screens) {
-				struct screen *scr = list2screen(cur);
-				if (scr->id == id) {
-					ii("refresh panel at screen %d\n", id);
-					update_panel_items(scr);
-					break;
-				}
-			}
-		}
-	}
-
-	dd("root %s\n", name.str);
-	free(name.ptr);
-}
-
-#undef match_cstr
-
 #if 0
 /*
  * Panel items:
@@ -2120,6 +2081,184 @@ static void move_panel(struct screen *scr)
 	update_panel_items(scr);
 	xcb_flush(dpy);
 }
+
+static void screen_add(uint8_t id, xcb_randr_output_t out, int16_t x, int16_t y,
+		       uint16_t w, uint16_t h)
+{
+	struct screen *scr;
+
+	scr = calloc(1, sizeof(*scr));
+	if (!scr)
+		panic("calloc(%lu) failed\n", sizeof(*scr));
+
+	scr->id = id;
+	scr->out = out;
+	scr->x = x;
+	scr->y = y;
+	scr->w = w;
+	scr->h = h;
+
+	list_init(&scr->dock);
+	list_init(&scr->tags);
+	init_panel(scr);
+
+	if (!list_empty(&scr->tags)) {
+		ii("current tag %p %s\n", list2tag(scr->tags.next),
+			(list2tag(scr->tags.next))->name);
+	}
+
+	list_add(&screens, &scr->head);
+
+	if (scr->x == 0)
+		defscr = scr; /* make such screen default */
+
+	ii("screen %d (%p), size %dx%d+%d+%d, %u tags\n", id, scr, scr->w,
+	   scr->h, scr->x, scr->y, scr->ntags);
+}
+
+static void init_crtc(uint8_t id, xcb_randr_output_t out,
+		      xcb_randr_get_output_info_reply_t *inf,
+		      xcb_timestamp_t ts)
+{
+	struct list_head *cur;
+	xcb_randr_get_crtc_info_cookie_t c;
+	xcb_randr_get_crtc_info_reply_t *r;
+
+	c = xcb_randr_get_crtc_info(dpy, inf->crtc, ts);
+	r = xcb_randr_get_crtc_info_reply(dpy, c, NULL);
+	if (!r)
+		return;
+
+	ii("crtc%d geo %ux%u+%d+%d\n", id, r->width, r->height, r->x, r->y);
+
+	/* find a screen that matches new geometry so we can re-use it */
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+
+		if (r->width == scr->w && r->height == scr->h + panel_height &&
+		    r->x == scr->x && r->y == scr->y) {
+			ii("crtc%d geo %ux%u+%d+%d is a clone of screen %d\n",
+			   id, scr->w, scr->h + panel_height, scr->x,
+			   scr->y, scr->id);
+			goto out;
+		}
+	}
+
+	/* adapt request screen geometry if none found */
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if (scr->out == out) {
+			ii("crtc%d, screen %d: "
+			   "old geo %ux%u+%d+%d, "
+			   "new geo %ux%u+%d+%d\n",
+			   id, scr->id,
+			   scr->w, scr->h + panel_height, scr->x, scr->y,
+			   r->width, r->height, r->x, r->y);
+			scr->x = r->x;
+			scr->y = r->y;
+			scr->w = r->width;
+			scr->h = r->height - panel_height;
+			move_panel(scr);
+			goto out;
+		}
+	}
+
+	/* one screen per output; share same root window via common
+	 * xcb_screen_t structure
+	 */
+	screen_add(id, out, r->x, r->y, r->width, r->height);
+
+out:
+	free(r);
+}
+
+static void init_output(int id, xcb_randr_output_t out, xcb_timestamp_t ts)
+{
+	char name[UCHAR_MAX];
+	strlen_t len;
+	xcb_randr_get_output_info_cookie_t c;
+	xcb_randr_get_output_info_reply_t *r;
+
+	c = xcb_randr_get_output_info(dpy, out, ts);
+	r = xcb_randr_get_output_info_reply(dpy, c, NULL);
+	if (!r)
+		return;
+
+	len = xcb_randr_get_output_info_name_length(r);
+	if (len > sizeof(name))
+		len = sizeof(name);
+	snprintf(name, len, "%s", xcb_randr_get_output_info_name(r));
+
+	dd("output %s%d, %ux%u\n", name, id, r->mm_width, r->mm_height);
+
+	if (r->connection != XCB_RANDR_CONNECTION_CONNECTED)
+		ii("output %s%d not connected\n", name, id);
+	else
+		init_crtc(id, out, r, ts);
+
+	free(r);
+}
+
+static void init_outputs(void)
+{
+	xcb_randr_get_screen_resources_current_cookie_t c;
+	xcb_randr_get_screen_resources_current_reply_t *r;
+	xcb_randr_output_t *out;
+	int i, len;
+
+	c = xcb_randr_get_screen_resources_current(dpy, rootscr->root);
+	r = xcb_randr_get_screen_resources_current_reply(dpy, c, NULL);
+	if (!r) {
+		ii("RandR extension is not present\n");
+		return;
+	}
+
+	len = xcb_randr_get_screen_resources_current_outputs_length(r);
+	out = xcb_randr_get_screen_resources_current_outputs(r);
+	ii("found %d screens\n", len);
+
+	for (i = 0; i < len; i++)
+		init_output(i, out[i], r->config_timestamp);
+
+	free(r);
+}
+
+#define ROOT_STR_MAX 64
+#define match_cstr(str, cstr) strncmp(str, cstr, sizeof(cstr) - 1) == 0
+
+static void handle_user_request(void)
+{
+	struct sprop name;
+
+	get_sprop(&name, rootscr->root, XCB_ATOM_WM_NAME);
+	if (!name.ptr)
+		return;
+
+	if (match_cstr(name.str, "reload-keys")) {
+		init_keys();
+	} else if (match_cstr(name.str, "refresh-outputs")) {
+		init_outputs();
+	} else if (match_cstr(name.str, "refresh-panel")) {
+		const char *arg = &name.str[sizeof("refresh-panel")];
+		if (arg) {
+			int id = atoi(arg);
+			struct list_head *cur;
+			list_walk(cur, &screens) {
+				struct screen *scr = list2screen(cur);
+				if (scr->id == id) {
+					ii("refresh panel at screen %d\n", id);
+					update_panel_items(scr);
+					break;
+				}
+			}
+		}
+	}
+
+	dd("root %s\n", name.str);
+	free(name.ptr);
+}
+
+#undef match_cstr
 
 static void update_panel_title(xcb_window_t win)
 {
@@ -2334,15 +2473,31 @@ static void handle_key_press(xcb_key_press_event_t *e)
 static void handle_visibility(xcb_visibility_notify_event_t *e)
 {
 	struct list_head *cur;
+	uint8_t panel = 0;
 
+	/* Check if this is a panel that needs some refreshment. */
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
 		if (scr->panel == e->window) {
-			panel_raise(scr);
-			redraw_panel_items(scr);
-			return;
+			panel = 1;
+			break;
 		}
 	}
+
+	if (!panel)
+		return;
+
+	/* One of the panels needs to be refreshed; however under certain
+	 * conditions in multiscreen mode all of them might need to undergo
+	 * the same treatment...
+	 */
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		panel_raise(scr);
+		redraw_panel_items(scr);
+	}
+
+	xcb_flush(dpy);
 }
 
 static void handle_unmap_notify(xcb_unmap_notify_event_t *e)
@@ -2375,6 +2530,17 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 		update_panel_title(e->event);
 
 	curscr = scr;
+	if (!curscr) {
+		ww("set up unmanaged screen\n");
+		/* Handle situation when wm started with monitors being
+		 * set in clone mode and then switched into tiling mode
+		 * with the same resolution; the latter aparently is not
+		 * associated with any xrandr event.
+		 *
+		 * Initialize outputs as soon as any window is moved in. */
+		init_outputs();
+		return;
+	}
 
 	if (curscr->tag->win)
 		window_focus(curscr, curscr->tag->win, 0);
@@ -2432,8 +2598,9 @@ static void handle_property_notify(xcb_property_notify_event_t *e)
 static void handle_configure_notify(xcb_configure_notify_event_t *e)
 {
 	if (e->event == rootscr->root && e->window == rootscr->root) {
-		ii("XCB_CONFIGURE_NOTIFY: event %p, window %p\n",
-		   e->event, e->window);
+		struct screen *scr = pointer2screen();
+		if (scr) /* update because screen geo could change */
+			update_panel_items(scr);
 	}
 }
 
@@ -2564,140 +2731,6 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 
         xcb_configure_window(dpy, e->window, mask, val);
         xcb_flush(dpy);
-}
-
-static void screen_add(uint8_t id, xcb_randr_output_t out, int16_t x, int16_t y,
-		       uint16_t w, uint16_t h)
-{
-	struct screen *scr;
-
-	scr = calloc(1, sizeof(*scr));
-	if (!scr)
-		panic("calloc(%lu) failed\n", sizeof(*scr));
-
-	scr->id = id;
-	scr->out = out;
-	scr->x = x;
-	scr->y = y;
-	scr->w = w;
-	scr->h = h;
-
-	list_init(&scr->dock);
-	list_init(&scr->tags);
-	init_panel(scr);
-
-	if (!list_empty(&scr->tags)) {
-		ii("current tag %p %s\n", list2tag(scr->tags.next),
-			(list2tag(scr->tags.next))->name);
-	}
-
-	list_add(&screens, &scr->head);
-
-	if (scr->x == 0)
-		defscr = scr; /* make such screen default */
-
-	ii("screen %d (%p), size %dx%d+%d+%d, %u tags\n", id, scr, scr->w,
-	   scr->h, scr->x, scr->y, scr->ntags);
-}
-
-static void init_crtc(uint8_t id, xcb_randr_output_t out,
-		      xcb_randr_get_output_info_reply_t *inf,
-		      xcb_timestamp_t ts)
-{
-	struct list_head *cur;
-	xcb_randr_get_crtc_info_cookie_t c;
-	xcb_randr_get_crtc_info_reply_t *r;
-
-	c = xcb_randr_get_crtc_info(dpy, inf->crtc, ts);
-	r = xcb_randr_get_crtc_info_reply(dpy, c, NULL);
-	if (!r)
-		return;
-
-	ii("crtc%d geo %ux%u+%d+%d\n", id, r->width, r->height, r->x, r->y);
-
-	list_walk(cur, &screens) {
-		struct screen *scr = list2screen(cur);
-		if (scr->out == out) {
-			ii("crtc%d, screen %d: "
-			   "old geo %ux%u+%d+%d, "
-			   "new geo %ux%u+%d+%d\n",
-			   id, scr->id,
-			   scr->w, scr->h + panel_height, scr->x, scr->y,
-			   r->width, r->height, r->x, r->y);
-			scr->x = r->x;
-			scr->y = r->y;
-			scr->w = r->width;
-			scr->h = r->height - panel_height;
-			move_panel(scr);
-			goto out;
-		} else if (r->width == scr->w &&
-			   r->height == scr->h + panel_height &&
-			   r->x == scr->x && r->y == scr->y) {
-			ii("crtc%d geo %ux%u+%d+%d is a clone of screen %d\n",
-			   id, scr->w, scr->h + panel_height, scr->x,
-			   scr->y, scr->id);
-			goto out;
-		}
-	}
-
-	/* one screen per output; share same root window via common
-	 * xcb_screen_t structure
-	 */
-	screen_add(id, out, r->x, r->y, r->width, r->height);
-
-out:
-	free(r);
-}
-
-static void init_output(int id, xcb_randr_output_t out, xcb_timestamp_t ts)
-{
-	char name[UCHAR_MAX];
-	strlen_t len;
-	xcb_randr_get_output_info_cookie_t c;
-	xcb_randr_get_output_info_reply_t *r;
-
-	c = xcb_randr_get_output_info(dpy, out, ts);
-	r = xcb_randr_get_output_info_reply(dpy, c, NULL);
-	if (!r)
-		return;
-
-	len = xcb_randr_get_output_info_name_length(r);
-	if (len > sizeof(name))
-		len = sizeof(name);
-	snprintf(name, len, "%s", xcb_randr_get_output_info_name(r));
-
-	dd("output %s%d, %ux%u\n", name, id, r->mm_width, r->mm_height);
-
-	if (r->connection != XCB_RANDR_CONNECTION_CONNECTED)
-		ii("output %s%d not connected\n", name, id);
-	else
-		init_crtc(id, out, r, ts);
-
-	free(r);
-}
-
-static void init_outputs(void)
-{
-	xcb_randr_get_screen_resources_current_cookie_t c;
-	xcb_randr_get_screen_resources_current_reply_t *r;
-	xcb_randr_output_t *out;
-	int i, len;
-
-	c = xcb_randr_get_screen_resources_current(dpy, rootscr->root);
-	r = xcb_randr_get_screen_resources_current_reply(dpy, c, NULL);
-	if (!r) {
-		ii("RandR extension is not present\n");
-		return;
-	}
-
-	len = xcb_randr_get_screen_resources_current_outputs_length(r);
-	out = xcb_randr_get_screen_resources_current_outputs(r);
-	ii("found %d screens\n", len);
-
-	for (i = 0; i < len; i++)
-		init_output(i, out[i], r->config_timestamp);
-
-	free(r);
 }
 
 static void handle_randr_notify(xcb_randr_screen_change_notify_event_t *e)
