@@ -225,6 +225,7 @@ struct client {
 	uint16_t w, h;
 	xcb_window_t win;
 	struct screen *scr;
+	struct tag *tag;
 	uint32_t flags;
 };
 
@@ -355,6 +356,8 @@ static xcb_connection_t *dpy;
 static xcb_atom_t a_state;
 static xcb_atom_t a_client_list;
 static xcb_atom_t a_systray;
+static xcb_atom_t a_active_window;
+static xcb_atom_t a_supported;
 
 static strlen_t actname_max = UCHAR_MAX - 1;
 
@@ -760,11 +763,18 @@ static void window_focus(struct screen *scr, xcb_window_t win, int focus)
 	tt("win %p, focus %d\n", win, focus);
 
 	if (!focus) {
+		xcb_window_t tmp = XCB_WINDOW_NONE;
 		window_border_color(win, border_normal);
+		xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, rootscr->root,
+				    a_active_window, XCB_ATOM_WINDOW, 32, 1,
+				    &tmp);
 	} else {
 		window_border_color(win, border_active);
 		print_title(scr, win);
 		scr->tag->win = win;
+		xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, rootscr->root,
+				    a_active_window, XCB_ATOM_WINDOW, 32, 1,
+				    &win);
 	}
 
 	xcb_set_input_focus_checked(dpy, XCB_NONE, win, XCB_CURRENT_TIME);
@@ -1047,7 +1057,6 @@ static void show_windows(struct screen *scr)
 		tt("tag->win=%p\n", scr->tag->win);
 		window_focus(scr, scr->tag->win, 1);
 	}
-	xcb_flush(dpy);
 }
 
 static void hide_windows(struct tag *tag)
@@ -1059,8 +1068,18 @@ static void hide_windows(struct tag *tag)
 		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
 		xcb_unmap_window_checked(dpy, cli->win);
 	}
+}
 
-	xcb_flush(dpy);
+static void tag_focus(struct screen *scr, struct tag *tag)
+{
+	scr->tag->flags &= ~TAG_FLG_ACTIVE;
+	print_tag(scr, scr->tag, &normal_color, 0);
+	hide_windows(scr->tag);
+
+	scr->tag = tag;
+	tag->flags |= TAG_FLG_ACTIVE;
+	print_tag(scr, tag, &active_color, 1);
+	show_windows(scr);
 }
 
 static void switch_tag(struct screen *scr, enum dir dir)
@@ -1079,14 +1098,7 @@ static void switch_tag(struct screen *scr, enum dir dir)
 			tag = list2tag(scr->tag->head.prev);
 	}
 
-	scr->tag->flags &= ~TAG_FLG_ACTIVE;
-	print_tag(scr, scr->tag, &normal_color, 0);
-	hide_windows(scr->tag);
-
-	scr->tag = tag;
-	tag->flags |= TAG_FLG_ACTIVE;
-	print_tag(scr, tag, &active_color, 1);
-	show_windows(scr);
+	tag_focus(scr, tag);
 }
 
 static void walk_tags(void *arg)
@@ -1097,6 +1109,7 @@ static void walk_tags(void *arg)
 		return;
 
 	switch_tag(curscr, (enum dir) arg);
+	xcb_flush(dpy);
 }
 
 #if 0
@@ -1144,6 +1157,7 @@ static void retag_window(void *arg)
 	walk_tags(arg);
 	list_add(&curscr->tag->clients, &cli->head);
 	curscr->tag->win = cli->win;
+	cli->tag = curscr->tag;
 	window_focus(curscr, curscr->tag->win, 1);
 	window_raise(curscr->tag->win);
 	xcb_flush(dpy);
@@ -1450,6 +1464,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 		else
 			list_add(&tag->clients, &cli->head);
 	}
+	cli->tag = tag;
 	/* also add to global list of clients */
 	list_add(&clients, &cli->list);
 
@@ -2311,6 +2326,7 @@ static void handle_panel_press(xcb_button_press_event_t *e)
 	dump_coords(curscr, e->event_x);
 	if pointer_inside(curscr, PANEL_AREA_TAGS, e->event_x) {
 		select_tag(curscr, e->event_x);
+		xcb_flush(dpy);
 	} else if pointer_inside(curscr, PANEL_AREA_MENU, e->event_x) {
 		struct list_head *cur;
 		ii("menu, tag %s\n", curscr->tag->name);
@@ -2439,6 +2455,7 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	    !(cli->flags & CLI_FLG_DOCK)) { /* retag */
 		list_del(&cli->head);
 		list_add(&curscr->tag->clients, &cli->head);
+		cli->tag = curscr->tag;
 		cli->scr = curscr;
 		curscr->tag->win = cli->win;
 		ii("win %p now on tag %s screen %d\n", e->child,
@@ -2627,14 +2644,21 @@ static void tray_add(xcb_window_t win)
 static void handle_client_message(xcb_client_message_event_t *e)
 {
 	print_atom_name(e->type);
-
 	dd("win %p, action %d, data %p, type %d (%d)\n", e->window,
-	   e->data.data32[0], e->data.data32[2], e->type, a_systray);
+	   e->data.data32[0], e->data.data32[2], e->type, a_active_window);
 	print_atom_name(e->data.data32[1]);
 
 	if (e->type == a_systray && e->format == 32 &&
 	    e->data.data32[1] == SYSTEM_TRAY_REQUEST_DOCK) {
 		tray_add(e->data.data32[2]);
+	} else if (e->type == a_active_window && e->format == 32) {
+		struct client *cli = win2client(e->window);
+		if (!cli)
+			return;
+		tag_focus(cli->scr, cli->tag);
+		window_focus(cli->scr, e->window, 1);
+		window_raise(e->window);
+		xcb_flush(dpy);
 	}
 }
 
@@ -3033,8 +3057,13 @@ static void init_randr(void)
 			       XCB_RANDR_NOTIFY_MASK_OUTPUT_PROPERTY);
 }
 
+#define support_atom(a)\
+	xcb_change_property(dpy, XCB_PROP_MODE_APPEND, rootscr->root,\
+			    a_supported, XCB_ATOM_ATOM, 32, 1, a)
+
 static void init_rootwin(void)
 {
+	xcb_atom_t a_supported;
 	xcb_window_t win = rootscr->root;
 	xcb_void_cookie_t c;
 	uint32_t val = XCB_EVENT_MASK_BUTTON_PRESS;
@@ -3052,6 +3081,16 @@ static void init_rootwin(void)
 	      XCB_EVENT_MASK_STRUCTURE_NOTIFY |
 	      XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
 	xcb_change_window_attributes(dpy, win, XCB_CW_EVENT_MASK, &val);
+
+	a_state = atom_by_name("WM_STATE");
+	a_client_list = atom_by_name("_NET_CLIENT_LIST");
+	a_systray = atom_by_name("_NET_SYSTEM_TRAY_OPCODE");
+	a_active_window = atom_by_name("_NET_ACTIVE_WINDOW");
+
+	a_supported = atom_by_name("_NET_SUPPORTED");
+	xcb_delete_property(dpy, win, a_supported);
+	support_atom(&a_active_window);
+
 	xcb_flush(dpy);
 }
 
@@ -3164,10 +3203,6 @@ int main()
 		curscr = defscr;
 
 	trace_screens();
-
-	a_state = atom_by_name("WM_STATE");
-	a_client_list = atom_by_name("_NET_CLIENT_LIST");
-	a_systray = atom_by_name("_NET_SYSTEM_TRAY_OPCODE");
 
 	init_tray();
 	clients_scan();
