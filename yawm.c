@@ -358,6 +358,7 @@ static xcb_atom_t a_client_list;
 static xcb_atom_t a_systray;
 static xcb_atom_t a_active_window;
 static xcb_atom_t a_supported;
+static xcb_atom_t a_has_vt;
 
 static strlen_t actname_max = UCHAR_MAX - 1;
 
@@ -2599,15 +2600,20 @@ static void handle_property_notify(xcb_property_notify_event_t *e)
 {
 	te("XCB_PROPERTY_NOTIFY: win %p, atom %d\n", e->window, e->atom);
 
-	switch (e->atom) {
-	case XCB_ATOM_WM_NAME:
+	if (e->atom == XCB_ATOM_WM_NAME) {
 		ii("screen %d\n", curscr ? curscr->id : -1);
 		if (e->window == rootscr->root)
 			handle_user_request();
 		else if (curscr)
 			print_title(curscr, e->window);
-		break;
-	default:
+	} else if (e->atom == a_has_vt) {
+		struct list_head *cur;
+		list_walk(cur, &screens) {
+			struct screen *scr = list2screen(cur);
+			panel_raise(scr);
+			redraw_panel_items(scr);
+		}
+	} else {
 		print_atom_name(((xcb_property_notify_event_t *) e)->atom);
 	}
 }
@@ -2644,7 +2650,7 @@ static void tray_add(xcb_window_t win)
 static void handle_client_message(xcb_client_message_event_t *e)
 {
 	print_atom_name(e->type);
-	dd("win %p, action %d, data %p, type %d (%d)\n", e->window,
+	ii("win %p, action %d, data %p, type %d (%d)\n", e->window,
 	   e->data.data32[0], e->data.data32[2], e->type, a_active_window);
 	print_atom_name(e->data.data32[1]);
 
@@ -3086,8 +3092,9 @@ static void init_rootwin(void)
 	a_client_list = atom_by_name("_NET_CLIENT_LIST");
 	a_systray = atom_by_name("_NET_SYSTEM_TRAY_OPCODE");
 	a_active_window = atom_by_name("_NET_ACTIVE_WINDOW");
-
+	a_has_vt = atom_by_name("XFree86_has_VT");
 	a_supported = atom_by_name("_NET_SUPPORTED");
+
 	xcb_delete_property(dpy, win, a_supported);
 	support_atom(&a_active_window);
 
