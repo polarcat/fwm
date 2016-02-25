@@ -1438,6 +1438,9 @@ static struct client *client_add(xcb_window_t win, int tray)
 		goto out;
 	}
 
+	if (scr->tag->win)
+		window_focus(scr, scr->tag->win, 0);
+
 	cli->scr = scr;
 	cli->win = win;
 	window_raise(win);
@@ -1492,10 +1495,8 @@ static struct client *client_add(xcb_window_t win, int tray)
 	dd("screen %d, tag %s, cli %p, win %p, geo %ux%u+%d+%d\n", scr->id,
 	   scr->tag->name, cli, cli->win, cli->w, cli->h, cli->x, cli->y);
 
-	if (client_pointed(cli->x, cli->y, cli->w, cli->h)) {
-		window_focus(scr, cli->win, 1);
-		print_title(scr, cli->win);
-	}
+	window_focus(scr, cli->win, 1);
+	print_title(scr, cli->win);
 
 	update_clients_list();
 out:
@@ -1534,6 +1535,7 @@ static void client_del(xcb_window_t win)
 			window_focus(tmp->scr, tmp->win, 1);
 			print_title(tmp->scr, tmp->win);
 			found = 1;
+			break;
 		}
 	}
 
