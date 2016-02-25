@@ -427,10 +427,14 @@ static void spawn(const char **argv)
 #else
 static void spawn(void *arg)
 {
-	struct keymap *kmap = arg;
+	struct keymap *kmap;
 	int len = baselen + sizeof("/keys/") + UCHAR_MAX;
 	char path[len];
 
+	if (!basedir)
+		return;
+
+	kmap = arg;
 
 	if (fork() != 0)
 		return;
@@ -595,6 +599,9 @@ static int window_docked(xcb_window_t win)
 	char *path;
 	struct stat st;
 	int rc;
+
+	if (!basedir)
+		return 0;
 
 	get_sprop(&class, win, XCB_ATOM_WM_CLASS);
 	if (!class.ptr) {
@@ -1196,6 +1203,9 @@ static struct tag *client_tag(struct screen *scr, xcb_window_t win)
 	struct stat st;
 	struct list_head *cur;
 	struct tag *tag;
+
+	if (!basedir)
+		return;
 
 	get_sprop(&class, win, XCB_ATOM_WM_CLASS);
 	if (!class.ptr) {
@@ -1901,7 +1911,7 @@ static void map_key(const char *path, xcb_key_symbols_t *syms, uint16_t mod,
 	}
 
 	/* not really, add new spawn binding */
-	kmap = calloc(1, sizeof(kmap));
+	kmap = calloc(1, sizeof(*kmap));
 	if (!kmap)
 		goto out;
 
@@ -1932,6 +1942,10 @@ static void init_keys(void)
 	struct stat st;
 	xcb_key_symbols_t *syms;
 	uint8_t i;
+
+	if (!basedir)
+		return;
+
 #if 0
 	xcb_keycode_t *mod;
 	xcb_get_modifier_mapping_cookie_t c;
@@ -2650,7 +2664,7 @@ static void tray_add(xcb_window_t win)
 static void handle_client_message(xcb_client_message_event_t *e)
 {
 	print_atom_name(e->type);
-	ii("win %p, action %d, data %p, type %d (%d)\n", e->window,
+	dd("win %p, action %d, data %p, type %d (%d)\n", e->window,
 	   e->data.data32[0], e->data.data32[2], e->type, a_active_window);
 	print_atom_name(e->data.data32[1]);
 
@@ -3135,12 +3149,18 @@ static int init_homedir(void)
 		goto err;
 	}
 
+	if (mkdir("keys", mode) < 0 && errno != EEXIST) {
+		ee("mkdir(%s/.yawm/keys) failed\n", home);
+		goto err;
+	}
+
 	return 0;
 
 err:
 	free(basedir);
 	basedir = NULL;
 	baselen = 0;
+	ww("base directory not available some features will be disabled\n");
 	return -1;
 }
 
