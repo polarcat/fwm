@@ -3139,7 +3139,7 @@ static int init_homedir(void)
 
 	if (chdir(home) < 0) {
 		ee("chdir(%s) failed\n", home);
-		goto err;
+		goto homeless;
 	}
 
 	if (mkdir(".yawm", mode) < 0 && errno != EEXIST) {
@@ -3160,9 +3160,12 @@ static int init_homedir(void)
 		goto err;
 	}
 
+	chdir(home);
 	return 0;
 
 err:
+	chdir(home);
+homeless:
 	free(basedir);
 	basedir = NULL;
 	baselen = 0;
