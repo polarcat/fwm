@@ -1770,8 +1770,12 @@ static int init_tags(struct screen *scr)
 			read(fd, name, sizeof(name) - 1);
 			close(fd);
 		}
+
 		if (name[0] == '\0')
 			snprintf(name, sizeof(name), "%d", i);
+		else if (name[strlen(name) - 1] == '\n')
+			name[strlen(name) - 1] = '\0';
+
 		dd("screen %d tag %d name %s\n", scr->id, i, name);
 		pos = tag_add(scr, name,i,  pos);
 		memset(name, 0, TAG_NAME_MAX);
