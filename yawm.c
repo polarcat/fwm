@@ -109,6 +109,7 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_NOFOCUS (1 << 3)
 #define CLI_FLG_FULLSCR (1 << 4)
 #define CLI_FLG_DOCK (1 << 5)
+#define CLI_FLG_TRAY (1 << 6)
 
 #define SCR_FLG_MAIN (1 << 0)
 #define SCR_FLG_PANEL_TOP (1 << 1)
@@ -891,7 +892,7 @@ static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 	val[3] = cli->h = h;
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
-	xcb_configure_window(dpy, cli->win, mask, val);
+	xcb_configure_window_checked(dpy, cli->win, mask, val);
 
 	tt("screen %d, cli %p, win %p, geo %ux%u+%d+%d\n", cli->scr->id, cli,
 	   cli->win, cli->w, cli->h, cli->x, cli->y);
@@ -1257,62 +1258,66 @@ static int calc_title_max(struct screen *scr)
 
 #define DOCKWIN_GAP (BORDER_WIDTH * 2)
 
-static void dock_del(struct client *cli)
+static void dock_arrange(struct screen *scr)
 {
 	struct list_head *cur;
-	struct screen *scr = cli->scr;
-	int16_t x;
+	int16_t x, y, yy;
 
-	list_del(&cli->head);
-	list_del(&cli->list);
-	free(cli);
+	if (scr->flags & SCR_FLG_PANEL_TOP)
+		yy = DOCKWIN_GAP;
+	else
+		yy = scr->y + scr->h + DOCKWIN_GAP;
 
 	x = scr->items[PANEL_AREA_DOCK].x;
 	list_walk(cur, &scr->dock) {
-		cli = list2client(cur);
-		x -= (cli->w + DOCKWIN_GAP + BORDER_WIDTH);
-		client_moveresize(cli, x, cli->y, cli->w, cli->h);
+		struct client *cli = list2client(cur);
+		if (cli->flags & CLI_FLG_TRAY)
+			y = yy + (panel_height - cli->h) / 2 - BORDER_WIDTH;
+		else
+			y = yy;
+		x -= cli->w + FONT_SIZE_FT - 2 * BORDER_WIDTH;
+		client_moveresize(cli, x, y, cli->w, cli->h);
 	}
 
 	scr->items[PANEL_AREA_TITLE].w = x - scr->items[PANEL_AREA_TITLE].x;
 	calc_title_max(scr);
 }
 
-static void dock_add(struct screen *scr, struct client *cli, int tray)
+static void dock_del(struct client *cli)
 {
-	struct list_head *cur;
-	int16_t x, y;
+	list_del(&cli->head);
+	list_del(&cli->list);
+	dock_arrange(cli->scr);
+	free(cli);
+}
 
-	list_add(&scr->dock, &cli->head);
+static void dock_add(struct client *cli, uint8_t bw)
+{
+	uint16_t h;
+
+	list_add(&cli->scr->dock, &cli->head);
 	list_add(&clients, &cli->list);
 
-	cli->scr = scr;
 	cli->flags |= CLI_FLG_DOCK;
-	cli->h = panel_height - 3 * DOCKWIN_GAP - 1;
 
-	if (tray)
-		cli->w = cli->h;
-	else
+	h = panel_height - 3 * DOCKWIN_GAP - 1;
+
+	if (cli->flags & CLI_FLG_TRAY)
+		cli->w = h;
+	else if (cli->h > panel_height) /* adjust width and height */
 		cli->w = panel_height + panel_height / 3;
+	/* else: client respects panel height so respect client's width
+	 * in return; this allows to dock e.g. xclock application
+	 */
 
-	x = scr->items[PANEL_AREA_DOCK].x;
+	cli->h = h;
+	dock_arrange(cli->scr);
 
-	if (scr->flags & SCR_FLG_PANEL_TOP)
-		y = DOCKWIN_GAP;
-	else
-		y = scr->y + scr->h + DOCKWIN_GAP;
-
-	list_walk(cur, &scr->dock) {
-		struct client *cli = list2client(cur);
-		x -= (cli->w + DOCKWIN_GAP + BORDER_WIDTH);
-		client_moveresize(cli, x, y, cli->w, cli->h);
-	}
-
-	scr->items[PANEL_AREA_TITLE].w = x - scr->items[PANEL_AREA_TITLE].x;
-	calc_title_max(scr);
-
-	if (!tray)
+	if (cli->flags & CLI_FLG_TRAY)
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
+
+	if (bw > 0) /* adjust border width if client desires to have a border */
+		window_border_width(cli->win, BORDER_WIDTH);
 
 	window_border_color(cli->win, border_docked);
 	xcb_map_window(dpy, cli->win);
@@ -1444,13 +1449,19 @@ static struct client *client_add(xcb_window_t win, int tray)
 	cli->scr = scr;
 	cli->win = win;
 	window_raise(win);
-	window_border_width(cli->win, BORDER_WIDTH);
 	window_border_color(cli->win, border_normal);
 
 	if (tray || window_docked(win)) {
-		dock_add(scr, cli, tray);
+		if (tray)
+			cli->flags |= CLI_FLG_TRAY;
+
+		cli->w = g->width;
+		cli->h = g->height;
+		dock_add(cli, g->border_width);
 		goto out;
 	}
+
+	window_border_width(cli->win, BORDER_WIDTH);
 
 	/* subscribe events */
 	val[0] = XCB_EVENT_MASK_ENTER_WINDOW |
@@ -1816,7 +1827,7 @@ static int update_panel_items(struct screen *scr)
 	/* clean panel */
 	fill_rect(scr->panel, scr->gc, scr->x, 0, scr->w, panel_height);
 
-	scr->items[PANEL_AREA_TEXT].x = scr->x + scr->w - FONT_SIZE_FT;
+	scr->items[PANEL_AREA_TEXT].x = scr->x + scr->w;
 	scr->items[PANEL_AREA_TEXT].w = 0;
 
 	scr->items[PANEL_AREA_DOCK].x = scr->items[PANEL_AREA_TEXT].x;
