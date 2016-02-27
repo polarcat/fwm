@@ -114,9 +114,10 @@ typedef uint8_t strlen_t;
 
 #define MENU_ICON "::"
 
-#define MODKEY XCB_MOD_MASK_4
+#define ALT XCB_MOD_MASK_1
+#define MOD XCB_MOD_MASK_4
 #define SHIFT XCB_MOD_MASK_SHIFT
-#define CONTROL XCB_MOD_MASK_CONTROL
+#define CTRL XCB_MOD_MASK_CONTROL
 
 /* data structures */
 
@@ -249,25 +250,25 @@ struct keymap {
 
 /* built-in default actions */
 static struct keymap kmap_def[] = {
-	{ MODKEY, XK_Tab, 0, "mod_tab", "_window_next",
+	{ MOD, XK_Tab, 0, "mod_tab", "_window_next",
 	  next_window, NULL,
 	},
-	{ MODKEY, XK_BackSpace, 0, "mod_backspace", "_window_prev",
+	{ MOD, XK_BackSpace, 0, "mod_backspace", "_window_prev",
 	  prev_window, NULL,
 	},
-	{ MODKEY, XK_Return, 0, "mod_return", "_raise_window",
+	{ MOD, XK_Return, 0, "mod_return", "_raise_window",
 	  raise_window, NULL,
 	},
-	{ MODKEY, XK_Home, 0, "mod_home", "_retag_next",
+	{ MOD, XK_Home, 0, "mod_home", "_retag_next",
 	  retag_window, (void *) DIR_NEXT,
 	},
-	{ MODKEY, XK_End, 0, "mod_end", "_retag_prev",
+	{ MOD, XK_End, 0, "mod_end", "_retag_prev",
 	  retag_window, (void *) DIR_PREV,
 	},
-	{ MODKEY, XK_Page_Up, 0, "mod_pageup", "_tag_next",
+	{ MOD, XK_Page_Up, 0, "mod_pageup", "_tag_next",
 	  walk_tags, (void *) DIR_NEXT,
 	},
-	{ MODKEY, XK_Page_Down, 0, "mod_pagedown", "_tag_prev",
+	{ MOD, XK_Page_Down, 0, "mod_pagedown", "_tag_prev",
 	  walk_tags, (void *) DIR_PREV,
 	},
 	{ SHIFT, XK_F5, 0, "shift_f5", "_top_left",
@@ -280,15 +281,15 @@ static struct keymap kmap_def[] = {
 	  place_window, (void *) WIN_POS_BOTTOM_RIGHT, },
 	{ SHIFT, XK_F10, 0, "shift_f10", "_center",
 	  place_window, (void *) WIN_POS_CENTER, },
-	{ MODKEY, XK_F5, 0, "mod_f5", "_left_fill",
+	{ MOD, XK_F5, 0, "mod_f5", "_left_fill",
 	  place_window, (void *) WIN_POS_LEFT_FILL, },
-	{ MODKEY, XK_F6, 0, "mod_f6", "_right_fill",
+	{ MOD, XK_F6, 0, "mod_f6", "_right_fill",
 	  place_window, (void *) WIN_POS_RIGHT_FILL, },
-	{ MODKEY, XK_F7, 0, "mod_f7", "_top_fill",
+	{ MOD, XK_F7, 0, "mod_f7", "_top_fill",
 	  place_window, (void *) WIN_POS_TOP_FILL, },
-	{ MODKEY, XK_F8, 0, "mod_f8", "_bottom_fill",
+	{ MOD, XK_F8, 0, "mod_f8", "_bottom_fill",
 	  place_window, (void *) WIN_POS_BOTTOM_FILL, },
-	{ MODKEY, XK_F9, 0, "mod_f9", "_full_screen",
+	{ MOD, XK_F9, 0, "mod_f9", "_full_screen",
 	  place_window, (void *) WIN_POS_FILL, },
 };
 
@@ -1791,8 +1792,11 @@ static void map_key(const char *path, xcb_key_symbols_t *syms, uint16_t mod,
 	}
 
 	n = read(fd, action, actname_max);
-	if (n < 1) {
+	if (n < 0) {
 		ee("read(%s) failed\n", path);
+		goto out;
+	} else if (n < 1) {
+		ww("%s: zero bytes read, no action\n", path);
 		goto out;
 	}
 	action[n] = '\0';
@@ -1869,13 +1873,13 @@ static void init_keys(void)
 		snprintf(ptr, len, "mod_%c", i);
 		if (stat(path, &st) < 0)
 			continue;
-		map_key(path, syms, MODKEY, i, buf, ptr);
+		map_key(path, syms, MOD, i, buf, ptr);
 	}
 	for (i = 1; i < 13; i++) {
 		snprintf(ptr, len, "mod_f%u", i);
 		if (stat(path, &st) < 0)
 			continue;
-		map_key(path, syms, MODKEY, XK_F1 + (i - 1), buf, ptr);
+		map_key(path, syms, MOD, XK_F1 + (i - 1), buf, ptr);
 	}
 	for (i = 1; i < 13; i++) {
 		snprintf(ptr, len, "shift_f%u", i);
@@ -1889,6 +1893,9 @@ static void init_keys(void)
 			continue;
 		ii("path: %s\n", path);
 	}
+	snprintf(ptr, len, "%s", "ctrl_alt_delete");
+	if (stat(path, &st) == 0)
+		map_key(path, syms, CTRL | ALT, XK_Delete, buf, ptr);
 
 	xcb_key_symbols_free(syms);
 }
@@ -2432,7 +2439,7 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 
 	window_focus(curscr, e->event, 1);
 
-	if (e->mode == MODKEY)
+	if (e->mode == MOD)
 		window_raise(e->event);
 
 	xcb_flush(dpy);
@@ -2916,11 +2923,11 @@ static void init_rootwin(void)
 	uint32_t val = XCB_EVENT_MASK_BUTTON_PRESS;
 
 	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
-		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_LEFT, MODKEY));
+		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_LEFT, MOD));
 	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
-		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_MID, MODKEY));
+		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_MID, MOD));
 	xcb_eval(c, xcb_grab_button(dpy, 0, win, val, XCB_GRAB_MODE_ASYNC,
-		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_RIGHT, MODKEY));
+		 XCB_GRAB_MODE_ASYNC, win, XCB_NONE, MOUSE_BTN_RIGHT, MOD));
 
 	/* subscribe events */
 	val = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT |
