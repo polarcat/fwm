@@ -72,17 +72,14 @@
 
 #define sslen(str) (sizeof(str) - 1)
 
-/* defaults */
-
-static uint32_t border_docked = 0x505050;
-static uint32_t border_active = 0x905030;
-static uint32_t border_normal = 0x303030;
-static uint32_t panel_bg = 0x101010;
-static uint32_t panel_height = 24; /* need to adjust with font height */
-
 /* defines */
 
 typedef uint8_t strlen_t;
+
+#define ACTIVE_COLOR 0xffffff
+#define NORMAL_COLOR 0x707070
+#define PANEL_BG 0x101010
+#define DOCKED_COLOR 0x505050
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -93,10 +90,6 @@ typedef uint8_t strlen_t;
 
 #define FONT_SIZE_FT 10.5
 #define FONT_NAME_FT "Monospace"
-#define FONT_COLOR_NORMAL { 0x7000, 0x7000, 0x7000, 0xffff, }
-//#define FONT_COLOR_NORMAL { 0x1000, 0x1000, 0x1000, 0xffff, }
-//#define FONT_COLOR_ACTIVE { 0x7800, 0x9900, 0x4c00, 0xffff, }
-#define FONT_COLOR_ACTIVE { 0xff00, 0xff00, 0xff00, 0xffff, }
 
 #define WIN_WIDTH_MIN 2
 #define WIN_HEIGHT_MIN 2
@@ -299,6 +292,14 @@ static struct keymap kmap_def[] = {
 
 static struct list_head keymap;
 
+/* defaults */
+
+static uint32_t docked_color = DOCKED_COLOR;
+static uint32_t active_color = ACTIVE_COLOR;
+static uint32_t normal_color = NORMAL_COLOR;
+static uint32_t panel_bg = PANEL_BG;
+static uint32_t panel_height = 24; /* need to adjust with font height */
+
 /* globals */
 
 enum wintype {
@@ -316,11 +317,9 @@ enum winstatus {
 static int16_t mouse_x, mouse_y;
 static int mouse_button; /* current mouse button */
 
-static XftColor normal_color;
-static XftColor active_color;
+static XftColor fc_normal;
+static XftColor fc_active;
 static XftFont *font;
-static XftDraw *normal_font;
-static XftDraw *active_font;
 
 static int xscr;
 static Display *xdpy;
@@ -387,7 +386,7 @@ static void spawn_cleanup(int sig)
 static void spawn(void *arg)
 {
 	struct keymap *kmap;
-	int len = baselen + sizeof("/keys/") + UCHAR_MAX;
+	uint16_t len = baselen + sizeof("/keys/") + UCHAR_MAX;
 	char path[len];
 
 	if (!basedir)
@@ -500,7 +499,7 @@ static void print_title(struct screen *scr, xcb_window_t win)
 		title.str[title.len] = '.';
 	}
 
-	draw_panel_text(scr, &active_color, scr->items[PANEL_AREA_TITLE].x,
+	draw_panel_text(scr, &fc_active, scr->items[PANEL_AREA_TITLE].x,
 			scr->items[PANEL_AREA_TITLE].w,
 			(XftChar8 *) title.str, title.len);
 	free(title.ptr);
@@ -688,12 +687,12 @@ static void window_focus(struct screen *scr, xcb_window_t win, int focus)
 
 	if (!focus) {
 		xcb_window_t tmp = XCB_WINDOW_NONE;
-		window_border_color(win, border_normal);
+		window_border_color(win, normal_color);
 		xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, rootscr->root,
 				    a_active_window, XCB_ATOM_WINDOW, 32, 1,
 				    &tmp);
 	} else {
-		window_border_color(win, border_active);
+		window_border_color(win, active_color);
 		print_title(scr, win);
 		scr->tag->win = win;
 		xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, rootscr->root,
@@ -996,11 +995,11 @@ static void hide_windows(struct tag *tag)
 
 static void tag_focus(struct screen *scr, struct tag *tag)
 {
-	print_tag(scr, scr->tag, &normal_color, 0);
+	print_tag(scr, scr->tag, &fc_normal, 0);
 	hide_windows(scr->tag);
 
 	scr->tag = tag;
-	print_tag(scr, tag, &active_color, 1);
+	print_tag(scr, tag, &fc_active, 1);
 	show_windows(scr);
 }
 
@@ -1216,7 +1215,7 @@ static void dock_add(struct client *cli, uint8_t bw)
 	if (bw > 0) /* adjust border width if client desires to have a border */
 		window_border_width(cli->win, BORDER_WIDTH);
 
-	window_border_color(cli->win, border_docked);
+	window_border_color(cli->win, docked_color);
 	xcb_map_window(dpy, cli->win);
 	xcb_flush(dpy);
 }
@@ -1346,7 +1345,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 	cli->scr = scr;
 	cli->win = win;
 	window_raise(win);
-	window_border_color(cli->win, border_normal);
+	window_border_color(cli->win, normal_color);
 
 	if (tray || window_docked(win)) {
 		if (tray)
@@ -1522,7 +1521,7 @@ static void print_menu(struct screen *scr)
 	x = scr->items[PANEL_AREA_MENU].x;
 	w = scr->items[PANEL_AREA_MENU].w;
 
-	draw_panel_text(scr, &normal_color, x, w, (XftChar8 *) MENU_ICON,
+	draw_panel_text(scr, &fc_normal, x, w, (XftChar8 *) MENU_ICON,
 		        sizeof(MENU_ICON) - 1);
 }
 
@@ -1541,7 +1540,7 @@ static void select_tag(struct screen *scr, int x)
 	if (scr->tag && tag_clicked(scr->tag, x)) {
 		return;
 	} else if (scr->tag) { /* deselect current instantly */
-		print_tag(scr, scr->tag, &normal_color, 0);
+		print_tag(scr, scr->tag, &fc_normal, 0);
 	}
 
 	prev = scr->tag;
@@ -1552,9 +1551,9 @@ static void select_tag(struct screen *scr, int x)
 		if (tag == scr->tag) {
 			continue;
 		} else if (!tag_clicked(tag, x)) {
-			print_tag(scr, tag, &normal_color, 0);
+			print_tag(scr, tag, &fc_normal, 0);
 		} else {
-			print_tag(scr, tag, &active_color, 1);
+			print_tag(scr, tag, &fc_active, 1);
 			scr->tag = tag;
 			break;
 		}
@@ -1624,9 +1623,9 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
 	text_exts(name, tag->nlen, &tag->w, &h);
 
 	if (pos != scr->items[PANEL_AREA_TAGS].x) {
-		color = &normal_color;
+		color = &fc_normal;
 	} else {
-		color = &active_color;
+		color = &fc_active;
 		scr->tag = tag;
 	}
 
@@ -1702,9 +1701,9 @@ static void redraw_panel_items(struct screen *scr)
 	list_walk(cur, &scr->tags) {
 		struct tag *tag = list2tag(cur);
 		if (scr->tag == tag)
-			color = &active_color;
+			color = &fc_active;
 		else
-			color = &normal_color;
+			color = &fc_normal;
 
 		draw_panel_text(scr, color, tag->x, tag->w,
 				(XftChar8 *) tag->name, tag->nlen);
@@ -1851,7 +1850,7 @@ out:
 static void init_keys(void)
 {
 	int tmp;
-	int len = baselen + sizeof("/keys/") + UCHAR_MAX;
+	uint16_t len = baselen + sizeof("/keys/") + UCHAR_MAX;
 	char path[len], *ptr;
 	char buf[actname_max];
 	struct stat st;
@@ -2115,7 +2114,53 @@ static void init_outputs(void)
 	free(r);
 }
 
-#define ROOT_STR_MAX 64
+static uint32_t load_color(const char *path, XftColor *fc, uint32_t def)
+{
+	uint32_t ret;
+	XRenderColor ref;
+	uint8_t buf[sizeof("0xffffff")];
+	int fd;
+
+	fd = open(path, O_RDONLY);
+	if (fd < 3) {
+		ret = def;
+	} else { /* at least 0x0 */
+		memset(buf, 0, sizeof(buf));
+		read(fd, buf, sizeof(buf));
+		close(fd);
+		ret = strtol(buf, NULL, 16);
+	}
+
+	if (fc) {
+		ref.alpha = 0xffff;
+		ref.red = (ret & 0xff0000) >> 8;
+		ref.green = ret & 0xff00;
+		ref.blue = (ret & 0xff) << 8;
+		XftColorAllocValue(xdpy, DefaultVisual(xdpy, xscr),
+				   DefaultColormap(xdpy, xscr), &ref, fc);
+	}
+
+	return ret;
+}
+
+static void init_colors(void)
+{
+	uint16_t len = baselen + sizeof("/colors/") + UCHAR_MAX;
+	char path[len];
+
+	snprintf(path, len, "%s/colors/active", basedir);
+	active_color = load_color(path, &fc_active, ACTIVE_COLOR);
+
+	snprintf(path, len, "%s/colors/normal", basedir);
+	normal_color = load_color(path, &fc_normal, NORMAL_COLOR);
+
+	snprintf(path, len, "%s/colors/docked", basedir);
+	docked_color = load_color(path, NULL, DOCKED_COLOR);
+
+	snprintf(path, len, "%s/colors/panelbg", basedir);
+	panel_bg = load_color(path, NULL, PANEL_BG);
+}
+
 #define match_cstr(str, cstr) strncmp(str, cstr, sizeof(cstr) - 1) == 0
 
 static void handle_user_request(void)
@@ -2128,6 +2173,14 @@ static void handle_user_request(void)
 
 	if (match_cstr(name.str, "reload-keys")) {
 		init_keys();
+	} else if (match_cstr(name.str, "reload-colors")) {
+		struct list_head *cur;
+		init_colors();
+		list_walk(cur, &screens) {
+			struct screen *scr = list2screen(cur);
+			panel_raise(scr);
+			redraw_panel_items(scr);
+		}
 	} else if (match_cstr(name.str, "refresh-outputs")) {
 		init_outputs();
 	} else if (match_cstr(name.str, "refresh-panel")) {
@@ -2782,21 +2835,11 @@ static xcb_atom_t get_atom_by_name(const char *str, strlen_t len)
 
 static void init_font(void)
 {
-	XRenderColor normal = FONT_COLOR_NORMAL;
-	XRenderColor active = FONT_COLOR_ACTIVE;
-
 	font = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
 			   FONT_NAME_FT, XFT_SIZE, XftTypeDouble,
 			   FONT_SIZE_FT, NULL);
 	if (!font)
 		panic("XftFontOpen(%s)\n", FONT_NAME_FT);
-
-        XftColorAllocValue(xdpy, DefaultVisual(xdpy, xscr),
-			   DefaultColormap(xdpy, xscr),
-			   &normal, &normal_color);
-        XftColorAllocValue(xdpy, DefaultVisual(xdpy, xscr),
-			   DefaultColormap(xdpy, xscr),
-			   &active, &active_color);
 }
 
 static void init_keys_def(void)
@@ -2990,6 +3033,11 @@ static int init_homedir(void)
 		goto err;
 	}
 
+	if (mkdir("colors", mode) < 0 && errno != EEXIST) {
+		ee("mkdir(%s/.yawm/colors) failed\n", home);
+		goto err;
+	}
+
 	chdir(home);
 	return 0;
 
@@ -2999,7 +3047,7 @@ homeless:
 	free(basedir);
 	basedir = NULL;
 	baselen = 0;
-	ww("base directory not available some features will be disabled\n");
+	ww("not all directories are available some features will be disabled\n");
 	return -1;
 }
 
@@ -3033,6 +3081,7 @@ int main()
 	}
 	xscr = DefaultScreen(xdpy);
 	init_font();
+	init_colors();
 #if 0
 	dpy = xcb_connect(NULL, NULL);
 #else
