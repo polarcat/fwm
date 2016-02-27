@@ -1556,8 +1556,12 @@ static void client_del(xcb_window_t win)
 	list_del(&cli->head);
 	list_del(&cli->list);
 
-	if (list_empty(&cli->scr->tag->clients))
+	if (list_empty(&cli->scr->tag->clients)) {
 		print_title(cli->scr, 0);
+		xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
+				    XCB_CURRENT_TIME);
+		xcb_flush(dpy);
+	}
 
 	free(cli);
 out:
