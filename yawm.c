@@ -115,7 +115,9 @@ typedef uint8_t strlen_t;
 #define MENU_ICON "::"
 
 #define ALT XCB_MOD_MASK_1
-#define MOD XCB_MOD_MASK_4
+#ifndef MOD
+#define MOD XCB_MOD_MASK_1
+#endif
 #define SHIFT XCB_MOD_MASK_SHIFT
 #define CTRL XCB_MOD_MASK_CONTROL
 
