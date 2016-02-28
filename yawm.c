@@ -2588,7 +2588,7 @@ static void handle_client_message(xcb_client_message_event_t *e)
 		tray_add(e->data.data32[2]);
 	} else if (e->type == a_active_window && e->format == 32) {
 		struct client *cli = win2client(e->window);
-		if (!cli)
+		if (!cli || (cli->flags & CLI_FLG_DOCK))
 			return;
 		tag_focus(cli->scr, cli->tag);
 		window_focus(cli->scr, e->window, 1);
