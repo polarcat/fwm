@@ -486,6 +486,7 @@ static void print_title(struct screen *scr, xcb_window_t win)
 	if (!win) {
 		draw_panel_text(scr, NULL, scr->items[PANEL_AREA_TITLE].x,
 				scr->items[PANEL_AREA_TITLE].w, NULL, 0);
+		return;
 	}
 
 	get_sprop(&title, win, XCB_ATOM_WM_NAME);
