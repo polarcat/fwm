@@ -76,10 +76,13 @@
 
 typedef uint8_t strlen_t;
 
-#define ACTIVE_COLOR 0xffffff
-#define NORMAL_COLOR 0x707070
+/* default colors */
+#define BORDER_ACTIVE 0xa0a0a0
+#define BORDER_NORMAL 0x303030
+#define BORDER_DOCKED 0x202020
+#define TEXT_ACTIVE 0xc0c0c0
+#define TEXT_NORMAL 0xa0a0a0
 #define PANEL_BG 0x101010
-#define DOCKED_COLOR 0x505050
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -295,9 +298,9 @@ static struct list_head keymap;
 
 /* defaults */
 
-static uint32_t docked_color = DOCKED_COLOR;
-static uint32_t active_color = ACTIVE_COLOR;
-static uint32_t normal_color = NORMAL_COLOR;
+static uint32_t border_docked = BORDER_DOCKED;
+static uint32_t border_active = BORDER_ACTIVE;
+static uint32_t border_normal = BORDER_NORMAL;
 static uint32_t panel_bg = PANEL_BG;
 static uint32_t panel_height = 24; /* need to adjust with font height */
 
@@ -689,12 +692,12 @@ static void window_focus(struct screen *scr, xcb_window_t win, int focus)
 
 	if (!focus) {
 		xcb_window_t tmp = XCB_WINDOW_NONE;
-		window_border_color(win, normal_color);
+		window_border_color(win, border_normal);
 		xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, rootscr->root,
 				    a_active_window, XCB_ATOM_WINDOW, 32, 1,
 				    &tmp);
 	} else {
-		window_border_color(win, active_color);
+		window_border_color(win, border_active);
 		print_title(scr, win);
 		scr->tag->win = win;
 		xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, rootscr->root,
@@ -1214,7 +1217,7 @@ static void dock_add(struct client *cli, uint8_t bw)
 
 	if (bw > 0) { /* adjust width if client desires to have a border */
 		window_border_width(cli->win, BORDER_WIDTH);
-		window_border_color(cli->win, docked_color);
+		window_border_color(cli->win, border_docked);
 		cli->flags |= CLI_FLG_BORDER;
 	}
 
@@ -1349,7 +1352,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 	cli->scr = scr;
 	cli->win = win;
 	window_raise(win);
-	window_border_color(cli->win, normal_color);
+	window_border_color(cli->win, border_normal);
 
 	if (tray || window_docked(win)) {
 		if (tray)
@@ -2152,17 +2155,23 @@ static void init_colors(void)
 	uint16_t len = baselen + sizeof("/colors/") + UCHAR_MAX;
 	char path[len];
 
-	snprintf(path, len, "%s/colors/active", basedir);
-	active_color = load_color(path, &fc_active, ACTIVE_COLOR);
+	snprintf(path, len, "%s/colors/border_active", basedir);
+	border_active = load_color(path, NULL, BORDER_ACTIVE);
 
-	snprintf(path, len, "%s/colors/normal", basedir);
-	normal_color = load_color(path, &fc_normal, NORMAL_COLOR);
+	snprintf(path, len, "%s/colors/border_normal", basedir);
+	border_normal = load_color(path, NULL, BORDER_NORMAL);
 
-	snprintf(path, len, "%s/colors/docked", basedir);
-	docked_color = load_color(path, NULL, DOCKED_COLOR);
+	snprintf(path, len, "%s/colors/border_docked", basedir);
+	border_docked = load_color(path, NULL, BORDER_DOCKED);
 
 	snprintf(path, len, "%s/colors/panelbg", basedir);
 	panel_bg = load_color(path, NULL, PANEL_BG);
+
+	snprintf(path, len, "%s/colors/text_active", basedir);
+	load_color(path, &fc_active, TEXT_ACTIVE);
+
+	snprintf(path, len, "%s/colors/text_normal", basedir);
+	load_color(path, &fc_normal, TEXT_NORMAL);
 }
 
 #define match_cstr(str, cstr) strncmp(str, cstr, sizeof(cstr) - 1) == 0
