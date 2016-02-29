@@ -2677,7 +2677,7 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 
 	list_walk(cur, &defscr->dock) {
 		cli = list2client(cur);
-		if (cli->flags & CLI_FLG_TRAY)
+		if (cli->flags & CLI_FLG_TRAY && cli->win == e->window)
 			break;
 		cli = NULL;
 	}
