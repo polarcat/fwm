@@ -96,6 +96,7 @@ typedef uint8_t strlen_t;
 
 #define CLI_FLG_DOCK (1 << 0)
 #define CLI_FLG_TRAY (1 << 1)
+#define CLI_FLG_BORDER (1 << 2)
 
 #define SCR_FLG_PANEL_TOP (1 << 0)
 
@@ -1153,25 +1154,24 @@ static int calc_title_max(struct screen *scr)
 	dd("title_max=%u\n", title_max);
 }
 
-#define DOCKWIN_GAP (BORDER_WIDTH * 2)
-
 static void dock_arrange(struct screen *scr)
 {
 	struct list_head *cur;
 	int16_t x, y, yy;
 
 	if (scr->flags & SCR_FLG_PANEL_TOP)
-		yy = DOCKWIN_GAP;
+		yy = scr->y;
 	else
-		yy = scr->y + scr->h + DOCKWIN_GAP;
+		yy = scr->y + scr->h;
 
 	x = scr->items[PANEL_AREA_DOCK].x;
 	list_walk(cur, &scr->dock) {
 		struct client *cli = list2client(cur);
-		if (cli->flags & CLI_FLG_TRAY)
-			y = yy + (panel_height - cli->h) / 2 - BORDER_WIDTH;
-		else
-			y = yy;
+
+		y = yy + (panel_height - cli->h) / 2;
+		if (!(cli->flags & CLI_FLG_TRAY))
+			y -= 1;
+
 		x -= cli->w + FONT_SIZE_FT - 2 * BORDER_WIDTH;
 		client_moveresize(cli, x, y, cli->w, cli->h);
 	}
@@ -1197,7 +1197,7 @@ static void dock_add(struct client *cli, uint8_t bw)
 
 	cli->flags |= CLI_FLG_DOCK;
 
-	h = panel_height - 3 * DOCKWIN_GAP - 1;
+	h = panel_height - 2 * 4;
 
 	if (cli->flags & CLI_FLG_TRAY)
 		cli->w = h;
@@ -1208,15 +1208,18 @@ static void dock_add(struct client *cli, uint8_t bw)
 	 */
 
 	cli->h = h;
-	dock_arrange(cli->scr);
 
 	if (cli->flags & CLI_FLG_TRAY)
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 
-	if (bw > 0) /* adjust border width if client desires to have a border */
+	if (bw > 0) { /* adjust width if client desires to have a border */
 		window_border_width(cli->win, BORDER_WIDTH);
+		window_border_color(cli->win, docked_color);
+		cli->flags |= CLI_FLG_BORDER;
+	}
 
-	window_border_color(cli->win, docked_color);
+	dock_arrange(cli->scr);
+
 	xcb_map_window(dpy, cli->win);
 	xcb_flush(dpy);
 }
@@ -2529,6 +2532,7 @@ static void print_atom_name(xcb_atom_t atom)
 static void handle_property_notify(xcb_property_notify_event_t *e)
 {
 	te("XCB_PROPERTY_NOTIFY: win %p, atom %d\n", e->window, e->atom);
+	print_atom_name(e->atom);
 
 	if (e->atom == XCB_ATOM_WM_NAME) {
 		ii("screen %d\n", curscr ? curscr->id : -1);
@@ -2544,7 +2548,7 @@ static void handle_property_notify(xcb_property_notify_event_t *e)
 			redraw_panel_items(scr);
 		}
 	} else {
-		print_atom_name(((xcb_property_notify_event_t *) e)->atom);
+		print_atom_name(e->atom);
 	}
 }
 
@@ -2554,6 +2558,9 @@ static void handle_configure_notify(xcb_configure_notify_event_t *e)
 		struct screen *scr = pointer2screen();
 		if (scr) /* update because screen geo could change */
 			update_panel_items(scr);
+	} else if (e->window != rootscr->root && e->border_width) {
+		window_border_width(e->window, BORDER_WIDTH);
+		xcb_flush(dpy);
 	}
 }
 
@@ -2673,6 +2680,13 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 	if (e->value_mask & XCB_CONFIG_WINDOW_HEIGHT) {
 		val[i++] = e->height;
 		mask |= XCB_CONFIG_WINDOW_HEIGHT;
+	}
+	if (e->value_mask & XCB_CONFIG_WINDOW_BORDER_WIDTH) {
+		if (e->border_width > 1)
+			val[i++] = BORDER_WIDTH;
+		else
+			val[i++] = e->border_width;
+		mask |= XCB_CONFIG_WINDOW_BORDER_WIDTH;
 	}
 	if (e->value_mask & XCB_CONFIG_WINDOW_SIBLING) {
 		val[i++] = e->sibling;
