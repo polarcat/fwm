@@ -2660,9 +2660,18 @@ static void print_configure_request(xcb_configure_request_event_t *e)
 
 static void handle_configure_request(xcb_configure_request_event_t *e)
 {
+	struct list_head *cur;
+	struct client *cli = NULL;
 	uint32_t val[7] = { 0 };
 	int i = 0;
 	uint16_t mask = 0;
+
+	list_walk(cur, &defscr->dock) {
+		cli = list2client(cur);
+		if (cli->flags & CLI_FLG_TRAY)
+			break;
+		cli = NULL;
+	}
 
 	/* the order has to correspond to the order value_mask bits */
 	if (e->value_mask & XCB_CONFIG_WINDOW_X) {
@@ -2674,11 +2683,17 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 		mask |= XCB_CONFIG_WINDOW_Y;
 	}
 	if (e->value_mask & XCB_CONFIG_WINDOW_WIDTH) {
-		val[i++] = e->width;
+		if (cli)
+			val[i++] = cli->w; /* tray client needs adjustment */
+		else
+			val[i++] = e->width;
 		mask |= XCB_CONFIG_WINDOW_WIDTH;
 	}
 	if (e->value_mask & XCB_CONFIG_WINDOW_HEIGHT) {
-		val[i++] = e->height;
+		if (cli)
+			val[i++] = cli->h; /* tray client needs adjustment */
+		else
+			val[i++] = e->height;
 		mask |= XCB_CONFIG_WINDOW_HEIGHT;
 	}
 	if (e->value_mask & XCB_CONFIG_WINDOW_BORDER_WIDTH) {
