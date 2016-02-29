@@ -2306,7 +2306,7 @@ static void handle_button_press(xcb_button_press_event_t *e)
 		if (curscr && curscr->panel == e->event) {
 			handle_panel_press(e);
 			return;
-		} else if (curscr) {
+		} else if (curscr && e->event != rootscr->root) {
 			print_title(curscr, e->event);
 		}
 		break;
