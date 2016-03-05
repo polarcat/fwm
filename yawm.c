@@ -76,15 +76,6 @@
 
 typedef uint8_t strlen_t;
 
-/* default colors */
-#define BORDER_ACTIVE 0xa0a0a0
-#define BORDER_NORMAL 0x303030
-#define BORDER_DOCKED 0x202020
-#define TEXT_ACTIVE 0xc0c0c0
-#define TEXT_NORMAL 0xa0a0a0
-#define TEXT_BG 0x003000
-#define PANEL_BG 0x101010
-
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
@@ -123,6 +114,13 @@ typedef uint8_t strlen_t;
 #define CTRL XCB_MOD_MASK_CONTROL
 
 /* data structures */
+
+struct color {
+	const char *fname;
+	void *val;
+	uint32_t def;
+	uint8_t type;
+};
 
 struct sprop { /* string property */
 	char *str;
@@ -300,11 +298,47 @@ static struct list_head keymap;
 
 /* defaults */
 
-static uint32_t border_docked = BORDER_DOCKED;
-static uint32_t border_active = BORDER_ACTIVE;
-static uint32_t border_normal = BORDER_NORMAL;
-static uint32_t text_bg = TEXT_BG;
-static uint32_t panel_bg = PANEL_BG;
+static uint32_t border_docked;
+static uint32_t border_normal;
+static uint32_t border_active;
+static XftColor textfg_normal;
+static XftColor textfg_active;
+static uint32_t textbg_normal;
+static uint32_t textbg_active;
+static uint32_t panelbg;
+
+enum colortype {
+	COLOR_TYPE_INT,
+	COLOR_TYPE_XFT,
+};
+
+enum coloridx {
+	BORDER_DOCKED,
+	BORDER_NORMAL,
+	BORDER_ACTIVE,
+	TEXTFG_NORMAL,
+	TEXTFG_ACTIVE,
+	TEXTBG_NORMAL,
+	TEXTBG_ACTIVE,
+	PANELBG,
+};
+
+static struct color defcolors[] = {
+	{ "border_docked", &border_docked, 0x202020, COLOR_TYPE_INT, },
+	{ "border_normal", &border_normal, 0x303030, COLOR_TYPE_INT, },
+	{ "border_active", &border_active, 0xa0a0a0, COLOR_TYPE_INT, },
+	{ "textfg_normal", &textfg_normal, 0xa0a0a0, COLOR_TYPE_XFT, },
+	{ "textfg_active", &textfg_active, 0xc0c0c0, COLOR_TYPE_XFT, },
+	{ "textbg_normal", &textbg_normal, 0x101010, COLOR_TYPE_INT, },
+	{ "textbg_active", &textbg_active, 0x303030, COLOR_TYPE_INT, },
+	{ "panelbg", &panelbg, 0x101010, COLOR_TYPE_INT, },
+	{ NULL, NULL, 0, 0, },
+};
+
+#define color2int(idx) *((uint32_t *) defcolors[idx].val)
+#define color2xft(idx) *((XftColor *) defcolors[idx].val)
+#define color2ptr(idx) &defcolors[idx]
+
 static uint32_t panel_height = 24; /* need to adjust with font height */
 
 /* globals */
@@ -324,8 +358,6 @@ enum winstatus {
 static int16_t mouse_x, mouse_y;
 static int mouse_button; /* current mouse button */
 
-static XftColor fc_normal;
-static XftColor fc_active;
 static XftFont *font;
 
 static int xscr;
@@ -366,26 +398,24 @@ static void text_exts(const char *text, int len, uint16_t *w, uint16_t *h)
 	*h = ext.height;
 }
 
-static void fill_rect(xcb_window_t win, xcb_gcontext_t gc, uint32_t color,
+static void fill_rect(xcb_window_t win, xcb_gcontext_t gc, struct color *color,
 		      int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
 	xcb_rectangle_t rect = { x, y, w, h, };
-	xcb_change_gc(dpy, gc, XCB_GC_FOREGROUND, &color);
+	xcb_change_gc(dpy, gc, XCB_GC_FOREGROUND, color->val);
 	xcb_poly_fill_rectangle(dpy, win, gc, 1, &rect);
 }
 
-static void draw_panel_text(struct screen *scr, XftColor *fg, uint32_t bg,
-			    int16_t x, uint16_t w, const char *text, int len)
+static void draw_panel_text(struct screen *scr, struct color *fg,
+			    struct color *bg, int16_t x, uint16_t w,
+			    const char *text, int len)
 {
-	if (bg) /* for black use 1 */
-		fill_rect(scr->panel, scr->gc, bg, x, ITEM_V_MARGIN, w,
-			  panel_height - 2 * ITEM_V_MARGIN);
-	else
-		fill_rect(scr->panel, scr->gc, panel_bg, x, 0, w, panel_height);
+	fill_rect(scr->panel, scr->gc, bg, x, ITEM_V_MARGIN, w,
+		  panel_height - 2 * ITEM_V_MARGIN);
 
 	if (text && len) {
 		x += ITEM_H_MARGIN;
-		XftDrawStringUtf8(scr->draw, fg, font, x, text_yoffs,
+		XftDrawStringUtf8(scr->draw, fg->val, font, x, text_yoffs,
 				  (XftChar8 *) text, len);
 		XSync(xdpy, 0);
 	}
@@ -500,8 +530,14 @@ static void print_title(struct screen *scr)
 	struct sprop title;
 	uint16_t w, h;
 
+	/* clean area */
+	fill_rect(scr->panel, scr->gc, color2ptr(PANELBG),
+		  scr->items[PANEL_AREA_TITLE].x, 0,
+		  scr->items[PANEL_AREA_DOCK].x, panel_height);
+
 	if (!win) {
-		draw_panel_text(scr, NULL, panel_bg,
+		draw_panel_text(scr, color2ptr(TEXTFG_NORMAL),
+				color2ptr(PANELBG),
 				scr->items[PANEL_AREA_TITLE].x,
 				scr->items[PANEL_AREA_TITLE].w, NULL, 0);
 		return;
@@ -522,7 +558,7 @@ static void print_title(struct screen *scr)
 		title.str[title.len - 1] = '.';
 	}
 
-	draw_panel_text(scr, &fc_active, 0x000030,
+	draw_panel_text(scr, color2ptr(TEXTFG_ACTIVE), color2ptr(PANELBG),
 			scr->items[PANEL_AREA_TITLE].x,
 			scr->items[PANEL_AREA_TITLE].w,
 			(XftChar8 *) title.str, title.len);
@@ -976,11 +1012,16 @@ static void panel_raise(struct screen *scr)
 	}
 }
 
-static void print_tag(struct screen *scr, struct tag *tag, XftColor *color,
-			int flush)
+static void print_tag(struct screen *scr, struct tag *tag, struct color *fg)
 {
-	uint32_t bg = (color == &fc_active ? text_bg : 0);
-	draw_panel_text(scr, color, bg, tag->x, tag->w, (XftChar8 *) tag->name,
+	struct color *bg;
+
+	if (fg == color2ptr(TEXTFG_ACTIVE))
+		bg = color2ptr(TEXTBG_ACTIVE);
+	else
+		bg = color2ptr(TEXTBG_NORMAL);
+
+	draw_panel_text(scr, fg, bg, tag->x, tag->w, (XftChar8 *) tag->name,
 		        tag->nlen);
 }
 
@@ -1013,11 +1054,11 @@ static void hide_windows(struct tag *tag)
 
 static void tag_focus(struct screen *scr, struct tag *tag)
 {
-	print_tag(scr, scr->tag, &fc_normal, 0);
+	print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
 	hide_windows(scr->tag);
 
 	scr->tag = tag;
-	print_tag(scr, tag, &fc_active, 1);
+	print_tag(scr, scr->tag, color2ptr(TEXTFG_ACTIVE));
 	show_windows(scr);
 }
 
@@ -1156,10 +1197,6 @@ static int calc_title_width(struct screen *scr, int16_t end)
 {
 	int16_t x, h, i;
 	char *tmp;
-
-	/* clean area */
-	fill_rect(scr->panel, scr->gc, panel_bg, scr->items[PANEL_AREA_TITLE].x,
-		  0, end, panel_height);
 
 	i = 1;
 	x = 0;
@@ -1540,8 +1577,8 @@ static void print_menu(struct screen *scr)
 	x = scr->items[PANEL_AREA_MENU].x;
 	w = scr->items[PANEL_AREA_MENU].w;
 
-	draw_panel_text(scr, &fc_normal, 0x300000, x, w, (XftChar8 *) MENU_ICON,
-		        sizeof(MENU_ICON) - 1);
+	draw_panel_text(scr, color2ptr(TEXTFG_NORMAL), color2ptr(PANELBG),
+			x, w, (XftChar8 *) MENU_ICON, sizeof(MENU_ICON) - 1);
 }
 
 static int tag_clicked(struct tag *tag, int16_t x)
@@ -1559,7 +1596,7 @@ static void select_tag(struct screen *scr, int x)
 	if (scr->tag && tag_clicked(scr->tag, x)) {
 		return;
 	} else if (scr->tag) { /* deselect current instantly */
-		print_tag(scr, scr->tag, &fc_normal, 0);
+		print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
 	}
 
 	prev = scr->tag;
@@ -1570,9 +1607,9 @@ static void select_tag(struct screen *scr, int x)
 		if (tag == scr->tag) {
 			continue;
 		} else if (!tag_clicked(tag, x)) {
-			print_tag(scr, tag, &fc_normal, 0);
+			print_tag(scr, tag, color2ptr(TEXTFG_NORMAL));
 		} else {
-			print_tag(scr, tag, &fc_active, 1);
+			print_tag(scr, tag, color2ptr(TEXTFG_ACTIVE));
 			scr->tag = tag;
 			break;
 		}
@@ -1598,7 +1635,9 @@ static struct tag *tag_get(struct screen *scr, const char *name, uint8_t id)
 			else if (tag->name)
 				free(tag->name);
 
-			draw_panel_text(scr, NULL, 0, tag->x, tag->w, NULL, 0);
+			/* clean area */
+			fill_rect(scr->panel, scr->gc, color2ptr(PANELBG),
+				  tag->x, 0, tag->w, panel_height);
 
 			tag->nlen = strlen(name);
 			tag->name = strdup(name);
@@ -1631,7 +1670,7 @@ static struct tag *tag_get(struct screen *scr, const char *name, uint8_t id)
 static int tag_add(struct screen *scr, const char *name, uint8_t id,
 		   uint16_t pos)
 {
-	XftColor *color;
+	struct color *fg;
 	struct tag *tag;
 	uint16_t h;
 
@@ -1642,16 +1681,16 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
 	text_exts(name, tag->nlen, &tag->w, &h);
 
 	if (pos != scr->items[PANEL_AREA_TAGS].x) {
-		color = &fc_normal;
+		fg = color2ptr(TEXTFG_NORMAL);
 	} else {
-		color = &fc_active;
+		fg = color2ptr(TEXTFG_ACTIVE);
 		scr->tag = tag;
 	}
 
 	tag->x = pos;
 	tag->w += ITEM_H_MARGIN * 2;
 
-	print_tag(scr, tag, color, 1);
+	print_tag(scr, tag, fg);
 
 	return pos + tag->w;
 }
@@ -1714,22 +1753,22 @@ out:
 
 static void redraw_panel_items(struct screen *scr)
 {
-	XftColor *fg;
+	struct color *fg;
 	struct list_head *cur;
 
 	/* clean panel */
-	fill_rect(scr->panel, scr->gc, panel_bg, scr->x, 0, scr->w,
+	fill_rect(scr->panel, scr->gc, color2ptr(PANELBG), scr->x, 0, scr->w,
 		  panel_height);
 
 	list_walk(cur, &scr->tags) {
 		struct tag *tag = list2tag(cur);
 
 		if (scr->tag == tag)
-			fg = &fc_active;
+			fg = color2ptr(TEXTFG_ACTIVE);
 		else
-			fg = &fc_normal;
+			fg = color2ptr(TEXTFG_NORMAL);
 
-		print_tag(scr, tag, fg, 0);
+		print_tag(scr, tag, fg);
 	}
 
 	print_menu(scr);
@@ -1742,7 +1781,7 @@ static int update_panel_items(struct screen *scr)
 	uint16_t h, w;
 
 	/* clean panel */
-	fill_rect(scr->panel, scr->gc, panel_bg, scr->x, 0, scr->w,
+	fill_rect(scr->panel, scr->gc, color2ptr(PANELBG), scr->x, 0, scr->w,
 		  panel_height);
 
 	scr->items[PANEL_AREA_DOCK].x = scr->x + scr->w;
@@ -1932,7 +1971,7 @@ static void init_panel(struct screen *scr)
 	scr->panel = xcb_generate_id(dpy);
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
-	val[0] = panel_bg;
+	val[0] = color2int(PANELBG);
 	val[1] = XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_VISIBILITY_CHANGE;
 
 	if (scr->flags & SCR_FLG_PANEL_TOP)
@@ -1957,7 +1996,7 @@ static void init_panel(struct screen *scr)
 
 	scr->gc = xcb_generate_id(dpy);
 	mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND;
-	val[0] = val[1] = panel_bg;
+	val[0] = val[1] = color2int(PANELBG);
         xcb_create_gc(dpy, scr->gc, scr->panel, mask, val);
 
 	xcb_map_window(dpy, scr->panel);
@@ -2137,57 +2176,46 @@ static void init_outputs(void)
 	free(r);
 }
 
-static uint32_t load_color(const char *path, XftColor *fc, uint32_t def)
+static void load_color(const char *path, struct color *color)
 {
-	uint32_t ret;
+	uint32_t val;
 	XRenderColor ref;
 	uint8_t buf[sizeof("0xffffff")];
 	int fd;
 
 	fd = open(path, O_RDONLY);
 	if (fd < 3) {
-		ret = def;
+		val = color->def;
 	} else { /* at least 0x0 */
 		memset(buf, 0, sizeof(buf));
 		read(fd, buf, sizeof(buf));
 		close(fd);
-		ret = strtol(buf, NULL, 16);
+		val = strtol(buf, NULL, 16);
 	}
 
-	if (fc) {
+	if (color->type == COLOR_TYPE_INT) {
+		*((uint32_t *) color->val) = val;
+	} else {
 		ref.alpha = 0xffff;
-		ref.red = (ret & 0xff0000) >> 8;
-		ref.green = ret & 0xff00;
-		ref.blue = (ret & 0xff) << 8;
+		ref.red = (val & 0xff0000) >> 8;
+		ref.green = val & 0xff00;
+		ref.blue = (val & 0xff) << 8;
 		XftColorAllocValue(xdpy, DefaultVisual(xdpy, xscr),
-				   DefaultColormap(xdpy, xscr), &ref, fc);
+				   DefaultColormap(xdpy, xscr), &ref,
+				   color->val);
 	}
-
-	return ret;
 }
 
 static void init_colors(void)
 {
 	uint16_t len = baselen + sizeof("/colors/") + UCHAR_MAX;
 	char path[len];
+	struct color *ptr = defcolors;
 
-	snprintf(path, len, "%s/colors/border_active", basedir);
-	border_active = load_color(path, NULL, BORDER_ACTIVE);
-
-	snprintf(path, len, "%s/colors/border_normal", basedir);
-	border_normal = load_color(path, NULL, BORDER_NORMAL);
-
-	snprintf(path, len, "%s/colors/border_docked", basedir);
-	border_docked = load_color(path, NULL, BORDER_DOCKED);
-
-	snprintf(path, len, "%s/colors/panelbg", basedir);
-	panel_bg = load_color(path, NULL, PANEL_BG);
-
-	snprintf(path, len, "%s/colors/text_active", basedir);
-	load_color(path, &fc_active, TEXT_ACTIVE);
-
-	snprintf(path, len, "%s/colors/text_normal", basedir);
-	load_color(path, &fc_normal, TEXT_NORMAL);
+	while (ptr->fname) {
+		snprintf(path, len, "%s/colors/%s", basedir, ptr->fname);
+		load_color(path, ptr++);
+	}
 }
 
 #define match_cstr(str, cstr) strncmp(str, cstr, sizeof(cstr) - 1) == 0
