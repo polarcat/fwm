@@ -1193,8 +1193,9 @@ out:
 	return NULL;
 }
 
-static int calc_title_width(struct screen *scr, int16_t end)
+static int calc_title_width(struct screen *scr)
 {
+	int16_t end = scr->items[PANEL_AREA_DOCK].x;
 	int16_t x, h, i;
 	char *tmp;
 
@@ -1217,6 +1218,9 @@ static void dock_arrange(struct screen *scr)
 	struct list_head *cur;
 	int16_t x, y;
 
+	scr->items[PANEL_AREA_DOCK].x = scr->x + scr->w;
+	scr->items[PANEL_AREA_DOCK].w = 0;
+
 	if (scr->flags & SCR_FLG_PANEL_TOP)
 		y = scr->y;
 	else
@@ -1231,7 +1235,9 @@ static void dock_arrange(struct screen *scr)
 		client_moveresize(cli, x, y, cli->w, cli->h);
 	}
 
-	calc_title_width(scr, x - ITEM_H_MARGIN);
+	scr->items[PANEL_AREA_DOCK].x = x;
+	scr->items[PANEL_AREA_DOCK].w = scr->items[PANEL_AREA_DOCK].x - x;
+	calc_title_width(scr);
 }
 
 static void dock_del(struct client *cli)
@@ -1784,11 +1790,6 @@ static int update_panel_items(struct screen *scr)
 	fill_rect(scr->panel, scr->gc, color2ptr(PANELBG), scr->x, 0, scr->w,
 		  panel_height);
 
-	scr->items[PANEL_AREA_DOCK].x = scr->x + scr->w;
-	scr->items[PANEL_AREA_DOCK].w = 0;
-
-	text_yoffs = panel_height - (panel_height - FONT_SIZE) / 2;
-
 	scr->items[PANEL_AREA_TAGS].x = ITEM_H_MARGIN;
 	scr->items[PANEL_AREA_TAGS].w = init_tags(scr);
 	x += scr->items[PANEL_AREA_TAGS].w + 1;
@@ -1800,11 +1801,8 @@ static int update_panel_items(struct screen *scr)
 	x += scr->items[PANEL_AREA_MENU].w + 1;
 	scr->items[PANEL_AREA_TITLE].x = x;
 
-	w = scr->items[PANEL_AREA_DOCK].x - 1;
-	calc_title_width(scr, w);
-
+	dock_arrange(scr);
 	print_menu(scr);
-	print_title(scr);
 }
 
 static void grab_key(xcb_key_symbols_t *syms, struct keymap *kmap)
@@ -2926,6 +2924,8 @@ static void init_font(void)
 			   FONT_SIZE, NULL);
 	if (!font)
 		panic("XftFontOpen(%s)\n", FONT_NAME);
+
+	text_yoffs = panel_height - (panel_height - FONT_SIZE) / 2;
 }
 
 static void init_keys_def(void)
