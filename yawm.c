@@ -493,6 +493,51 @@ static void get_sprop(struct sprop *ret, xcb_window_t win,
 	}
 }
 
+static xcb_atom_t get_atom_by_name(const char *str, strlen_t len)
+{
+	xcb_intern_atom_cookie_t c;
+	xcb_intern_atom_reply_t *r;
+	xcb_atom_t a;
+
+	c = xcb_intern_atom(dpy, 0, len, str);
+	r = xcb_intern_atom_reply(dpy, c, NULL);
+	if (!r) {
+		ee("xcb_intern_atom(%s) failed\n", str);
+		return (XCB_ATOM_NONE);
+	}
+
+	a = r->atom;
+	free(r);
+	return a;
+}
+
+#define atom_by_name(name) get_atom_by_name(name, sizeof(name) - 1)
+
+#ifndef DEBUG
+#define print_atom_name(a) do {} while(0)
+#else
+static void print_atom_name(xcb_atom_t atom)
+{
+	strlen_t len;
+	char *name, *tmp;
+	xcb_get_atom_name_reply_t *r;
+	xcb_get_atom_name_cookie_t c;
+
+	c = xcb_get_atom_name(dpy, atom);
+	r = xcb_get_atom_name_reply(dpy, c, NULL);
+	if (r) {
+		len = xcb_get_atom_name_name_length(r);
+		if (len > 0) {
+			name = xcb_get_atom_name_name(r);
+			tmp = strndup(name, len);
+			ii("atom %d, name %s, len %d\n", atom, tmp, len);
+			free(tmp);
+		}
+		free(r);
+	}
+}
+#endif /* DEBUG */
+
 #ifndef VERBOSE
 #define panel_items_stat(scr) ;
 #else
@@ -1781,7 +1826,7 @@ static void redraw_panel_items(struct screen *scr)
 	print_title(scr);
 }
 
-static int update_panel_items(struct screen *scr)
+static void update_panel_items(struct screen *scr)
 {
 	int16_t x;
 	uint16_t h, w;
@@ -2006,8 +2051,6 @@ static void init_panel(struct screen *scr)
 				  DefaultVisual(xdpy, xscr),
 				  DefaultColormap(xdpy, xscr));
 
-	update_panel_items(scr);
-
 	ii("screen %d, panel %p geo %ux%u+%d+%d\n", scr->id, scr->panel,
 	   scr->w, panel_height, scr->x, y);
 }
@@ -2031,6 +2074,56 @@ static void move_panel(struct screen *scr)
 	xcb_configure_window(dpy, scr->panel, mask, val);
 	update_panel_items(scr);
 	xcb_flush(dpy);
+}
+
+static void tray_notify(xcb_atom_t atom)
+{
+	xcb_client_message_event_t e = {
+		.response_type = XCB_CLIENT_MESSAGE,
+		.window = rootscr->root,
+		.type = XCB_ATOM_RESOURCE_MANAGER,
+		.format = 32,
+		.data.data32[0] = XCB_CURRENT_TIME,
+		.data.data32[1] = atom,
+		.data.data32[2] = defscr->panel,
+	};
+
+	xcb_send_event(dpy, 0, rootscr->root, 0xffffff, (void *) &e);
+}
+
+static void init_tray(void)
+{
+	xcb_get_selection_owner_cookie_t c;
+	xcb_get_selection_owner_reply_t *r;
+	xcb_atom_t a_tray, a_manager;
+	char *name = xcb_atom_name_by_screen("_NET_SYSTEM_TRAY", defscr->id);
+
+	if (!name) {
+		ee("failed to get systray atom name\n");
+		return;
+	}
+
+	a_tray = get_atom_by_name(name, strlen(name));
+	free(name);
+
+	ii("tray atom %d, manager atom %d\n", a_tray, a_manager);
+	print_atom_name(a_tray);
+	xcb_set_selection_owner(dpy, defscr->panel, a_tray, XCB_CURRENT_TIME);
+
+	/* verify selection */
+	c = xcb_get_selection_owner(dpy, a_tray);
+	r = xcb_get_selection_owner_reply(dpy, c, NULL);
+	if (!r) {
+		ee("xcb_get_selection_owner(%s) failed\n", name);
+		return;
+	}
+
+	if (r->owner != defscr->panel)
+		ww("systray owned by win %p scr %d\n", r->owner, defscr->id);
+	else
+		tray_notify(a_tray);
+
+	free(r);
 }
 
 static void screen_add(uint8_t id, xcb_randr_output_t out, int16_t x, int16_t y,
@@ -2152,6 +2245,7 @@ static void init_output(int id, xcb_randr_output_t out, xcb_timestamp_t ts)
 
 static void init_outputs(void)
 {
+	struct list_head *cur;
 	xcb_randr_get_screen_resources_current_cookie_t c;
 	xcb_randr_get_screen_resources_current_reply_t *r;
 	xcb_randr_output_t *out;
@@ -2172,6 +2266,26 @@ static void init_outputs(void)
 		init_output(i, out[i], r->config_timestamp);
 
 	free(r);
+
+	if (list_empty(&screens)) { /*randr failed or not supported */
+		screen_add(0, 0, 0, 0, rootscr->width_in_pixels,
+			   rootscr->height_in_pixels);
+	}
+
+	if (!defscr)
+		defscr = list2screen(screens.next); /* use first one */
+	if (!curscr)
+		curscr = defscr;
+
+	/* force refresh all panels */
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		update_panel_items(scr);
+	}
+
+	trace_screens();
+	init_tray();
+	clients_scan();
 }
 
 static void load_color(const char *path, struct color *color)
@@ -2556,31 +2670,6 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	xcb_flush(dpy);
 }
 
-#ifndef DEBUG
-#define print_atom_name(a) do {} while(0)
-#else
-static void print_atom_name(xcb_atom_t atom)
-{
-	strlen_t len;
-	char *name, *tmp;
-	xcb_get_atom_name_reply_t *r;
-	xcb_get_atom_name_cookie_t c;
-
-	c = xcb_get_atom_name(dpy, atom);
-	r = xcb_get_atom_name_reply(dpy, c, NULL);
-	if (r) {
-		len = xcb_get_atom_name_name_length(r);
-		if (len > 0) {
-			name = xcb_get_atom_name_name(r);
-			tmp = strndup(name, len);
-			ii("atom %d, name %s, len %d\n", atom, tmp, len);
-			free(tmp);
-		}
-		free(r);
-	}
-}
-#endif /* DEBUG */
-
 static void handle_property_notify(xcb_property_notify_event_t *e)
 {
 	te("XCB_PROPERTY_NOTIFY: win %p, atom %d\n", e->window, e->atom);
@@ -2897,26 +2986,6 @@ static int handle_events(void)
 	return 1;
 }
 
-static xcb_atom_t get_atom_by_name(const char *str, strlen_t len)
-{
-	xcb_intern_atom_cookie_t c;
-	xcb_intern_atom_reply_t *r;
-	xcb_atom_t a;
-
-	c = xcb_intern_atom(dpy, 0, len, str);
-	r = xcb_intern_atom_reply(dpy, c, NULL);
-	if (!r) {
-		ee("xcb_intern_atom(%s) failed\n", str);
-		return (XCB_ATOM_NONE);
-	}
-
-	a = r->atom;
-	free(r);
-	return a;
-}
-
-#define atom_by_name(name) get_atom_by_name(name, sizeof(name) - 1)
-
 static void init_font(void)
 {
 	font = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
@@ -2972,56 +3041,6 @@ static void init_keys_def(void)
 	}
 
 	actname_max++;
-}
-
-static void tray_notify(xcb_atom_t atom)
-{
-	xcb_client_message_event_t e = {
-		.response_type = XCB_CLIENT_MESSAGE,
-		.window = rootscr->root,
-		.type = XCB_ATOM_RESOURCE_MANAGER,
-		.format = 32,
-		.data.data32[0] = XCB_CURRENT_TIME,
-		.data.data32[1] = atom,
-		.data.data32[2] = defscr->panel,
-	};
-
-	xcb_send_event(dpy, 0, rootscr->root, 0xffffff, (void *) &e);
-}
-
-static void init_tray(void)
-{
-	xcb_get_selection_owner_cookie_t c;
-	xcb_get_selection_owner_reply_t *r;
-	xcb_atom_t a_tray, a_manager;
-	char *name = xcb_atom_name_by_screen("_NET_SYSTEM_TRAY", defscr->id);
-
-	if (!name) {
-		ee("failed to get systray atom name\n");
-		return;
-	}
-
-	a_tray = get_atom_by_name(name, strlen(name));
-	free(name);
-
-	ii("tray atom %d, manager atom %d\n", a_tray, a_manager);
-	print_atom_name(a_tray);
-	xcb_set_selection_owner(dpy, defscr->panel, a_tray, XCB_CURRENT_TIME);
-
-	/* verify selection */
-	c = xcb_get_selection_owner(dpy, a_tray);
-	r = xcb_get_selection_owner_reply(dpy, c, NULL);
-	if (!r) {
-		ee("xcb_get_selection_owner(%s) failed\n", name);
-		return;
-	}
-
-	if (r->owner != defscr->panel)
-		ww("systray owned by win %p scr %d\n", r->owner, defscr->id);
-	else
-		tray_notify(a_tray);
-
-	free(r);
 }
 
 static void init_randr(void)
@@ -3192,21 +3211,6 @@ int main()
 	init_rootwin();
 	init_randr();
 	init_outputs();
-
-	if (list_empty(&screens)) { /*randr failed or not supported */
-		screen_add(0, 0, 0, 0, rootscr->width_in_pixels,
-			   rootscr->height_in_pixels);
-	}
-
-	if (!defscr)
-		defscr = list2screen(screens.next); /* use first one */
-	if (!curscr)
-		curscr = defscr;
-
-	trace_screens();
-
-	init_tray();
-	clients_scan();
 
 	pfd.fd = xcb_get_file_descriptor(dpy);
 	pfd.events = POLLIN;
