@@ -1260,7 +1260,7 @@ static int calc_title_width(struct screen *scr)
 
 static void dock_arrange(struct screen *scr)
 {
-	struct list_head *cur;
+	struct list_head *cur, *tmp;
 	int16_t x, y;
 
 	scr->items[PANEL_AREA_DOCK].x = scr->x + scr->w;
@@ -1274,8 +1274,14 @@ static void dock_arrange(struct screen *scr)
 	y += ITEM_V_MARGIN;
 
 	x = scr->items[PANEL_AREA_DOCK].x;
-	list_walk(cur, &scr->dock) {
+	list_walk_safe(cur, tmp, &scr->dock) {
 		struct client *cli = list2client(cur);
+		if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
+			list_del(&cli->head);
+			list_del(&cli->list);
+			free(cur);
+			continue;
+		}
 		x -= (cli->w + ITEM_H_MARGIN + 2 * BORDER_WIDTH);
 		client_moveresize(cli, x, y, cli->w, cli->h);
 	}
@@ -1413,14 +1419,14 @@ static struct client *client_add(xcb_window_t win, int tray)
 	} else {
 		if (scr->panel == win) {
 			goto out; /* don't handle it here */
-		} else if (scr2client(scr, win, WIN_TYPE_DOCK)) {
-			ii("already on dock list\n");
-			goto out; /* already added */
-		} else if (scr2client(scr, win, WIN_TYPE_NORMAL)) {
-			ii("already on clients list\n");
-			xcb_map_window(dpy, win);
-			xcb_flush(dpy);
-			goto out; /* already added */
+		} else if ((cli = scr2client(scr, win, WIN_TYPE_DOCK))) {
+			ii("win %p already on dock list\n", win);
+			list_del(&cli->head);
+			list_del(&cli->list);
+		} else if ((cli = scr2client(scr, win, WIN_TYPE_NORMAL))) {
+			ii("win %p already on clients list\n", win);
+			list_del(&cli->head);
+			list_del(&cli->list);
 		}
 	}
 
@@ -1431,7 +1437,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 	a = xcb_get_window_attributes_reply(dpy, c, NULL);
 	if (!a) {
 		ee("xcb_get_window_attributes() failed\n");
-		return NULL;
+		goto out;
 	}
 
 	if (a->override_redirect) {
@@ -1442,10 +1448,12 @@ static struct client *client_add(xcb_window_t win, int tray)
 	/* tell x server to restore window upon our sudden exit */
 	xcb_change_save_set(dpy, XCB_SET_MODE_INSERT, win);
 
-	cli = calloc(1, sizeof(*cli));
 	if (!cli) {
-		ee("calloc(%lu) failed\n", sizeof(*cli));
-		goto out;
+		cli = calloc(1, sizeof(*cli));
+		if (!cli) {
+			ee("calloc(%lu) failed\n", sizeof(*cli));
+			goto out;
+		}
 	}
 
 	if (scr->tag->win)
@@ -1512,9 +1520,8 @@ static struct client *client_add(xcb_window_t win, int tray)
 	   scr->tag->name, cli, cli->win, cli->w, cli->h, cli->x, cli->y);
 
 	window_focus(scr, cli->win, 1);
-	update_clients_list();
 out:
-	xcb_flush(dpy);
+	update_clients_list();
 	free(a);
 	free(g);
 	return cli;
@@ -1535,7 +1542,7 @@ static void client_del(xcb_window_t win)
 
 	if (cli->flags & CLI_FLG_DOCK) {
 		dock_del(cli);
-		return;
+		goto out;
 	}
 
 	/* find client under pointer */
@@ -2943,6 +2950,24 @@ static int handle_events(void)
 		   ((xcb_key_press_event_t *) e)->event,
 		   ((xcb_key_press_event_t *) e)->child);
 		handle_key_press((xcb_key_press_event_t *) e);
+		break;
+	case XCB_CREATE_NOTIFY:
+		te("XCB_CREATE_NOTIFY: parent %p, window %p, "
+		   "geo %ux%u+%d+%d, border %u, override-redirect %u\n",
+		   ((xcb_create_notify_event_t *) e)->parent,
+		   ((xcb_create_notify_event_t *) e)->window,
+		   ((xcb_create_notify_event_t *) e)->width,
+		   ((xcb_create_notify_event_t *) e)->height,
+		   ((xcb_create_notify_event_t *) e)->x,
+		   ((xcb_create_notify_event_t *) e)->y,
+		   ((xcb_create_notify_event_t *) e)->border_width,
+		   ((xcb_create_notify_event_t *) e)->override_redirect);
+		break;
+	case XCB_MAP_NOTIFY:
+		te("XCB_MAP_NOTIFY: event %p, win %p, redirect %u\n",
+		   ((xcb_map_notify_event_t *) e)->event,
+		   ((xcb_map_notify_event_t *) e)->window,
+		   ((xcb_map_notify_event_t *) e)->override_redirect);
 		break;
 	case XCB_MAP_REQUEST:
 		te("XCB_MAP_REQUEST: parent %p, win %p\n",
