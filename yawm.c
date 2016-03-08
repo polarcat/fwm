@@ -2133,16 +2133,19 @@ static void init_tray(void)
 	free(r);
 }
 
-static void screen_add(uint8_t id, xcb_randr_output_t out, int16_t x, int16_t y,
-		       uint16_t w, uint16_t h)
+static void screen_add(uint8_t *id, xcb_randr_output_t out,
+		       int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
+	uint8_t tmp;
 	struct screen *scr;
 
 	scr = calloc(1, sizeof(*scr));
 	if (!scr)
 		panic("calloc(%lu) failed\n", sizeof(*scr));
 
-	scr->id = id;
+	tmp = *id;
+	scr->id = tmp++;
+	*id = tmp;
 	scr->out = out;
 	scr->x = x;
 	scr->y = y;
@@ -2163,11 +2166,11 @@ static void screen_add(uint8_t id, xcb_randr_output_t out, int16_t x, int16_t y,
 	if (scr->x == 0)
 		defscr = scr; /* make such screen default */
 
-	ii("screen %d (%p), size %dx%d+%d+%d\n", id, scr, scr->w, scr->h,
-	   scr->x, scr->y);
+	ii("add screen %d (%p), size %dx%d+%d+%d\n", scr->id, scr, scr->w,
+	   scr->h, scr->x, scr->y);
 }
 
-static void init_crtc(uint8_t id, xcb_randr_output_t out,
+static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 		      xcb_randr_get_output_info_reply_t *inf,
 		      xcb_timestamp_t ts)
 {
@@ -2180,7 +2183,7 @@ static void init_crtc(uint8_t id, xcb_randr_output_t out,
 	if (!r)
 		return;
 
-	ii("crtc%d geo %ux%u+%d+%d\n", id, r->width, r->height, r->x, r->y);
+	ii("crtc%d geo %ux%u+%d+%d\n", i, r->width, r->height, r->x, r->y);
 
 	/* find a screen that matches new geometry so we can re-use it */
 	list_walk(cur, &screens) {
@@ -2188,9 +2191,7 @@ static void init_crtc(uint8_t id, xcb_randr_output_t out,
 
 		if (r->width == scr->w && r->height == scr->h + panel_height &&
 		    r->x == scr->x && r->y == scr->y) {
-			ii("crtc%d geo %ux%u+%d+%d is a clone of screen %d\n",
-			   id, scr->w, scr->h + panel_height, scr->x,
-			   scr->y, scr->id);
+			ii("crtc%d is a clone of screen %d\n", i, scr->id);
 			goto out;
 		}
 	}
@@ -2202,7 +2203,7 @@ static void init_crtc(uint8_t id, xcb_randr_output_t out,
 			ii("crtc%d, screen %d: "
 			   "old geo %ux%u+%d+%d, "
 			   "new geo %ux%u+%d+%d\n",
-			   id, scr->id,
+			   i, scr->id,
 			   scr->w, scr->h + panel_height, scr->x, scr->y,
 			   r->width, r->height, r->x, r->y);
 			scr->x = r->x;
@@ -2223,7 +2224,8 @@ out:
 	free(r);
 }
 
-static void init_output(int id, xcb_randr_output_t out, xcb_timestamp_t ts)
+static void init_output(uint8_t i, uint8_t *id, xcb_randr_output_t out,
+			xcb_timestamp_t ts)
 {
 	char name[UCHAR_MAX];
 	strlen_t len;
@@ -2240,23 +2242,25 @@ static void init_output(int id, xcb_randr_output_t out, xcb_timestamp_t ts)
 		len = sizeof(name);
 	snprintf(name, len, "%s", xcb_randr_get_output_info_name(r));
 
-	dd("output %s%d, %ux%u\n", name, id, r->mm_width, r->mm_height);
+	dd("output %s%d, %ux%u\n", name, i, r->mm_width, r->mm_height);
 
 	if (r->connection != XCB_RANDR_CONNECTION_CONNECTED)
-		ii("output %s%d not connected\n", name, id);
+		ii("output %s%d not connected\n", name, i);
 	else
-		init_crtc(id, out, r, ts);
+		init_crtc(i, id, out, r, ts);
 
 	free(r);
 }
 
 static void init_outputs(void)
 {
-	struct list_head *cur;
+	struct screen *scr;
+	struct list_head *cur, *tmp;
 	xcb_randr_get_screen_resources_current_cookie_t c;
 	xcb_randr_get_screen_resources_current_reply_t *r;
 	xcb_randr_output_t *out;
-	int i, len;
+	int len;
+	uint8_t id, i;
 
 	c = xcb_randr_get_screen_resources_current(dpy, rootscr->root);
 	r = xcb_randr_get_screen_resources_current_reply(dpy, c, NULL);
@@ -2269,13 +2273,21 @@ static void init_outputs(void)
 	out = xcb_randr_get_screen_resources_current_outputs(r);
 	ii("found %d screens\n", len);
 
+	/* reset geometry of previously found screens */
+	list_walk_safe(cur, tmp, &screens) {
+		scr = list2screen(cur);
+		scr->x = scr->y = scr->w = scr->h = 0;
+	}
+
+	id = 0;
 	for (i = 0; i < len; i++)
-		init_output(i, out[i], r->config_timestamp);
+		init_output(i, &id, out[i], r->config_timestamp);
 
 	free(r);
 
 	if (list_empty(&screens)) { /*randr failed or not supported */
-		screen_add(0, 0, 0, 0, rootscr->width_in_pixels,
+		id = 0;
+		screen_add(&id, 0, 0, 0, rootscr->width_in_pixels,
 			   rootscr->height_in_pixels);
 	}
 
@@ -2286,7 +2298,7 @@ static void init_outputs(void)
 
 	/* force refresh all panels */
 	list_walk(cur, &screens) {
-		struct screen *scr = list2screen(cur);
+		scr = list2screen(cur);
 		update_panel_items(scr);
 	}
 
