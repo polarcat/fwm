@@ -1599,8 +1599,6 @@ static void clients_scan(void)
 	xcb_query_tree_reply_t *tree;
 	xcb_window_t *wins;
 
-	list_init(&clients);
-
 	/* walk through windows tree */
 	c = xcb_query_tree(dpy, rootscr->root);
 	tree = xcb_query_tree_reply(dpy, c, 0);
@@ -3239,6 +3237,7 @@ int main()
 	   rootscr->height_in_pixels);
 
 	list_init(&screens);
+	list_init(&clients);
 
 	init_keys_def();
 	init_keys();
