@@ -2220,7 +2220,7 @@ static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 	screen_add(*id, out, r->x, r->y, r->width, r->height);
 
 out:
-	*id++;
+	(uint8_t)(*id)++;
 	free(r);
 }
 
