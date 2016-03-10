@@ -2133,19 +2133,16 @@ static void init_tray(void)
 	free(r);
 }
 
-static void screen_add(uint8_t *id, xcb_randr_output_t out,
+static void screen_add(uint8_t id, xcb_randr_output_t out,
 		       int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
-	uint8_t tmp;
 	struct screen *scr;
 
 	scr = calloc(1, sizeof(*scr));
 	if (!scr)
 		panic("calloc(%lu) failed\n", sizeof(*scr));
 
-	tmp = *id;
-	scr->id = tmp++;
-	*id = tmp;
+	scr->id = id;
 	scr->out = out;
 	scr->x = x;
 	scr->y = y;
@@ -2218,9 +2215,10 @@ static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 	/* one screen per output; share same root window via common
 	 * xcb_screen_t structure
 	 */
-	screen_add(id, out, r->x, r->y, r->width, r->height);
+	screen_add(*id, out, r->x, r->y, r->width, r->height);
 
 out:
+	*id++;
 	free(r);
 }
 
@@ -2286,8 +2284,7 @@ static void init_outputs(void)
 	free(r);
 
 	if (list_empty(&screens)) { /*randr failed or not supported */
-		id = 0;
-		screen_add(&id, 0, 0, 0, rootscr->width_in_pixels,
+		screen_add(0, 0, 0, 0, rootscr->width_in_pixels,
 			   rootscr->height_in_pixels);
 	}
 
