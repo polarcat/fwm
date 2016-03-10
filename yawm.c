@@ -784,13 +784,22 @@ static void window_border_width(xcb_window_t win, uint16_t width)
 	xcb_configure_window_checked(dpy, win, mask, val);
 }
 
-static void window_focus(struct screen *scr, xcb_window_t win, int focus)
+enum focus_flags {
+	FOCUS_NONE,
+	FOCUS_ONLY,
+	FOCUS_RAISE,
+};
+
+static void window_focus(struct screen *scr, xcb_window_t win, uint8_t flag)
 {
 	struct client *cli;
 
 	tt("win %p, focus %d\n", win, focus);
 
-	if (!focus) {
+	if (flag == FOCUS_RAISE)
+		window_raise(win);
+
+	if (flag == FOCUS_NONE) {
 		xcb_window_t tmp = XCB_WINDOW_NONE;
 		window_border_color(win, border_normal);
 		xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, rootscr->root,
@@ -870,9 +879,8 @@ static void switch_window(struct screen *scr, enum dir dir)
 		return;
 
 out:
-	window_raise(cli->win);
-	window_focus(scr, scr->tag->win, 0);
-	window_focus(scr, cli->win, 1);
+	window_focus(scr, scr->tag->win, FOCUS_NONE);
+	window_focus(scr, cli->win, FOCUS_RAISE);
 	xcb_warp_pointer(dpy, XCB_NONE, cli->win, 0, 0, 0, 0, cli->w / 2,
 			 cli->h / 2);
 	xcb_flush(dpy);
@@ -1082,7 +1090,7 @@ static void show_windows(struct screen *scr)
 
 	if (scr->tag->win) {
 		tt("tag->win=%p\n", scr->tag->win);
-		window_focus(scr, scr->tag->win, 1);
+		window_focus(scr, scr->tag->win, FOCUS_ONLY);
 	}
 }
 
@@ -1167,8 +1175,7 @@ static void retag_window(void *arg)
 	list_add(&curscr->tag->clients, &cli->head);
 	curscr->tag->win = cli->win;
 	cli->tag = curscr->tag;
-	window_focus(curscr, curscr->tag->win, 1);
-	window_raise(curscr->tag->win);
+	window_focus(curscr, curscr->tag->win, FOCUS_RAISE);
 	xcb_flush(dpy);
 }
 
@@ -1457,7 +1464,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 	}
 
 	if (scr->tag->win)
-		window_focus(scr, scr->tag->win, 0);
+		window_focus(scr, scr->tag->win, FOCUS_NONE);
 
 	cli->scr = scr;
 	cli->win = win;
@@ -1519,7 +1526,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 	dd("screen %d, tag %s, cli %p, win %p, geo %ux%u+%d+%d\n", scr->id,
 	   scr->tag->name, cli, cli->win, cli->w, cli->h, cli->x, cli->y);
 
-	window_focus(scr, cli->win, 1);
+	window_focus(scr, cli->win, FOCUS_ONLY);
 out:
 	update_clients_list();
 	free(a);
@@ -1552,8 +1559,7 @@ static void client_del(xcb_window_t win)
 		if (tmp->win == win)
 			continue;
 		if (client_pointed(tmp->x, tmp->y, tmp->w, tmp->h)) {
-			window_raise(tmp->win);
-			window_focus(tmp->scr, tmp->win, 1);
+			window_focus(tmp->scr, tmp->win, FOCUS_RAISE);
 			print_title(tmp->scr);
 			found = 1;
 			break;
@@ -1617,10 +1623,8 @@ static void clients_scan(void)
 		client_add(wins[i], 0);
 	}
 
-	if (curscr->tag->win) {
-		window_raise(curscr->tag->win);
-		window_focus(curscr, curscr->tag->win, 1);
-	}
+	if (curscr->tag->win)
+		window_focus(curscr, curscr->tag->win, FOCUS_RAISE);
 
 	free(tree);
 	update_clients_list();
@@ -2674,9 +2678,9 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	}
 
 	if (curscr->tag->win)
-		window_focus(curscr, curscr->tag->win, 0);
+		window_focus(curscr, curscr->tag->win, FOCUS_NONE);
 
-	window_focus(curscr, e->event, 1);
+	window_focus(curscr, e->event, FOCUS_ONLY);
 
 	if (e->mode == MOD)
 		window_raise(e->event);
@@ -2756,8 +2760,7 @@ static void handle_client_message(xcb_client_message_event_t *e)
 		if (!cli || (cli->flags & CLI_FLG_DOCK))
 			return;
 		tag_focus(cli->scr, cli->tag);
-		window_focus(cli->scr, e->window, 1);
-		window_raise(e->window);
+		window_focus(cli->scr, e->window, FOCUS_RAISE);
 		xcb_flush(dpy);
 	}
 }
