@@ -1448,7 +1448,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 		goto out;
 	}
 
-	if (a->override_redirect) {
+	if (!tray && a->override_redirect) {
 		dd("ignore redirected window 0x%x\n", win);
 		goto out;
 	}
