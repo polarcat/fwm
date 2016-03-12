@@ -1417,10 +1417,10 @@ static struct client *client_add(xcb_window_t win, int tray)
 	if (!scr) {
 		if (panel_window(win)) {
 			goto out;
-		} else if (win2client(win)) {
-			xcb_map_window(dpy, win);
-			xcb_flush(dpy);
-			goto out; /* window is already added */
+		} else if ((cli = win2client(win))) {
+			ii("win 0x%x already on clients list\n", win);
+			list_del(&cli->head);
+			list_del(&cli->list);
 		}
 		scr = defscr;
 	} else {
@@ -1431,13 +1431,14 @@ static struct client *client_add(xcb_window_t win, int tray)
 			list_del(&cli->head);
 			list_del(&cli->list);
 		} else if ((cli = scr2client(scr, win, WIN_TYPE_NORMAL))) {
-			ii("win 0x%x already on clients list\n", win);
+			ii("win 0x%x already on [%s] list\n", win,
+			   scr->tag->name);
 			list_del(&cli->head);
 			list_del(&cli->list);
 		}
 	}
 
-	dd("screen %d, win %p, geo %ux%u+%d+%d\n", scr->id, win, g->width,
+	dd("screen %d, win 0x%x, geo %ux%u+%d+%d\n", scr->id, win, g->width,
 	   g->height, g->x, g->y);
 
 	c = xcb_get_window_attributes(dpy, win);
@@ -1448,7 +1449,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 	}
 
 	if (a->override_redirect) {
-		dd("ignore redirected window %p\n", win);
+		dd("ignore redirected window 0x%x\n", win);
 		goto out;
 	}
 
