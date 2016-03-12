@@ -1079,6 +1079,11 @@ static void show_windows(struct screen *scr)
 {
 	struct list_head *cur;
 
+	if (list_empty(&scr->tag->clients)) {
+		xcb_set_input_focus_checked(dpy, XCB_NONE, scr->panel, XCB_CURRENT_TIME);
+		return;
+	}
+
 	list_walk(cur, &scr->tag->clients) {
 		struct client *cli = list2client(cur);
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
