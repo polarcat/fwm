@@ -370,6 +370,7 @@ static xcb_atom_t a_client_list;
 static xcb_atom_t a_systray;
 static xcb_atom_t a_active_window;
 static xcb_atom_t a_has_vt;
+static xcb_atom_t a_embed_info;
 
 static strlen_t actname_max = UCHAR_MAX - 1;
 
@@ -647,6 +648,31 @@ static void update_clients_list(void)
 				    &cli->win);
 	}
 	xcb_flush(dpy);
+}
+
+static uint8_t tray_window(xcb_window_t win)
+{
+	uint8_t ret;
+	xcb_get_property_cookie_t c;
+	xcb_get_property_reply_t *r;
+
+	c = xcb_get_property(dpy, 0, win, a_embed_info,
+			     XCB_GET_PROPERTY_TYPE_ANY, 0, 2 * 32);
+	r = xcb_get_property_reply(dpy, c, NULL);
+	if (!r || r->length == 0) {
+		dd("no _XEMBED_INFO (%d) available\n", a_embed_info);
+		ret = 0;
+	} else {
+#ifdef DEBUG
+		uint32_t *val = xcb_get_property_value(r);
+		dd("fmt %u, len %u, ver %u, flg %x\n", r->format, r->length,
+		   val[0], val[1]);
+#endif
+		ret = 1;
+	}
+
+	free(r);
+	return ret;
 }
 
 /*
@@ -1403,6 +1429,11 @@ static struct client *client_add(xcb_window_t win, int tray)
 	if (!g) {
 		ee("xcb_get_geometry() failed\n");
 		goto out;
+	}
+
+	if (tray_window(win)) {
+		ii("win 0x%x provides embed info\n", win);
+		tray = 1;
 	}
 
 	if (g->x == 0 && g->y == 0) {
@@ -3117,6 +3148,7 @@ static void init_rootwin(void)
 	      XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
 	xcb_change_window_attributes(dpy, win, XCB_CW_EVENT_MASK, &val);
 
+	a_embed_info = atom_by_name("_XEMBED_INFO");
 	a_state = atom_by_name("WM_STATE");
 	a_client_list = atom_by_name("_NET_CLIENT_LIST");
 	a_systray = atom_by_name("_NET_SYSTEM_TRAY_OPCODE");
