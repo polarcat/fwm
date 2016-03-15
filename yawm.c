@@ -1630,6 +1630,30 @@ static int screen_panel(xcb_window_t win)
 	return 0;
 }
 
+static void hide_leader(xcb_window_t win, xcb_atom_t a_leader)
+{
+	xcb_window_t tmp;
+	xcb_get_property_cookie_t c;
+	xcb_get_property_reply_t *r;
+
+	c = xcb_get_property(dpy, 0, win, a_leader, XCB_ATOM_WINDOW, 0, 1);
+	r = xcb_get_property_reply(dpy, c, NULL);
+	if (r && r->length != 0) {
+		tmp = *(xcb_window_t *) xcb_get_property_value(r);
+		if (tmp != win) {
+			struct client *cli = win2client(tmp);
+			if (cli) {
+				list_del(&cli->head);
+				list_del(&cli->list);
+				free(cli);
+			}
+			xcb_unmap_window(dpy, tmp);
+		}
+	}
+
+	free(r);
+}
+
 static void clients_scan(void)
 {
 	int i, n;
@@ -1653,6 +1677,10 @@ static void clients_scan(void)
 		if (screen_panel(wins[i]))
 			continue;
 		client_add(wins[i], 0);
+		/* gotta do this otherwise empty windows are being shown
+		 * in certain situations e.g. when adding systray clients
+		 */
+		hide_leader(wins[i], atom_by_name("WM_CLIENT_LEADER"));
 	}
 
 	if (curscr->tag->win)
