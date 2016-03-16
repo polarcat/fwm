@@ -1590,6 +1590,10 @@ static void client_del(xcb_window_t win)
 		struct client *tmp = list2client(cur);
 		if (tmp->win == win)
 			continue;
+		if (window_status(win) != WIN_STATUS_VISIBLE) {
+			dd("ignore non-visible win 0x%x\n", tmp->win);
+			continue;
+		}
 		if (client_pointed(tmp->x, tmp->y, tmp->w, tmp->h)) {
 			window_focus(tmp->scr, tmp->win, FOCUS_RAISE);
 			print_title(tmp->scr);
