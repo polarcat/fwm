@@ -819,6 +819,9 @@ static void window_focus(struct screen *scr, xcb_window_t win, uint8_t flag)
 {
 	tt("win %p, focus %d\n", win, focus);
 
+	if (win == XCB_NONE)
+		return;
+
 	if (flag == FOCUS_RAISE)
 		window_raise(win);
 
@@ -1134,12 +1137,15 @@ static void hide_windows(struct tag *tag)
 
 static void tag_focus(struct screen *scr, struct tag *tag)
 {
-	print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
-	hide_windows(scr->tag);
+	if (scr->tag) {
+		print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
+		hide_windows(scr->tag);
+	}
 
 	scr->tag = tag;
 	print_tag(scr, scr->tag, color2ptr(TEXTFG_ACTIVE));
 	show_windows(scr);
+	xcb_set_input_focus(dpy, XCB_NONE, scr->panel, XCB_CURRENT_TIME);
 }
 
 static void switch_tag(struct screen *scr, enum dir dir)
@@ -1743,6 +1749,8 @@ static void select_tag(struct screen *scr, int x)
 			hide_windows(prev);
 		show_windows(scr);
 	}
+
+	xcb_set_input_focus(dpy, XCB_NONE, scr->panel, XCB_CURRENT_TIME);
 }
 
 static struct tag *tag_get(struct screen *scr, const char *name, uint8_t id)
@@ -1919,6 +1927,24 @@ static void update_panel_items(struct screen *scr)
 
 	dock_arrange(scr);
 	print_menu(scr);
+}
+
+static void refresh_panel(uint8_t id)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if (scr->id != id)
+			continue;
+
+		print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
+		hide_windows(scr->tag);
+		update_panel_items(scr);
+		tag_focus(scr, list2tag(scr->tags.next));
+//		window_focus(scr, scr->tag->win, FOCUS_RAISE);
+		break;
+	}
 }
 
 static void grab_key(xcb_key_symbols_t *syms, struct keymap *kmap)
@@ -2434,18 +2460,8 @@ static void handle_user_request(void)
 		init_outputs();
 	} else if (match_cstr(name.str, "refresh-panel")) {
 		const char *arg = &name.str[sizeof("refresh-panel")];
-		if (arg) {
-			int id = atoi(arg);
-			struct list_head *cur;
-			list_walk(cur, &screens) {
-				struct screen *scr = list2screen(cur);
-				if (scr->id == id) {
-					ii("refresh panel at screen %d\n", id);
-					update_panel_items(scr);
-					break;
-				}
-			}
-		}
+		if (arg)
+			refresh_panel(atoi(arg));
 	}
 
 	dd("root %s\n", name.str);
