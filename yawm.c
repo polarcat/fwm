@@ -696,7 +696,6 @@ static int window_docked(xcb_window_t win)
 		ww("unable to detect window class\n");
 		return 0;
 	}
-	ii("win 0x%x, class %s\n", win, class.str);
 
 	rc = 0;
 	class.len += baselen + sizeof("/dock/");
@@ -2753,7 +2752,6 @@ static void handle_property_notify(xcb_property_notify_event_t *e)
 	print_atom_name(e->atom);
 
 	if (e->atom == XCB_ATOM_WM_NAME) {
-		ii("screen %d\n", curscr ? curscr->id : -1);
 		if (e->window == rootscr->root) {
 			handle_user_request();
 		} else if (curscr) {
