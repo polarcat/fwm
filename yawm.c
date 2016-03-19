@@ -1342,8 +1342,14 @@ static void dock_del(struct client *cli)
 static void dock_add(struct client *cli, uint8_t bw)
 {
 	uint16_t h;
+	struct list_head *head;
 
-	list_add(&cli->scr->dock, &cli->head);
+	if (cli->flags & CLI_FLG_TRAY)
+		head = &cli->scr->dock;
+	else
+		head = cli->scr->dock.next;
+
+	list_add(head, &cli->head);
 	list_add(&clients, &cli->list);
 
 	cli->flags |= CLI_FLG_DOCK;
