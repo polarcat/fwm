@@ -1022,7 +1022,8 @@ static void place_window(void *arg)
 
 out:
 	client_moveresize(cli, x, y, w, h);
-	window_raise(cli->win);
+	window_focus(curscr, cli->win, FOCUS_RAISE);
+	xcb_warp_pointer(dpy, XCB_NONE, cli->win, 0, 0, 0, 0, w / 2, h / 2);
 	xcb_flush(dpy);
 	return;
 halfwh:
@@ -1561,6 +1562,8 @@ static struct client *client_add(xcb_window_t win, int tray)
 	if (scr->tag == tag) {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 		xcb_map_window(dpy, cli->win);
+		xcb_warp_pointer(dpy, XCB_NONE, cli->win, 0, 0, 0, 0,
+				 cli->w / 2, cli->h / 2);
 	} else {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
 		xcb_unmap_window(dpy, cli->win);
@@ -1948,7 +1951,6 @@ static void refresh_panel(uint8_t id)
 		hide_windows(scr->tag);
 		update_panel_items(scr);
 		tag_focus(scr, list2tag(scr->tags.next));
-//		window_focus(scr, scr->tag->win, FOCUS_RAISE);
 		break;
 	}
 }
