@@ -34,6 +34,32 @@
 
 #include "list.h"
 
+#ifndef MEMDEBUG
+#define mallinfo_start(name) do {} while(0)
+#define mallinfo_stop(name) do {} while(0)
+#define mallinfo_call(fn) do {} while(0)
+#else /* MEMDEBUG */
+#include <malloc.h> /* for mallinfo */
+
+#define mallinfo_start(name) struct mallinfo name = mallinfo();
+
+#define mallinfo_stop(name) {\
+	struct mallinfo name_ = mallinfo();\
+	ii(#name": mem %d --> %d, diff %d\n", name.uordblks, name_.uordblks,\
+	   name_.uordblks - name.uordblks);\
+}
+
+#define mallinfo_call(fn) {\
+	struct mallinfo mi0__ = mallinfo(), mi1__;\
+	ii("> %s:%d: "#fn"() mem before %d\n", __func__, __LINE__,\
+	   mi0__.uordblks);\
+	fn;\
+	mi1__ = mallinfo();\
+	ii("< %s:%d: "#fn"() mem after %d, diff %d\n", __func__, __LINE__,\
+	   mi1__.uordblks, mi1__.uordblks - mi0__.uordblks);\
+}
+#endif /* MEMDEBUG */
+
 #define ee(fmt, ...) {\
 	int errno_save__ = errno;\
 	fprintf(stderr, "(ee) %s[%d]:%s: " fmt, __FILE__, __LINE__,\
