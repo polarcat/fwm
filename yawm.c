@@ -618,8 +618,7 @@ static void print_title(struct screen *scr)
 
 	get_sprop(&title, win, XCB_ATOM_WM_NAME);
 	if (!title.ptr || !title.len)
-		return;
-
+		goto out;
 	text_exts(title.str, title.len, &w, &h);
 
 	if (w > scr->items[PANEL_AREA_TITLE].w) {
@@ -635,6 +634,7 @@ static void print_title(struct screen *scr)
 			scr->items[PANEL_AREA_TITLE].x,
 			scr->items[PANEL_AREA_TITLE].w,
 			title.str, title.len);
+out:
 	free(title.ptr);
 }
 
