@@ -1595,7 +1595,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 				 cli->w / 2, cli->h / 2);
 	} else {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
-		xcb_unmap_window(dpy, cli->win);
+		xcb_unmap_window_checked(dpy, cli->win);
 	}
 
 	dd("screen %d, tag %s, cli %p, win %p, geo %ux%u+%d+%d\n", scr->id,
@@ -1689,7 +1689,7 @@ static void hide_leader(xcb_window_t win, xcb_atom_t a_leader)
 				list_del(&cli->list);
 				free(cli);
 			}
-			xcb_unmap_window(dpy, tmp);
+			xcb_unmap_window_checked(dpy, tmp);
 		}
 	}
 
@@ -2677,7 +2677,7 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	val[0] = cli->x;
 	val[1] = cli->y;
-	xcb_configure_window(dpy, cli->win, mask, val);
+	xcb_configure_window_checked(dpy, cli->win, mask, val);
 	xcb_flush(dpy);
 
 	if ((cli->scr != curscr || curscr->tag->win != cli->win) &&
@@ -2978,7 +2978,7 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 		mask |= XCB_CONFIG_WINDOW_STACK_MODE;
 	}
 
-        xcb_configure_window(dpy, e->window, mask, val);
+        xcb_configure_window_checked(dpy, e->window, mask, val);
         xcb_flush(dpy);
 }
 
