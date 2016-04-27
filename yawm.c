@@ -2720,7 +2720,7 @@ static void handle_key_press(xcb_key_press_event_t *e)
 	}
 }
 
-static void handle_visibility(xcb_visibility_notify_event_t *e)
+static void handle_visibility(xcb_window_t win)
 {
 	struct list_head *cur;
 	uint8_t panel = 0;
@@ -2728,7 +2728,7 @@ static void handle_visibility(xcb_visibility_notify_event_t *e)
 	/* Check if this is a panel that needs some refreshment. */
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
-		if (scr->panel == e->window) {
+		if (scr->panel == win) {
 			panel = 1;
 			break;
 		}
@@ -3011,17 +3011,21 @@ static int handle_events(void)
 	type = XCB_EVENT_RESPONSE_TYPE(e);
 	mm("got event %d (%d)\n", e->response_type, type);
 
+#define WIN(struct_ptr) ((struct_ptr *) e)->window
 	switch (type) {
 	case 0: break; /* NO EVENT */
 	case XCB_VISIBILITY_NOTIFY:
 		te("XCB_VISIBILITY_NOTIFY: win %p\n",
-		   ((xcb_visibility_notify_event_t *) e)->window);
+		   WIN(xcb_visibility_notify_event_t));
                 switch (((xcb_visibility_notify_event_t *) e)->state) {
                 case XCB_VISIBILITY_FULLY_OBSCURED:
                 case XCB_VISIBILITY_PARTIALLY_OBSCURED: /* fall through */
-			handle_visibility((xcb_visibility_notify_event_t *) e);
+			handle_visibility(WIN(xcb_visibility_notify_event_t));
 			break;
                 }
+		break;
+	case XCB_EXPOSE:
+		handle_visibility(WIN(xcb_expose_event_t));
 		break;
 	case XCB_BUTTON_PRESS:
 		mouse_x = ((xcb_button_press_event_t *) e)->root_x;
