@@ -1192,7 +1192,7 @@ static void tag_focus(struct screen *scr, struct tag *tag)
 	print_tag(scr, scr->tag, color2ptr(TEXTFG_ACTIVE));
 	show_windows(scr);
 
-	if (tag->win)
+	if (tag->win && window_status(tag->win) == WIN_STATUS_VISIBLE)
 		win = tag->win;
 	else
 		win = find_visible_window(tag);
@@ -2752,10 +2752,15 @@ static void handle_visibility(xcb_window_t win)
 
 static void handle_unmap_notify(xcb_unmap_notify_event_t *e)
 {
+	if (curscr->tag->win == e->window) {
+		xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
+				    XCB_CURRENT_TIME);
+		xcb_flush(dpy);
+	}
+
 	if (window_status(e->window) == WIN_STATUS_UNKNOWN) {
 		dd("window is gone %p\n", e->window);
 		client_del(e->window);
-		return;
 	}
 }
 
