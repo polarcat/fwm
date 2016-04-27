@@ -935,8 +935,8 @@ static void switch_window(struct screen *scr, enum dir dir)
 out:
 	window_focus(scr, scr->tag->win, FOCUS_NONE);
 	window_focus(scr, cli->win, FOCUS_RAISE);
-	xcb_warp_pointer(dpy, XCB_NONE, cli->win, 0, 0, 0, 0, cli->w / 2,
-			 cli->h / 2);
+	xcb_warp_pointer_checked(dpy, XCB_NONE, cli->win, 0, 0, 0, 0,
+				 cli->w / 2, cli->h / 2);
 	xcb_flush(dpy);
 }
 
@@ -1051,7 +1051,8 @@ static void place_window(void *arg)
 out:
 	client_moveresize(cli, x, y, w, h);
 	window_focus(curscr, cli->win, FOCUS_RAISE);
-	xcb_warp_pointer(dpy, XCB_NONE, cli->win, 0, 0, 0, 0, w / 2, h / 2);
+	xcb_warp_pointer_checked(dpy, XCB_NONE, cli->win, 0, 0, 0, 0, w / 2,
+				 h / 2);
 	xcb_flush(dpy);
 	return;
 halfwh:
@@ -1137,7 +1138,8 @@ static void show_windows(struct screen *scr)
 	struct list_head *cur;
 
 	if (list_empty(&scr->tag->clients)) {
-		xcb_set_input_focus_checked(dpy, XCB_NONE, scr->panel, XCB_CURRENT_TIME);
+		xcb_set_input_focus_checked(dpy, XCB_NONE, scr->panel,
+					    XCB_CURRENT_TIME);
 		return;
 	}
 
@@ -1564,7 +1566,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 	if (!g->depth && !a->colormap) {
 		dd("win %p, root %p, colormap=%p, class=%u, depth=%u\n",
 		   win, g->root, a->colormap, a->_class, g->depth);
-		xcb_destroy_window(dpy, win);
+		xcb_destroy_window_checked(dpy, win);
 		ww("zombie window 0x%x destroyed\n", win);
 		goto out;
 	}
@@ -1590,9 +1592,9 @@ static struct client *client_add(xcb_window_t win, int tray)
 
 	if (scr->tag == tag) {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
-		xcb_map_window(dpy, cli->win);
-		xcb_warp_pointer(dpy, XCB_NONE, cli->win, 0, 0, 0, 0,
-				 cli->w / 2, cli->h / 2);
+		xcb_map_window_checked(dpy, cli->win);
+		xcb_warp_pointer_checked(dpy, XCB_NONE, cli->win, 0, 0, 0, 0,
+					 cli->w / 2, cli->h / 2);
 	} else {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
 		xcb_unmap_window_checked(dpy, cli->win);
@@ -1648,8 +1650,10 @@ static void client_del(xcb_window_t win)
 			print_title(scr);
 			cli = scr2client(scr, tmp, WIN_TYPE_NORMAL);
 			if (cli) {
-				xcb_warp_pointer(dpy, XCB_NONE, tmp, 0, 0, 0, 0,
-						 cli->w / 2, cli->h / 2);
+				xcb_warp_pointer_checked(dpy, XCB_NONE, tmp,
+							 0, 0, 0, 0,
+							 cli->w / 2,
+							 cli->h / 2);
 			}
 			xcb_flush(dpy);
 		}
