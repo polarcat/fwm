@@ -1760,6 +1760,11 @@ static void select_tag(struct screen *scr, int x)
 	struct list_head *cur;
 	struct tag *prev;
 
+	if (scr->tagmod) { /* un-mark tag if previously marked */
+		print_tag(scr, scr->tagmod, color2ptr(TEXTFG_NORMAL));
+		scr->tagmod = NULL;
+	}
+
 	if (scr->tag && tag_clicked(scr->tag, x)) {
 		return;
 	} else if (scr->tag) { /* deselect current instantly */
@@ -2600,10 +2605,6 @@ static void window_retag(struct screen *scr, xcb_window_t win)
 	window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
 	xcb_unmap_window_checked(dpy, cli->win);
 	xcb_flush(dpy);
-
-	/* un-mark tag */
-	print_tag(scr, scr->tagmod, color2ptr(TEXTFG_NORMAL));
-	scr->tagmod = NULL;
 }
 
 static void handle_panel_press(xcb_button_press_event_t *e)
