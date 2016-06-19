@@ -181,6 +181,7 @@ struct screen { /* per output abstraction */
 	struct list_head dock;
 
 	struct tag *tag; /* current tag */
+	struct tag *tagmod; /* modified tag */
 
 	int16_t x, y;
 	uint16_t w, h;
@@ -1528,7 +1529,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 	}
 
 	/* tell x server to restore window upon our sudden exit */
-	xcb_change_save_set(dpy, XCB_SET_MODE_INSERT, win);
+	xcb_change_save_set_checked(dpy, XCB_SET_MODE_INSERT, win);
 
 	if (!cli) {
 		cli = calloc(1, sizeof(*cli));
@@ -2450,6 +2451,7 @@ static void load_color(const char *path, struct color *color)
 	if (color->type == COLOR_TYPE_INT) {
 		*((uint32_t *) color->val) = val;
 	} else {
+		color->def = val;
 		ref.alpha = 0xffff;
 		ref.red = (val & 0xff0000) >> 8;
 		ref.green = val & 0xff00;
@@ -2549,6 +2551,47 @@ static void dump_coords(struct screen *scr, int x)
 }
 #endif
 
+static void window_retag(struct screen *scr, int16_t x)
+{
+	struct list_head *cur;
+	struct client *cli;
+	struct color bg, *fg;
+
+	list_walk(cur, &scr->tags) { /* refresh labels */
+		struct tag *tag = list2tag(cur);
+
+		if (!tag_clicked(tag, x))
+			continue;
+
+		cli = scr2client(scr, scr->tag->win, WIN_TYPE_NORMAL);
+		if (!cli)
+			return;
+
+		ii("move window 0x%x to tag %s len %d\n", cli->win, tag->name,
+		   tag->nlen);
+
+		/* redraw tag with inverted active color */
+		fg = color2ptr(TEXTFG_ACTIVE);
+		bg.fname = NULL;
+		bg.def = UINT_MAX - fg->def;
+		bg.val = &bg.def;
+		bg.type = COLOR_TYPE_INT;
+		draw_panel_text(scr, fg, &bg, tag->x, tag->w, tag->name,
+				tag->nlen);
+
+		/* re-tag window */
+		switch_window(scr, DIR_NEXT);
+		scr->tagmod = tag;
+		list_del(&cli->head);
+		list_add(&tag->clients, &cli->head);
+		cli->tag = tag;
+		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
+		xcb_unmap_window_checked(dpy, cli->win);
+		xcb_flush(dpy);
+		return;
+	}
+}
+
 static void handle_panel_press(xcb_button_press_event_t *e)
 {
 	curscr = coord2screen(e->root_x, e->root_y);
@@ -2586,6 +2629,11 @@ static void refresh_titles(void)
 
 static void handle_button_release(xcb_button_release_event_t *e)
 {
+	if (curscr && curscr->tagmod) {
+		print_tag(curscr, curscr->tagmod, color2ptr(TEXTFG_NORMAL));
+		curscr->tagmod = NULL;
+	}
+
 	mouse_x = mouse_y = mouse_button = 0;
 	xcb_ungrab_pointer(dpy, XCB_CURRENT_TIME);
 	xcb_flush(dpy);
@@ -2623,10 +2671,17 @@ static void handle_button_press(xcb_button_press_event_t *e)
 		break;
 	}
 
-	/* prepare for motion event handling */
+	/* pressed with modifier */
 
 	if (e->event != e->root || !e->child)
 		return;
+
+	if (curscr && curscr->panel == e->child) {
+		if pointer_inside(curscr, PANEL_AREA_TAGS, e->event_x)
+			window_retag(curscr, e->event_x);
+	}
+
+	/* prepare for motion event */
 
 	window_raise(e->child);
 	panel_raise(curscr);
