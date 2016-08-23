@@ -941,6 +941,46 @@ out:
 	xcb_flush(dpy);
 }
 
+static int16_t adjust_x(struct screen *scr, int16_t x, uint16_t w)
+{
+	if (x < scr->x || x > scr->x + scr->w || x + w > scr->x + scr->w)
+		return scr->x;
+	return x;
+}
+
+static int16_t adjust_y(struct screen *scr, int16_t y, uint16_t h)
+{
+	int16_t ret;
+
+	if (y < scr->y || y > scr->y + scr->h || y + h > scr->y + scr->h)
+		ret = scr->y;
+	else
+		ret = y;
+
+	if (scr->flags & SCR_FLG_PANEL_TOP)
+		ret += panel_height;
+
+	return ret;
+}
+
+static int16_t adjust_w(struct screen *scr, uint16_t w)
+{
+	if (w > scr->w)
+		return scr->w - 2 * BORDER_WIDTH;
+	else if (w < WIN_WIDTH_MIN)
+		return scr->w / 2 - 2 * BORDER_WIDTH;
+	return w;
+}
+
+static int16_t adjust_h(struct screen *scr, uint16_t h)
+{
+	if (h > scr->h)
+		return scr->h - 2 * BORDER_WIDTH;
+	else if (h < WIN_HEIGHT_MIN)
+		return scr->h / 2 - 2 * BORDER_WIDTH;
+	return h;
+}
+
 static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 			      uint16_t w, uint16_t h)
 {
@@ -948,24 +988,11 @@ static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 	uint16_t mask;
 
 	if (!(cli->flags & CLI_FLG_DOCK)) {
-		/* correct window location */
-		if (x < cli->scr->x || x > cli->scr->x + cli->scr->w)
-			x = cli->scr->x;
-		if (y < cli->scr->y || y > cli->scr->y + cli->scr->h)
-			y = cli->scr->y;
-
 		/* fit into monitor space */
-		if (w > cli->scr->w)
-			w = cli->scr->w - 2 * BORDER_WIDTH;
-		else if (w < WIN_WIDTH_MIN)
-			w = cli->scr->w / 2 - 2 * BORDER_WIDTH;
-		if (h > cli->scr->h)
-			h = cli->scr->h - 2 * BORDER_WIDTH;
-		else if (h < WIN_HEIGHT_MIN)
-			h = cli->scr->h / 2 - 2 * BORDER_WIDTH;
-
-		if (cli->scr->flags & SCR_FLG_PANEL_TOP)
-			y += panel_height;
+		x = adjust_x(cli->scr, x, w);
+		y = adjust_y(cli->scr, y, h);
+		w = adjust_w(cli->scr, w);
+		h = adjust_h(cli->scr, h);
 	}
 
 	val[0] = cli->x = x;
@@ -976,7 +1003,7 @@ static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
 	xcb_configure_window_checked(dpy, cli->win, mask, val);
 
-	tt("screen %d, cli %p, win %p, geo %ux%u+%d+%d\n", cli->scr->id, cli,
+	dd("scr %d, cli %p, win 0x%x, geo %ux%u+%d+%d\n", cli->scr->id, cli,
 	   cli->win, cli->w, cli->h, cli->x, cli->y);
 }
 
@@ -3014,7 +3041,8 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 	struct client *cli = NULL;
 	uint32_t val[7] = { 0 };
 	int i = 0;
-	uint16_t mask = 0;
+	uint16_t w, h, mask = 0;
+	int16_t x, y;
 
 	list_walk(cur, &defscr->dock) {
 		cli = list2client(cur);
@@ -3023,27 +3051,34 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 		cli = NULL;
 	}
 
+	/* check if window is placed within screen boundaries */
+	if (!cli) { /* excluding tray windows */
+		x = adjust_x(curscr, e->x, e->width);
+		y = adjust_y(curscr, e->y, e->height);
+		w = adjust_w(curscr, e->width);
+		h = adjust_h(curscr, e->height);
+	} else {
+		x = cli->x;
+		y = cli->y;
+		w = cli->w;
+		h = cli->h;
+	}
+
 	/* the order has to correspond to the order value_mask bits */
-	if (e->value_mask & XCB_CONFIG_WINDOW_X) {
-		val[i++] = e->x;
+	if (e->value_mask & XCB_CONFIG_WINDOW_X || e->x != x) {
+		val[i++] = x;
 		mask |= XCB_CONFIG_WINDOW_X;
 	}
-	if (e->value_mask & XCB_CONFIG_WINDOW_Y) {
+	if (e->value_mask & XCB_CONFIG_WINDOW_Y || e->y != y) {
 		val[i++] = e->y;
 		mask |= XCB_CONFIG_WINDOW_Y;
 	}
-	if (e->value_mask & XCB_CONFIG_WINDOW_WIDTH) {
-		if (cli)
-			val[i++] = cli->w; /* tray client needs adjustment */
-		else
-			val[i++] = e->width;
+	if (e->value_mask & XCB_CONFIG_WINDOW_WIDTH || e->width != w) {
+		val[i++] = w;
 		mask |= XCB_CONFIG_WINDOW_WIDTH;
 	}
-	if (e->value_mask & XCB_CONFIG_WINDOW_HEIGHT) {
-		if (cli)
-			val[i++] = cli->h; /* tray client needs adjustment */
-		else
-			val[i++] = e->height;
+	if (e->value_mask & XCB_CONFIG_WINDOW_HEIGHT || e->height != h) {
+		val[i++] = h;
 		mask |= XCB_CONFIG_WINDOW_HEIGHT;
 	}
 	if (e->value_mask & XCB_CONFIG_WINDOW_BORDER_WIDTH) {
@@ -3062,8 +3097,8 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 		mask |= XCB_CONFIG_WINDOW_STACK_MODE;
 	}
 
-        xcb_configure_window_checked(dpy, e->window, mask, val);
-        xcb_flush(dpy);
+	xcb_configure_window_checked(dpy, e->window, mask, val);
+	xcb_flush(dpy);
 }
 
 static void handle_randr_notify(xcb_randr_screen_change_notify_event_t *e)
