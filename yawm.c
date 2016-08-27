@@ -450,6 +450,18 @@ static void draw_panel_text(struct screen *scr, struct color *fg,
 	}
 }
 
+static void exec(const char *cmd)
+{
+	if (fork() != 0)
+		return;
+
+	close(xcb_get_file_descriptor(dpy));
+	close(ConnectionNumber(xdpy));
+	setsid();
+	system(cmd);
+	exit(0);
+}
+
 static void spawn_cleanup(int sig)
 {
 	while (waitpid(-1, NULL, WNOHANG) < 0) {
@@ -468,16 +480,20 @@ static void spawn(void *arg)
 		return;
 
 	kmap = arg;
+	snprintf(path, len, "%s/keys/%s", basedir, kmap->keyname);
+	exec(path);
+}
 
-	if (fork() != 0)
+static void autostart(void)
+{
+	uint16_t len = baselen + sizeof("autostart");
+	char path[len];
+
+	if (!basedir)
 		return;
 
-	close(xcb_get_file_descriptor(dpy));
-	close(ConnectionNumber(xdpy));
-	setsid();
-	snprintf(path, len, "%s/keys/%s", basedir, kmap->keyname);
-	system(path);
-	exit(0);
+	snprintf(path, len, "%s/autostart", basedir);
+	exec(path);
 }
 
 static void clean(void)
@@ -3477,6 +3493,8 @@ int main()
 	init_rootwin();
 	init_randr();
 	init_outputs();
+
+	autostart();
 
 	pfd.fd = xcb_get_file_descriptor(dpy);
 	pfd.events = POLLIN;
