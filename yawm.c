@@ -193,6 +193,7 @@ static void next_window(void *);
 static void prev_window(void *);
 static void raise_window(void *);
 static void place_window(void *);
+static void make_grid(void *);
 
 struct keymap {
 	uint16_t mod;
@@ -249,6 +250,8 @@ static struct keymap kmap_def[] = {
 	  place_window, (void *) WIN_POS_BOTTOM_FILL, },
 	{ MOD, XK_F9, 0, "mod_f9", "_full_screen",
 	  place_window, (void *) WIN_POS_FILL, },
+	{ MOD, XK_F3, 0, "mod_f3", "_make_grid",
+	  make_grid, NULL, },
 };
 
 #define list2keymap(item) list_entry(item, struct keymap, head)
@@ -951,6 +954,55 @@ static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 
 	dd("scr %d, cli %p, win 0x%x, geo %ux%u+%d+%d\n", cli->scr->id, cli,
 	   cli->win, cli->w, cli->h, cli->x, cli->y);
+}
+
+#define GRIDCELL_MIN_WIDTH 100
+
+static void make_grid(void *arg)
+{
+	struct list_head *cur;
+	uint16_t i, n;
+	uint16_t cw, ch; /* cell size */
+	int16_t x, y;
+
+	n = 0;
+	list_walk(cur, &curscr->tag->clients) {
+		struct client *cli = list2client(cur);
+		if (window_status(cli->win) == WIN_STATUS_VISIBLE)
+			n++;
+	}
+
+	cw = ch = GRIDCELL_MIN_WIDTH;
+	for (i = 1; i < curscr->w / GRIDCELL_MIN_WIDTH; i++) {
+		if (i * i >= n) {
+			cw = curscr->w / i;
+			ch = curscr->h / i;
+			goto done;
+		} else if (i * (i + 1) >= n) {
+			cw = curscr->w / (i + 1);
+			ch = curscr->h / i - BORDER_WIDTH;
+			goto done;
+		}
+	}
+	ww("failed to calculate cell size for screen %d\n", curscr->id);
+	return;
+done:
+	ii("%d cells size of (%u,%u)\n", n, cw, ch);
+	x = y = 0;
+	list_walk(cur, &curscr->tag->clients) {
+		struct client *cli = list2client(cur);
+		if (window_status(cli->win) != WIN_STATUS_VISIBLE)
+			continue;
+		client_moveresize(cli, curscr->x + x, curscr->y + y,
+				  cw - BORDER_WIDTH - WINDOW_PAD,
+				  ch - BORDER_WIDTH - WINDOW_PAD);
+		x += cw;
+		if (x > curscr->w - cw) {
+			x = 0;
+			y += ch;
+		}
+	}
+	xcb_flush(dpy);
 }
 
 static void place_window(void *arg)
@@ -2591,13 +2643,7 @@ static void handle_panel_press(xcb_button_press_event_t *e)
 		select_tag(curscr, e->event_x);
 		xcb_flush(dpy);
 	} else if pointer_inside(curscr, PANEL_AREA_MENU, e->event_x) {
-		struct list_head *cur;
-		ii("menu, tag %s\n", curscr->tag->name);
-		list_walk(cur, &curscr->tag->clients)
-			ii("  win 0x%x, geo %ux%u+%d+%d\n",
-			   list2client(cur)->win, list2client(cur)->w,
-			   list2client(cur)->h, list2client(cur)->x,
-			   list2client(cur)->y);
+		make_grid(NULL);
 	} else if pointer_inside(curscr, PANEL_AREA_TITLE, e->event_x) {
 		ii("title\n");
 	} else if pointer_inside(curscr, PANEL_AREA_DOCK, e->event_x) {
