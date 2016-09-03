@@ -337,10 +337,84 @@ static strlen_t actname_max = UCHAR_MAX - 1;
 
 static uint8_t baselen;
 static char *basedir;
+static char *homedir;
 
 static uint8_t randrbase;
 
 /* ... and the mess begins */
+
+static int store_info(struct clientreq *req)
+{
+	int fd;
+	struct stat st;
+
+	if (stat(YAWM_FIFO, &st) < 0) {
+		ee("stat("YAWM_FIFO") failed\n");
+		return -1;
+	} else if (!(S_ISFIFO(st.st_mode))) {
+		ee(YAWM_FIFO" is not a fifo file\n");
+		return -1;
+	} else if ((fd = open(YAWM_FIFO, O_WRONLY | O_NONBLOCK)) < 0) {
+		ee("open("YAWM_FIFO") failed\n");
+		return -1;
+	}
+
+	int ret = write(fd, req, sizeof(*req));
+	if (ret != sizeof(*req)) {
+		ee("failed to store info win 0x%x\n", req->info.win);
+		ret = -1;
+	}
+
+	close(fd);
+	return ret;
+}
+
+static void client_restore(xcb_window_t win, int fd, struct screen **scr,
+			   struct tag **tag)
+{
+	struct clientinfo info = { 0 };
+
+	lseek(fd, 0, SEEK_SET);
+	while (read(fd, &info, sizeof(info)) == sizeof(info)) {
+		struct list_head *cur;
+
+		if (info.win != win)
+			continue;
+
+		list_walk(cur, &screens) {
+			struct screen *tmp = list2screen(cur);
+			if (info.scr == tmp->id) {
+				*scr = tmp;
+				break;
+			}
+		}
+
+		if (!*scr)
+			return;
+
+		list_walk(cur, &(*scr)->tags) {
+			struct tag *tmp = list2tag(cur);
+			if (info.tag == tmp->id) {
+				*tag = tmp;
+				ii("restore 0x%x, screen %d tag %s\n",
+				   win, (*scr)->id, (*tag)->name);
+				return;
+			}
+		}
+	}
+}
+
+static void client_store(struct client *cli, uint8_t clean)
+{
+	if (cli->scr && cli->tag) {
+		struct clientreq req;
+		req.info.win = cli->win;
+		req.info.scr = cli->scr->id;
+		req.info.tag = cli->tag->id;
+		clean ? (req.type = REQTYPE_CLEAN) : (req.type = REQTYPE_STORE);
+		store_info(&req);
+	}
+}
 
 static void text_exts(const char *text, int len, uint16_t *w, uint16_t *h)
 {
@@ -387,6 +461,9 @@ static void exec(const char *cmd)
 {
 	if (fork() != 0)
 		return;
+
+	if (homedir)
+		chdir(homedir);
 
 	close(xcb_get_file_descriptor(dpy));
 	close(ConnectionNumber(xdpy));
@@ -1290,6 +1367,7 @@ static void retag_window(void *arg)
 	cli->tag = curscr->tag;
 	window_focus(curscr, curscr->tag->win, FOCUS_RAISE);
 	xcb_flush(dpy);
+	client_store(cli, 0);
 }
 
 #if 0
@@ -1478,7 +1556,7 @@ static struct screen *pointer2screen(void)
         return scr;
 }
 
-static struct client *client_add(xcb_window_t win, int tray)
+static struct client *client_add(xcb_window_t win, int tray, int winlist)
 {
 	struct tag *tag;
 	struct screen *scr;
@@ -1505,9 +1583,15 @@ static struct client *client_add(xcb_window_t win, int tray)
 		tray = 1;
 	}
 
-	if (g->x == 0 && g->y == 0) {
+	scr = NULL;
+	tag = NULL;
+
+	if (winlist >= 0) /* try to restore screen and tag from file */
+		client_restore(win, winlist, &scr, &tag);
+
+	if (!scr && g->x == 0 && g->y == 0) {
 		scr = pointer2screen();
-	} else {
+	} else if (!scr) {
 		/* preserve current location of already existed windows */
 		scr = coord2screen(g->x, g->y);
 		if (!scr)
@@ -1597,9 +1681,10 @@ static struct client *client_add(xcb_window_t win, int tray)
 		goto out;
 	}
 
-	tag = client_tag(scr, win);
-	if (!tag)
-		tag = scr->tag;
+	if (!tag) {
+		if (!(tag = client_tag(scr, win)))
+			tag = scr->tag;
+	}
 
 	if (!tag->win) {
 		list_add(&tag->clients, &cli->head);
@@ -1610,13 +1695,12 @@ static struct client *client_add(xcb_window_t win, int tray)
 		else
 			list_add(&tag->clients, &cli->head);
 	}
-	cli->tag = tag;
-	/* also add to global list of clients */
-	list_add(&clients, &cli->list);
 
+	cli->tag = tag;
+	list_add(&clients, &cli->list); /* also add to global list of clients */
 	client_moveresize(cli, g->x, g->y, g->width, g->height);
 
-	if (scr->tag == tag) {
+	if (scr->tag == cli->tag) {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 		xcb_map_window_checked(dpy, cli->win);
 		xcb_warp_pointer_checked(dpy, XCB_NONE, cli->win, 0, 0, 0, 0,
@@ -1630,6 +1714,7 @@ static struct client *client_add(xcb_window_t win, int tray)
 	   scr->tag->name, cli, cli->win, cli->w, cli->h, cli->x, cli->y);
 
 	window_focus(scr, cli->win, FOCUS_ONLY);
+	client_store(cli, 0);
 out:
 	update_clients_list();
 	free(a);
@@ -1654,6 +1739,7 @@ static void client_del(xcb_window_t win)
 		goto out;
 	}
 
+	client_store(cli, 1);
 	scr = cli->scr;
 
 	list_del(&cli->head);
@@ -1728,7 +1814,7 @@ static void hide_leader(xcb_window_t win, xcb_atom_t a_leader)
 
 static void clients_scan(void)
 {
-	int i, n;
+	int i, n, fd;
 	xcb_query_tree_cookie_t c;
 	xcb_query_tree_reply_t *tree;
 	xcb_window_t *wins;
@@ -1742,18 +1828,22 @@ static void clients_scan(void)
 	n = xcb_query_tree_children_length(tree);
 	wins = xcb_query_tree_children(tree);
 
+	if ((fd = open(YAWM_LIST, O_RDONLY)) < 0)
+		ww("open("YAWM_LIST") failed, layout won't be recovered\n");
+
 	/* map clients onto the current screen */
 	ii("%d clients found\n", n);
 	for (i = 0; i < n; i++) {
 		dd("++ handle win %p\n", wins[i]);
 		if (screen_panel(wins[i]))
 			continue;
-		client_add(wins[i], 0);
+		client_add(wins[i], 0, fd);
 		/* gotta do this otherwise empty windows are being shown
 		 * in certain situations e.g. when adding systray clients
 		 */
 		hide_leader(wins[i], atom_by_name("WM_CLIENT_LEADER"));
 	}
+	close(fd);
 
 	if (curscr->tag->win)
 		window_focus(curscr, curscr->tag->win, FOCUS_RAISE);
@@ -2630,6 +2720,7 @@ static void window_retag(struct screen *scr, xcb_window_t win)
 	window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
 	xcb_unmap_window_checked(dpy, cli->win);
 	xcb_flush(dpy);
+	client_store(cli, 0);
 }
 
 static void handle_panel_press(xcb_button_press_event_t *e)
@@ -2787,6 +2878,7 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 		curscr->tag->win = cli->win;
 		ii("win 0x%x now on tag %s screen %d\n", e->child,
 		   curscr->tag->name, curscr->id);
+		client_store(cli, 0);
 	}
 }
 
@@ -2942,7 +3034,7 @@ static void tray_add(xcb_window_t win)
 
 	cli = win2client(win);
 	if (!cli) {
-		cli = client_add(win, 1);
+		cli = client_add(win, 1, -1);
 		if (!cli) {
 			ee("client_add(0x%x) failed\n", win);
 			return;
@@ -3204,7 +3296,7 @@ static int handle_events(void)
 		te("XCB_MAP_REQUEST: parent %p, win %p\n",
 		   ((xcb_map_request_event_t *) e)->parent,
 		   ((xcb_map_request_event_t *) e)->window);
-		client_add(((xcb_map_notify_event_t *) e)->window, 0);
+		client_add(((xcb_map_notify_event_t *) e)->window, 0, -1);
 		break;
 	case XCB_PROPERTY_NOTIFY:
 		handle_property_notify((xcb_property_notify_event_t *) e);
@@ -3356,55 +3448,61 @@ static void init_rootwin(void)
 	xcb_flush(dpy);
 }
 
+static void init_yawmd(void)
+{
+	struct clientreq req = { REQTYPE_RESET, };
+	if (store_info(&req) >= 0)
+		ii("desktop layout will be tracked by yawmd\n");
+}
+
 static int init_homedir(void)
 {
-	const char *home;
 	int mode = S_IRWXU;
 
-	home = getenv("HOME");
-	if (!home)
+	homedir = getenv("HOME");
+	if (!homedir)
 		return -1;
 
-	baselen = strlen(home) + sizeof("/.yawm");
+	baselen = strlen(homedir) + sizeof("/.yawm");
 	basedir = calloc(1, baselen);
 	if (!basedir) {
 		ee("calloc(%d) failed, use built-in config\n", baselen);
 		return -1;
 	}
 
-	if (chdir(home) < 0) {
-		ee("chdir(%s) failed\n", home);
+	if (chdir(homedir) < 0) {
+		ee("chdir(%s) failed\n", homedir);
 		goto homeless;
 	}
 
 	if (mkdir(".yawm", mode) < 0 && errno != EEXIST) {
-		ee("mkdir(%s/.yawm) failed\n", home);
+		ee("mkdir(%s/.yawm) failed\n", homedir);
 		goto err;
 	}
 
-	snprintf(basedir, baselen, "%s/.yawm", home);
+	snprintf(basedir, baselen, "%s/.yawm", homedir);
 	ii("basedir: %s\n", basedir);
 
-	if (chdir(basedir) < 0) { /* sanity check */
+	if (chdir(basedir) < 0) { /* change to working directory */
 		ee("chdir(%s) failed\n", basedir);
 		goto err;
 	}
 
 	if (mkdir("keys", mode) < 0 && errno != EEXIST) {
-		ee("mkdir(%s/.yawm/keys) failed\n", home);
+		ee("mkdir(%s/.yawm/keys) failed\n", homedir);
 		goto err;
 	}
 
 	if (mkdir("colors", mode) < 0 && errno != EEXIST) {
-		ee("mkdir(%s/.yawm/colors) failed\n", home);
+		ee("mkdir(%s/.yawm/colors) failed\n", homedir);
 		goto err;
 	}
 
-	chdir(home);
+	init_yawmd(); /* keep track on desktop layout */
 	return 0;
 
 err:
-	chdir(home);
+	chdir(homedir);
 homeless:
 	free(basedir);
 	basedir = NULL;
