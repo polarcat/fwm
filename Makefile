@@ -1,6 +1,8 @@
 cc = $(CROSS_COMPILE)gcc
-out = yawm
-src = yawm.c
+wmout = yawm
+wmsrc = yawm.c
+dout = yawmd
+dsrc = yawmd.c
 
 ldflags = $(LDFLAGS) -lm -g
 ldflags += -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms
@@ -8,13 +10,17 @@ ldflags += $(shell pkg-config --libs xft) -lX11 -lX11-xcb
 ccflags += $(CFLAGS) $(shell pkg-config --cflags xft)
 
 .PHONY: all clean distclean
-all: $(out)
+all: $(wmout) $(dout)
 
-$(out):
-	$(cc) -o $(out) $(src) $(ccflags) $(ldflags)
-	@echo "(==) $(out) compilation finished" | grep --color -E "^...."
+$(wmout):
+	$(cc) -o $(wmout) $(wmsrc) $(ccflags) $(ldflags)
+	@echo "(==) $(wmout) compilation finished" | grep --color -E "^...."
+
+$(dout):
+	$(cc) -o $(dout) $(dsrc) $(CFLAGS) -lxcb
+	@echo "(==) $(dout) compilation finished" | grep --color -E "^...."
 
 clean:
-	-rm -f $(out)
+	-rm -f $(wmout) $(dout)
 
 distclean: clean
