@@ -268,6 +268,8 @@ static XftColor textfg_active;
 static uint32_t textbg_normal;
 static uint32_t textbg_active;
 static uint32_t panelbg;
+static XftColor selectfg;
+static uint32_t selectbg;
 
 enum colortype {
 	COLOR_TYPE_INT,
@@ -283,17 +285,21 @@ enum coloridx {
 	TEXTBG_NORMAL,
 	TEXTBG_ACTIVE,
 	PANELBG,
+	SELECTFG,
+	SELECTBG,
 };
 
 static struct color defcolors[] = {
-	{ "border_docked", &border_docked, 0x202020, COLOR_TYPE_INT, },
-	{ "border_normal", &border_normal, 0x303030, COLOR_TYPE_INT, },
-	{ "border_active", &border_active, 0xa0a0a0, COLOR_TYPE_INT, },
+	{ "border_docked", &border_docked, 0x303030, COLOR_TYPE_INT, },
+	{ "border_normal", &border_normal, 0x404040, COLOR_TYPE_INT, },
+	{ "border_active", &border_active, 0x84aad2, COLOR_TYPE_INT, },
 	{ "textfg_normal", &textfg_normal, 0xa0a0a0, COLOR_TYPE_XFT, },
 	{ "textfg_active", &textfg_active, 0xc0c0c0, COLOR_TYPE_XFT, },
 	{ "textbg_normal", &textbg_normal, 0x101010, COLOR_TYPE_INT, },
-	{ "textbg_active", &textbg_active, 0x303030, COLOR_TYPE_INT, },
-	{ "panelbg", &panelbg, 0x101010, COLOR_TYPE_INT, },
+	{ "textbg_active", &textbg_active, 0x202020, COLOR_TYPE_INT, },
+	{ "panelbg", &panelbg, 0x202020, COLOR_TYPE_INT, },
+	{ "selectfg", &selectfg, 0x000000, COLOR_TYPE_XFT, },
+	{ "selectbg", &selectbg, 0x84aad2, COLOR_TYPE_INT, },
 	{ NULL, NULL, 0, 0, },
 };
 
@@ -2673,7 +2679,7 @@ static void dump_coords(struct screen *scr, int x)
 
 static void mark_tag(struct screen *scr, int16_t x)
 {
-	struct color bg, *fg;
+	struct color *bg, *fg;
 	struct list_head *cur;
 
 	if (scr->tagmod) /* un-mark tag */
@@ -2689,13 +2695,9 @@ static void mark_tag(struct screen *scr, int16_t x)
 			continue;
 
 		scr->tagmod = tag;
-		/* redraw tag with inverted active color */
-		fg = color2ptr(TEXTFG_ACTIVE);
-		bg.fname = NULL;
-		bg.def = UINT_MAX - fg->def;
-		bg.val = &bg.def;
-		bg.type = COLOR_TYPE_INT;
-		draw_panel_text(scr, fg, &bg, tag->x, tag->w, tag->name,
+		fg = color2ptr(SELECTFG);
+		bg = color2ptr(SELECTBG);
+		draw_panel_text(scr, fg, bg, tag->x, tag->w, tag->name,
 				tag->nlen);
 		return;
 	}
