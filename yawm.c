@@ -32,7 +32,9 @@
 #include <X11/Xft/Xft.h>
 #include <X11/keysym.h>
 
+#include "misc.h"
 #include "yawm.h"
+#include "list.h"
 
 /* defines */
 

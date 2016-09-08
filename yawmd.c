@@ -21,6 +21,7 @@
 
 #include <xcb/xcb.h>
 
+#include "misc.h"
 #include "list.h"
 #include "yawm.h"
 
