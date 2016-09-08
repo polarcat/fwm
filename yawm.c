@@ -904,6 +904,21 @@ static void window_focus(struct screen *scr, xcb_window_t win, uint8_t flag)
 	xcb_set_input_focus_checked(dpy, XCB_NONE, win, XCB_CURRENT_TIME);
 }
 
+static xcb_window_t pointer2win(void)
+{
+	xcb_query_pointer_cookie_t c;
+	xcb_query_pointer_reply_t *r;
+
+	c = xcb_query_pointer(dpy, rootscr->root);
+        r = xcb_query_pointer_reply(dpy, c, NULL);
+        if (r) {
+		return r->child;
+		free(r);
+	}
+
+        return XCB_NONE;
+}
+
 static void switch_window(struct screen *scr, enum dir dir)
 {
 	struct list_head *cur;
@@ -1288,7 +1303,7 @@ static xcb_window_t find_visible_window(struct tag *tag)
 	return rootscr->root;
 }
 
-static void tag_focus(struct screen *scr, struct tag *tag)
+static void tag_focus(struct screen *scr, struct tag *tag, uint8_t flag)
 {
 	xcb_window_t win;
 
@@ -1301,12 +1316,15 @@ static void tag_focus(struct screen *scr, struct tag *tag)
 	print_tag(scr, scr->tag, color2ptr(TEXTFG_ACTIVE));
 	show_windows(scr);
 
+	if (flag == FOCUS_NONE)
+		return;
+
 	if (tag->win && window_status(tag->win) == WIN_STATUS_VISIBLE)
 		win = tag->win;
 	else
 		win = find_visible_window(tag);
 
-	window_focus(scr, win, FOCUS_RAISE);
+	window_focus(scr, win, flag);
 }
 
 static void switch_tag(struct screen *scr, enum dir dir)
@@ -1325,7 +1343,8 @@ static void switch_tag(struct screen *scr, enum dir dir)
 			tag = list2tag(scr->tag->head.prev);
 	}
 
-	tag_focus(scr, tag);
+	tag_focus(scr, tag, FOCUS_NONE);
+	window_focus(scr, pointer2win(), FOCUS_RAISE);
 }
 
 static void walk_tags(void *arg)
@@ -2105,7 +2124,7 @@ static void refresh_panel(uint8_t id)
 		print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
 		hide_windows(scr->tag);
 		update_panel_items(scr);
-		tag_focus(scr, list2tag(scr->tags.next));
+		tag_focus(scr, list2tag(scr->tags.next), FOCUS_RAISE);
 		break;
 	}
 }
@@ -3062,7 +3081,7 @@ static void handle_client_message(xcb_client_message_event_t *e)
 		struct client *cli = win2client(e->window);
 		if (!cli || (cli->flags & CLI_FLG_DOCK))
 			return;
-		tag_focus(cli->scr, cli->tag);
+		tag_focus(cli->scr, cli->tag, FOCUS_NONE);
 		window_focus(cli->scr, e->window, FOCUS_RAISE);
 		xcb_flush(dpy);
 	}
