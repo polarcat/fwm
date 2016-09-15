@@ -1,0 +1,150 @@
+#!/bin/bash
+
+mempct()
+{
+	free -t | while read name total used rest; do
+		if [ "$name" = "$1" ]; then
+			case $used in
+			[0-9]*) echo "$(($used * 100 / $total))";;
+			esac
+		fi
+	done
+}
+
+. $base_/menu "home" "home"
+
+echo "<b>users</b><br><br>"
+who | while read line; do
+	echo "<span>$line</span><br>"
+done
+
+echo "<br>
+<b>memory</b><br><br>
+<table class=\"legend\">"
+free -h -t | while read title total used free share cache available; do
+	i=$((i + 1))
+	echo -n "<tr>"
+	if [ $i -eq 1 ]; then
+		class=" class=\"bgleft\""
+		echo "<td$class>&nbsp;&nbsp;</td>"
+	else
+		class=''
+	fi
+	echo "<td$class>&nbsp;$title&nbsp;</td>
+<td$class>&nbsp;$total&nbsp;</td>
+<td$class>&nbsp;$used&nbsp;</td>
+<td$class>&nbsp;$free&nbsp;</td>
+<td$class>&nbsp;$share&nbsp;</td>
+<td$class>&nbsp;$cache&nbsp;</td>
+<td$class>&nbsp;$available&nbsp;</td>"
+	if [ $i -eq 1 ]; then
+		echo "<td$class>&nbsp;$use&nbsp;</td>"
+	else
+		echo -n "<td style=\"color:#111;font-family:Monospace\">&nbsp;"
+		if [ $i -eq 2 ]; then
+			pct=$(mempct "Mem:")
+		elif [ $i -eq 3 ];then
+			pct=$(mempct "Swap:")
+		elif [ $i -eq 4 ]; then
+			pct=$(mempct "Total:")
+		else
+			pct=100
+		fi
+		cur=$(($pct / 10))
+		end=$((10 - $cur))
+		for ((n=0;n<$cur;n++)); do
+#			echo -n "o"
+			echo -n "&#9632;"
+		done
+		for ((n=0;n<$end;n++)); do
+#			echo -n "-"
+			echo -n "&#9633;"
+#			echo -n "&nbsp;"
+		done
+		echo "&nbsp;$pct%&nbsp;</td>"
+	fi
+echo "</tr>"
+done
+echo "</table>
+<br><b>storage</b><br><br>
+<table class=\"legend\">"
+
+df -h | while read fs size used avail use rest; do
+	i=$((i + 1))
+	if [ $i -eq 1 ]; then
+		class=" class=\"bgleft\""
+	else
+		class=''
+	fi
+	echo "<tr>
+<td$class>&nbsp;$fs&nbsp;</td>
+<td$class>&nbsp;$size&nbsp;</td>
+<td$class>&nbsp;$used&nbsp;</td>
+<td$class>&nbsp;$avail&nbsp;</td>
+<td$class>&nbsp;$rest&nbsp;</td>"
+	if [ $i -eq 1 ]; then
+		echo "<td$class>&nbsp;$use&nbsp;</td>"
+	else
+		echo -n "<td style=\"color:#111;font-family:Monospace\">&nbsp;"
+		pct=$(getvar_ '%' $use)
+		cur=$(($pct / 10))
+		end=$((10 - $cur))
+		for ((n=0;n<$cur;n++)); do
+#			echo -n "o"
+			echo -n "&#9632;"
+		done
+		for ((n=0;n<$end;n++)); do
+#			echo -n "-"
+			echo -n "&#9633;"
+#			echo -n "&nbsp;"
+		done
+		echo "&nbsp;$use&nbsp;</td>"
+	fi
+echo "</tr>"
+done
+echo "</table>
+<br>
+<b>system</b><br><br>
+<span>$(uname -a)</span><br>
+<span>$(uptime)</span><br><br>
+<table class=\"legend\">
+<tr>
+<td class=\"bgleft\">cpu&nbsp;&nbsp;&nbsp;</td>
+<td class=\"bgleft\">model&nbsp;</td>
+<td class=\"bgleft\">MHz&nbsp;</td>
+<td class=\"bgleft\">cache&nbsp;</td>
+</tr>"
+
+ifs=$IFS
+IFS=':'
+while read var val; do
+	str=''
+	case $var in
+	"processor"*) echo "<tr>"; str=$val;;
+	"model name"*) str=$val;;
+	"cpu MHz"*) str=$val;;
+	"cache size"*) str=$val;;
+	*) str='';;
+	esac
+	if [ -n "$str" ]; then
+		echo "<td>$str&nbsp;&nbsp;</td>"
+		n=$((n + 1))
+	fi
+	if [ $n -eq 4 ]; then
+		echo "</tr>"
+		n=0
+	fi
+done < /proc/cpuinfo
+IFS=$ifs
+echo "</table><br>
+<b>processes</b><br><br>"
+
+pstree -a -p -g -u | sed 's/ /\&nbsp;/g' | while read line; do
+	case $line in
+	"&nbsp;&nbsp;|-"[a-zA-Z]*) echo "<b style=\"color:#000;\">$line</b><br>";;
+	*) echo "<span>$line</span><br>";;
+	esac
+done
+
+echo '</body>
+</html>'

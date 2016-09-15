@@ -1,0 +1,31 @@
+#!/bin/bash
+
+. $base_/head "$1"
+
+list="home:home"
+list+="|apps:apps"
+list+="|wincfg:wins"
+list+="|scrcfg:screens"
+list+="|tagcfg:tags"
+list+="|netcfg:network"
+
+# using table makes it working with browsers with weak CSS support
+echo '</head>
+<body style="background-color:#ffffff">
+<header><table><tr>'
+if [ $# -eq 2 ]; then
+	ifs="$IFS"
+	IFS='|'
+	for item in $list; do
+		tag=$(getvar_ ':' $item)
+		val=$(getval_ ':' $item)
+		if [ "$2" = "$tag" ]; then
+			bg='style="color:#6993C1";text-decoration:underline;'
+		else
+			bg='style="color:#000";text-decoration:none;'
+		fi
+		echo "<td><a $bg class=\"menu\" href=\"cgi?$tag\"><b>$val</b></a></td>"
+	done
+	IFS="$ifs"
+fi
+echo '</tr></table><hr></header>'

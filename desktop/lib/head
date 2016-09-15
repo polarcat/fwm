@@ -1,0 +1,7 @@
+#!/bin/sh
+
+echo "<!DOCTYPE html><html>
+<head>
+<link rel=\"stylesheet\" type=\"text/css\" href=\"/files/styles/main.css\">
+<meta charset=\"UTF-8\">
+<title>$@</title>"

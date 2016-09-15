@@ -1,0 +1,189 @@
+#!/bin/bash
+
+base_=./lib
+home_=~/.yawm
+maxtags_=255
+
+trace_()
+{
+	echo "$@" >&2
+}
+
+getitem_()
+{
+	local n="$1"
+	shift 1
+	case "$n" in
+	1) echo $1;;
+	2) shift 1; echo $@;;
+	esac
+}
+
+getvar_() { ifs=$IFS; IFS=$1; shift 1; getitem_ 1 $@; IFS=$ifs; }
+getval_() { ifs=$IFS; IFS=$1; shift 1; getitem_ 2 $@; IFS=$ifs; }
+
+getcmdargs_() { shift 1; echo $@; }
+
+screen_=''
+
+addtag_()
+{
+	local n=0
+
+	while [ $n -lt $maxtags_ ]; do
+		if [ ! -d $home_/$screen_/tags/$n ]; then
+			trace_ "add $home_/$screen_/tags/$n"
+			mkdir $home_/$screen_/tags/$n
+			echo -n "$n" > $home_/$screen_/tags/$n/.name
+			break
+		fi
+		n=$((n + 1))
+	done
+}
+
+modtags_()
+{
+	local i=0
+	local changed=0
+
+	shift 1
+	screen_=$(getval_ '=' $1)
+	shift 1
+	for arg in $@; do
+		cmdvar=$(getvar_ '.' $arg)
+		cmdval=$(getval_ '.' $arg)
+		var=$(getvar_ '=' $arg)
+		val=$(getval_ '=' $arg)
+		trace_ "arg $arg"
+		trace_ "cmdvar: $cmdvar, cmdval: $cmdval, var: $var, val: $val"
+		if [ -n "$cmdvar" -a -n "$cmdval" ]; then
+			trace_ "delete $home_/$screen_/tags/$cmdvar"
+			rm -vfr $home_/$screen_/tags/$cmdvar 1>&2
+			changed=1
+		elif [ -n "$var" -a "$var" = "tag" -a -n "$val" -a "$val" = "new" ]; then
+			addtag_
+			changed=1
+		elif [ -n "$val" ]; then
+			trace_ "$val --> $home_/$screen_/tags/$var/.name"
+			echo -n "$val" > $home_/$screen_/tags/$var/.name
+			changed=1
+		fi
+	done
+	if [ $changed -eq 1 ]; then
+		xsetroot -name "refresh-panel"
+	fi
+}
+
+## main()
+
+if [ $# -ne 1 ]; then
+	exit 1
+fi
+
+trace_ "uuid: $1"
+
+echo OK # handshake response
+read data # receive payload
+
+trace_ "data: $data"
+
+mkdir -p files
+if [ $? -ne 0 ]; then
+	trace_ "files: failed to create directory"
+	exit 1
+fi
+
+if [ "$data" = "/" ]; then
+	. $base_/home > files/index.html
+	echo "files/index.html"
+	exit 0
+fi
+
+dir_=cache/$1
+mkdir -p $dir_
+if [ $? -ne 0 ]; then
+	trace_ "$dir_: failed to create directory"
+	exit 1
+fi
+
+case "$data" in
+/cgi?home)
+	. $base_/home > files/index.html
+	echo "files/index.html"
+	;;
+/cgi?apps)
+	. $base_/apps > $dir_/apps.html
+	echo "$dir_/apps.html"
+	;;
+/cgi?wincfg)
+	. $base_/wincfg > $dir_/wins.html
+	echo "$dir_/wins.html"
+	;;
+/cgi?show=*)
+	win=$(getval_ '=' $data)
+	if [ -n "$win" ]; then
+		xdotool windowraise $win
+		xdotool windowfocus $win
+	fi
+	. $base_/wincfg > $dir_/wins.html
+	echo "$dir_/wins.html"
+	;;
+/cgi?close=*)
+	win=$(getval_ '=' $data)
+	if [ -n "$win" ]; then
+		xdotool windowkill $win
+		for i in $(seq 1 5000); do
+			if ! xwininfo -id $win; then
+				break
+			fi
+		done
+	fi
+	. $base_/wincfg > $dir_/wins.html
+	echo "$dir_/wins.html"
+	;;
+/cgi?pidinfo=*)
+	pid=$(getval_ '=' $data)
+	top -H -b -n 1 -p $pid > $dir_/pid.txt
+	echo "$dir_/pid.txt"
+	;;
+/cgi?wininfo=*)
+	win=$(getval_ '=' $data)
+	xprop -id $win > $dir_/win.txt
+	echo "$dir_/win.txt"
+	;;
+/cgi?cache=*)
+	src=$(getval_ '=' $data)
+	trace_ $src
+	echo "$src"
+	;;
+/cgi?tagcfg)
+	. $base_/tagcfg > $dir_/tagcfg.html
+	echo "$dir_/tagcfg.html"
+	;;
+/cgi?netcfg)
+	tmp=0; exit 1
+	;;
+'post.run.'*=*)
+	data=$(getval_ '.' $data) # strip post
+	data=$(getval_ '.' $data) # strip run
+	cmd=$(getvar_ '=' $data)
+	arg=$(getval_ '=' $data)
+	trace_ "exec: $arg $cmd"
+	if [ -n "$arg" -a "$arg" == "term" ]; then
+		exec xterm -e "$cmd" >/dev/null &
+	else
+		exec $cmd >/dev/null &
+	fi
+	sleep 1
+	. $base_/wincfg > $dir_/wins.html
+	echo "$dir_/wins.html"
+	;;
+/cgi?cmd=tagcfg*)
+	args=$(IFS='?'; getcmdargs_ $data)
+	trace_ "tagcfg cmd args: $args"
+	ifs=$IFS; IFS='&'; modtags_ $args; IFS=$ifs
+	. $base_/tagcfg > $dir_/tagcfg.html
+	echo "$dir_/tagcfg.html"
+	;;
+*) trace_ "bad request '$data'"; exit 1;;
+esac

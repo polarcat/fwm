@@ -1,0 +1,70 @@
+#!/bin/sh
+
+. $base_/menu "wins" "wincfg"
+
+color1="#f8f8f8"
+color2="#101010"
+image=''
+w=24
+h=24
+
+echo "<table id=\"wins\">"
+
+wmctrl -l -p | sort |
+while read wid desktop pid user name; do
+	i=$((i + 1))
+	if [ $((i % 2)) -eq 0 ]; then
+		style=''
+		bgcolor="transparent"
+	else
+		style="style=\"background-color:$color1\";"
+		bgcolor="$color1"
+	fi
+
+	if [ $pid -ne 0 ]; then
+		while read val; do cmd=$val; done < /proc/$pid/comm
+	fi
+
+	icon=$(xprop -id $wid | grep -E "^WM_CLASS.*=" | cut -f2 -d'"')
+
+	if [ -f files/icons/$icon-alt.png ]; then
+		image=files/icons/$icon-alt.png
+	elif [ -f files/icons/$icon.png ]; then
+		image=files/icons/$icon.png
+	else
+		image=$(find /usr/share/{icons,pixmaps}/ -name $icon.png | grep "$wx$h")
+		if [ -z "$image" ]; then
+			image=files/icons/application.png
+		else
+			cp $image files/icons
+			image=files/icons/$(basename $image)
+		fi
+	fi
+
+	echo "<tr $style>
+<td>
+<a href=\"cgi?close=$wid\">
+<img class=\"icon\"
+src=\"/files/icons/close0-alt.png\" border=\"0\" title=\"close window\">
+</a>
+</td>
+<td>
+<form action=\"cgi?\" method=\"get\">
+<button class=\"framed\" title=\"show window\" type=\"submit\" name=\"close\" value=\"$wid\">
+<table class=\"button\">
+<tr>
+<td><img class=\"icon\" src=\"/$image\"/></td>
+<td>$name</td>
+</tr>
+</table>
+</button>
+</form>
+</td>
+<td title=\"command\">$cmd</td>
+<td><a href=\"cgi?pidinfo=$pid\" title=\"show process details\">$pid</a></td>
+<td><a href=\"cgi?wininfo=$wid\" title=\"show window details\">$wid</a></td>
+</tr>"
+done
+echo '</table>
+</body>
+</html>'
