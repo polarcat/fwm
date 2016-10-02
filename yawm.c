@@ -340,6 +340,7 @@ static xcb_atom_t a_systray;
 static xcb_atom_t a_active_window;
 static xcb_atom_t a_has_vt;
 static xcb_atom_t a_embed_info;
+static xcb_atom_t a_net_wm_name;
 
 static strlen_t actname_max = UCHAR_MAX - 1;
 
@@ -541,11 +542,11 @@ static void clean(void)
 }
 
 static void get_sprop(struct sprop *ret, xcb_window_t win,
-		      enum xcb_atom_enum_t atom)
+		      enum xcb_atom_enum_t atom, uint32_t len)
 {
 	xcb_get_property_cookie_t c;
 
-	c = xcb_get_property(dpy, 0, win, atom, XCB_ATOM_STRING, 0, UCHAR_MAX);
+	c = xcb_get_property(dpy, 0, win, atom, XCB_GET_PROPERTY_TYPE_ANY, 0, len);
 	ret->ptr = xcb_get_property_reply(dpy, c, NULL);
 	if (!ret->ptr) {
 		ret->str = NULL;
@@ -651,9 +652,12 @@ static void print_title(struct screen *scr)
 		return;
 	}
 
-	get_sprop(&title, win, XCB_ATOM_WM_NAME);
-	if (!title.ptr || !title.len)
-		goto out;
+	get_sprop(&title, win, XCB_ATOM_WM_NAME, UCHAR_MAX);
+	if (!title.ptr || !title.len) {
+		get_sprop(&title, win, a_net_wm_name, UINT_MAX);
+		if (!title.ptr || !title.len)
+			goto out;
+	}
 	text_exts(title.str, title.len, &w, &h);
 
 	if (w > scr->items[PANEL_AREA_TITLE].w) {
@@ -753,7 +757,7 @@ static int window_docked(xcb_window_t win)
 	if (!basedir)
 		return 0;
 
-	get_sprop(&class, win, XCB_ATOM_WM_CLASS);
+	get_sprop(&class, win, XCB_ATOM_WM_CLASS, UCHAR_MAX);
 	if (!class.ptr) {
 		ww("unable to detect window class\n");
 		return 0;
@@ -1433,7 +1437,7 @@ static struct tag *client_tag(struct screen *scr, xcb_window_t win)
 	if (!basedir)
 		return NULL;
 
-	get_sprop(&class, win, XCB_ATOM_WM_CLASS);
+	get_sprop(&class, win, XCB_ATOM_WM_CLASS, UCHAR_MAX);
 	if (!class.ptr) {
 		ww("unable to detect window class\n");
 		return NULL;
@@ -2627,9 +2631,12 @@ static void handle_user_request(void)
 {
 	struct sprop name;
 
-	get_sprop(&name, rootscr->root, XCB_ATOM_WM_NAME);
-	if (!name.ptr)
-		return;
+	get_sprop(&name, rootscr->root, XCB_ATOM_WM_NAME, UCHAR_MAX);
+	if (!name.ptr) {
+		get_sprop(&name, rootscr->root, a_net_wm_name, UINT_MAX);
+		if (!name.ptr)
+			return;
+	}
 
 	if (match_cstr(name.str, "reload-keys")) {
 		init_keys();
@@ -3464,6 +3471,7 @@ static void init_rootwin(void)
 	a_active_window = atom_by_name("_NET_ACTIVE_WINDOW");
 	a_has_vt = atom_by_name("XFree86_has_VT");
 	a_supported = atom_by_name("_NET_SUPPORTED");
+	a_net_wm_name = atom_by_name("_NET_WM_NAME");
 
 	xcb_delete_property(dpy, win, a_supported);
 	support_atom(&a_active_window);
