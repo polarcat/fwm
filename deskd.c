@@ -457,7 +457,7 @@ static int parsereq(struct context *ctx)
 
 	cnt = pullstr(ctx->sd, buf, sizeof(buf) - 1, req, ARRAY_SIZE(req));
 	if (cnt < 1)
-		return 500; /* internal server error */
+		return -1; /* no data */
 	reqptr = req;
 	reqend = reqptr + cnt;
 	while (reqptr < reqend) {
@@ -489,7 +489,7 @@ static void work(struct context *ctx)
 	if (!(err = parsereq(ctx))) {
 		if (pushfile(ctx, iov) < 0)
 			pusherror(ctx->sd, 404, iov, ARRAY_SIZE(iov)); /* not found */
-	} else {
+	} else if (err > 0) {
 		pusherror(ctx->sd, err, iov, ARRAY_SIZE(iov));
 	}
 
