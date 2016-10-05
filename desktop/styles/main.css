@@ -1,7 +1,7 @@
 header, footer {
 	padding:0em;
 	color:#111;
-	background-color:#fefefe;
+	background-color:#5983B1;
 	clear:left;
 	text-align:left;
 	font-family:Arial, Helvetica, sans-serif;
@@ -121,4 +121,13 @@ div.header {
 }
 div.pad {
 	border:0px;
+}
+@font-face {
+	font-family:fontawesome;
+	src: url(/files/fontawesome-webfont.ttf);
+}
+label.icon {
+	font-family:fontawesome;
+	font-size:32px;
+	color:#fff;
 }

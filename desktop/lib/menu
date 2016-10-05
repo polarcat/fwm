@@ -12,7 +12,12 @@ list+="|netcfg:network"
 # using table makes it working with browsers with weak CSS support
 echo '</head>
 <body style="background-color:#ffffff">
-<header><table><tr>'
+<header>
+<table style="width:100%;">
+<tr>
+<td>
+<table style="padding:4px;">
+<tr>'
 if [ $# -eq 2 ]; then
 	ifs="$IFS"
 	IFS='|'
@@ -20,12 +25,28 @@ if [ $# -eq 2 ]; then
 		tag=$(getvar_ ':' $item)
 		val=$(getval_ ':' $item)
 		if [ "$2" = "$tag" ]; then
-			bg='style="color:#6993C1";text-decoration:underline;'
+			bg="style=\"color:#fff\";text-decoration:underline;"
+		elif [ "$2" != "$tag" -a "$tag" = "home" ]; then
+			bg="style=\"color:#304A67\";text-decoration:underline;"
 		else
-			bg='style="color:#000";text-decoration:none;'
+			bg="style=\"color:#111\";text-decoration:none;"
 		fi
-		echo "<td><a $bg class=\"menu\" href=\"cgi?$tag\"><b>$val</b></a></td>"
+		if [ "$tag" = "home" ]; then
+			echo "<td style=\"padding:8px;\">
+<label class=\"icon\">
+<a $bg class=\"menu\" href=\"cgi?$tag\">&#xf015;</a></td>
+</label>"
+		else
+			echo "<td style=\"padding:8px;\">
+<a $bg class=\"menu\" href=\"cgi?$tag\"><b>$val</b></a></td>"
+		fi
 	done
 	IFS="$ifs"
 fi
-echo '</tr></table><hr></header>'
+echo '</tr>
+</table>
+</td>
+</tr>
+</table>
+</header>
+<br>'
