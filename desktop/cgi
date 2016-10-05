@@ -70,7 +70,7 @@ modtags_()
 		fi
 	done
 	if [ $changed -eq 1 ]; then
-		xsetroot -name "refresh-panel"
+		xsetroot -name "refresh-panel $screen_"
 	fi
 }
 
