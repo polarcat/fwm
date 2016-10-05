@@ -57,7 +57,7 @@ typedef uint8_t strlen_t;
 
 #define SCR_FLG_PANEL_TOP (1 << 0)
 
-#define TAG_NAME_MAX 15
+#define TAG_NAME_MAX 32
 
 #define MOUSE_BTN_LEFT 1
 #define MOUSE_BTN_MID 2
