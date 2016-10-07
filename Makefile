@@ -20,10 +20,10 @@ $(wmout):
 	$(cc) -o $(wmout) $(wmsrc) $(ccflags) $(ldflags)
 	@echo "(==) $(wmout) compilation finished"
 
-clean$(wmout):
+clean-$(wmout):
 	-rm -f $(wmout)
 
-install$(wmout):
+install-$(wmout):
 	-mkdir -p $(HOME)/bin
 	-unlink $(HOME)/bin/$(wmout)
 	-cp -v $(wmout) $(HOME)/bin/$(wmout)
@@ -33,17 +33,17 @@ $(wmdout):
 	$(cc) -o $(wmdout) $(wmdsrc) $(CFLAGS) -lxcb
 	@echo "(==) $(wmdout) compilation finished"
 
-clean$(wmdout):
+clean-$(wmdout):
 	-rm -f $(wmdout)
 
 $(deskout):
 	$(cc) -o $(deskout) $(desksrc) $(CFLAGS)
 	@echo "(==) $(deskout) compilation finished"
 
-clean$(deskout):
+clean-$(deskout):
 	-rm -f $(deskout)
 
-install$(deskout):
+install-$(deskout):
 	-mkdir -p $(HOME)/bin
 	-unlink $(HOME)/bin/$(deskout)
 	-cp -v $(deskout) $(HOME)/bin/$(deskout)
