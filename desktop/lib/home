@@ -13,10 +13,9 @@ mempct()
 
 . $base_/menu "home" "home"
 
-echo "<b>users</b><br><br>"
-who | while read line; do
-	echo "<span>$line</span><br>"
-done
+echo "<a href=\"/files/who.txt\"><b>users</b></a><br><br>"
+echo "<span>$(who -q)</span><br>"
+who -u -H > files/who.txt
 
 echo "<br>
 <b>memory</b><br><br>
