@@ -1,26 +1,6 @@
 #!/bin/bash
 
-base_=./lib
-home_=~/.yawm
-maxtags_=255
-
-trace_()
-{
-	echo "$@" >&2
-}
-
-getitem_()
-{
-	local n="$1"
-	shift 1
-	case "$n" in
-	1) echo $1;;
-	2) shift 1; echo $@;;
-	esac
-}
-
-getvar_() { ifs=$IFS; IFS=$1; shift 1; getitem_ 1 $@; IFS=$ifs; }
-getval_() { ifs=$IFS; IFS=$1; shift 1; getitem_ 2 $@; IFS=$ifs; }
+. ./libcgi
 
 getcmdargs_() { shift 1; echo $@; }
 
@@ -144,6 +124,8 @@ case "$data" in
 /cgi?pidinfo=*)
 	pid=$(getval_ '=' $data)
 	top -H -b -n 1 -p $pid > $dir_/pid.txt
+	echo >> $dir_/pid.txt
+	ls -l /proc/$pid/fd >> $dir_/pid.txt 2>&1
 	echo "$dir_/pid.txt"
 	;;
 /cgi?wininfo=*)
@@ -160,8 +142,20 @@ case "$data" in
 	. $base_/tagcfg > $dir_/tagcfg.html
 	echo "$dir_/tagcfg.html"
 	;;
+/cgi?netstat=*)
+	shift 1
+	info=$(getval_ '=' $data)
+	. $base_/netstat $info > $dir_/pidinfo.txt
+	echo $dir_/pidinfo.txt
+	;;
+/cgi?netstat)
+	shift 1
+	. $base_/netstat > $dir_/netstat.html
+	echo "$dir_/netstat.html"
+	;;
 /cgi?netcfg)
-	tmp=0; exit 1
+	. $base_/netcfg > $dir_/netcfg.html
+	echo "$dir_/netcfg.html"
 	;;
 'post.run.'*=*)
 	data=$(getval_ '.' $data) # strip post

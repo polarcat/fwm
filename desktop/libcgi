@@ -1,0 +1,40 @@
+#!/bin/sh
+
+base_=./lib
+home_=~/.yawm
+maxtags_=255
+
+trace_()
+{
+	echo "$@" >&2
+}
+
+getitem__()
+{
+	local n="$1"
+	shift 1
+	case "$n" in
+	1) echo $1;;
+	2) shift 1; echo $@;;
+	esac
+}
+
+getvar_() { ifs=$IFS; IFS=$1; shift 1; getitem__ 1 $@; IFS=$ifs; }
+getval_() { ifs=$IFS; IFS=$1; shift 1; getitem__ 2 $@; IFS=$ifs; }
+
+index__()
+{
+	local n="$1"
+	local i=0
+	shift 1
+	while [ $# -ne 0 ]; do
+		i=$((i + 1))
+		if [ $i -eq $n ]; then
+			echo $1
+			break
+		fi
+		shift 1
+	done
+}
+
+index_() { ifs=$IFS; IFS=$1; shift 1; index__ $@; IFS=$ifs; }

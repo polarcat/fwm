@@ -11,13 +11,82 @@ mempct()
 	done
 }
 
+rxtx()
+{
+	while [ $# -ne 0 ]; do
+		case $1 in
+		"("*) echo "$@"; return 0;;
+		esac
+		shift 1
+	done
+	echo "-"
+}
+
 . $base_/menu "home" "home"
 
-echo "<a href=\"/files/who.txt\"><b>users</b></a><br><br>"
-echo "<span>$(who -q)</span><br>"
-who -u -H > files/who.txt
-
-echo "<br>
+echo "<a class=\"menu\" href=\"/files/who.txt\"><b>users</b></a><br><br>"
+echo "<span>$(who -q)</span><br><br>"
+who -a -H > files/who.txt
+ifconfig -a > files/netstat.txt
+echo "<a class=\"menu\" href=\"cgi?netstat\"><b>netstat</b></a><br><br>
+<table class=\"legend\">
+<tr>
+<td class=\"bgleft\">&nbsp;&nbsp;</td>
+<td class=\"bgleft\">&nbsp;tcp addr&nbsp;</td>
+<td class=\"bgleft\">&nbsp;mac addr&nbsp;</td>
+<td class=\"bgleft\">&nbsp;received&nbsp;</td>
+<td class=\"bgleft\">&nbsp;transmitted&nbsp;</td>
+</tr>"
+while read name addr aux rest; do
+	case $name in
+	[0-9a-zA-Z]*:) iface=$(getvar_ ':' $name);;
+	inet) ip=$addr;;
+	ether) mac=$addr;;
+	RX)
+		if [ -n "$iface" -a "$addr" = "packets" ]; then
+			rx=$(rxtx $rest)
+		elif [ "$addr" = "errors" ]; then
+			err=$aux
+		else
+			rx='-'
+			err='-'
+		fi
+		;;
+	TX)
+		if [ -n "$iface" -a "$addr" = "packets" ]; then
+			tx=$(rxtx $rest)
+		elif [ "$addr" = "errors" ]; then
+			err=$aux
+		else
+			tx='-'
+			err='-'
+		fi
+		if [ -n "$iface" ]; then
+			if [ -z "$ip" ]; then
+				ip="-"
+			fi
+			if [ -z "$mac" ]; then
+				mac="-"
+			fi
+		fi
+		;;
+	esac
+	if [ -n "$iface" -a -n "$ip" -a -n "$mac" -a -n "$rx" -a -n "$tx" ]; then
+		echo "<tr><td>&nbsp;$iface&nbsp;</td>
+<td>&nbsp;$ip&nbsp;</td>
+<td>&nbsp;$mac&nbsp;</td>
+<td>&nbsp;$rx&nbsp;</td>
+<td>&nbsp;$tx&nbsp;</td></tr>"
+		iface=''
+		ip=''
+		mac=''
+		rx=''
+		tx=''
+		err=''
+	fi
+done < files/netstat.txt
+echo "</table>
+<br>
 <b>memory</b><br><br>
 <table class=\"legend\">"
 free -h -t | while read title total used free share cache available; do

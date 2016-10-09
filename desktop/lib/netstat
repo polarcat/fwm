@@ -1,0 +1,128 @@
+#!/bin/bash
+
+if [ -n "$1" ]; then
+
+proc()
+{
+	if [ $# -ne 1 ]; then
+		return
+	fi
+
+	for file in /proc/[1-9]*/fd/*; do
+		link=$(readlink $file)
+		case "$link" in
+		socket:*$1*)
+			pid=$(index_ '/' 3 $file)
+			echo "pid: $pid"
+			echo -n "cmd: "
+			cat /proc/$pid/cmdline
+			echo
+			echo
+			ls -l /proc/$pid/fd/*
+			return
+			;;
+		esac
+	done
+	echo "failed to match inode $1 to any process"
+}
+
+	proc $1
+
+else
+
+. $base_/menu "home" "home"
+
+prstat()
+{
+	trace_ "ARGS: $@"
+	echo "<tr>"
+	while [ $# -ne 0 ]; do
+		echo "<td>$1</td>"
+		shift 1
+	done
+	echo "</tr>"
+}
+
+ip4()
+{
+	ip4str=''
+	ip4str=$((0x$1 >> 24))
+	ip4str=$((0x$1 >> 16 & 0xff)).$ip4str
+	ip4str=$((0x$1 >> 8 & 0xff)).$ip4str
+	ip4str=$((0x$1 & 0xff)).$ip4str
+}
+
+route()
+{
+	echo "<tr>"
+	local class=''
+	local i=0
+	while [ $# -ne 0 ]; do
+		str=$1
+		if [ "$str" = "Iface" ]; then
+			class=" class=\"bgleft\""
+		elif [ -z "$class" ]; then
+			if [ $i -eq 1 -o $i -eq 2 -o $i -eq 7 ]; then
+				ip4 $1
+				str=$ip4str
+			fi
+		fi
+		echo "<td$class>&nbsp;$str&nbsp;</td>"
+		i=$((i + 1))
+		shift 1
+	done
+	echo "</tr>"
+}
+
+stat()
+{
+	echo "<tr>"
+	while [ $# -ne 0 ]; do
+		echo "<td$class>&nbsp;$1&nbsp;</td>"
+		shift 1
+	done
+	echo "</tr>"
+}
+
+	echo "<b>routes</b><br><br>
+<table class=\"legend\">"
+	while read line; do
+		route $line
+	done < /proc/net/route
+	echo "</table>
+<br>
+<b>connections</b><br><br>
+<table class=\"legend\">
+<tr>
+<td colspan=2>&nbsp;<b>local</b>&nbsp;</td>
+<td colspan=2>&nbsp;<b>remote&nbsp;</b></td>
+</tr>
+<tr>
+<td class=\"bgleft\">&nbsp;addr&nbsp;</td>
+<td class=\"bgleft\">&nbsp;port&nbsp;</td>
+<td class=\"bgleft\">&nbsp;</td>
+<td class=\"bgleft\">&nbsp;port&nbsp;</td>
+<td class=\"bgleft\">&nbsp;addr&nbsp;</td>
+<td class=\"bgleft\">&nbsp;user&nbsp;</td>
+<td class=\"bgleft\">&nbsp;inode&nbsp;</td>
+</tr>"
+	while read sl loc rem st txrx trtm retr uid tout inode rest; do
+		if [ "$sl" = "sl" ]; then
+			continue
+		else
+			lport=$((0x$(getval_ ':' $loc)))
+			ip4 $(getvar_ ':' $loc)
+			loc=$ip4str
+			rport=$((0x$(getval_ ':' $rem)))
+			ip4 $(getvar_ ':' $rem)
+			rem=$ip4str
+			cmd="<a class=\"menu\" href=\"cgi?netstat=$inode\">$inode</a>"
+		fi
+		blank="&#xf0ec;"
+		stat $loc $lport $blank $rport $rem $uid "$cmd"
+	done < /proc/net/tcp
+	echo "</table>
+</body>
+</html>"
+
+fi
