@@ -1,0 +1,77 @@
+#!/bin/sh
+
+. $base_/menu "network" "netcfg"
+
+getaddr()
+{
+	ifconfig $1 | while read line; do
+		i=$((i + 1))
+		if [ $i -eq 1 ]; then
+			continue
+		fi
+		case $line in
+		inet*) index_ ' ' 2 "$line"; break;;
+		*) echo "0.0.0.0";;
+		esac
+	done
+}
+
+ip4style="type=\"text\" maxlength=\"15\" size=\"11\""
+resstyle="type=\"reset\" value=\"&#xf021;\" title=\"reset\""
+recstyle="type=\"submit\" value=\"&#xf021;\" title=\"reset\""
+
+pwd=$PWD
+cd /sys/class/net/
+echo "<table class=\"legend\" id=\"devices\">
+<tr>
+<td class=\"bgleft\">&nbsp;type&nbsp;</td>
+<td class=\"bgleft\">&nbsp;name&nbsp;</td>
+<td class=\"bgleft\">&nbsp;auto&nbsp;</td>
+<td class=\"bgleft\">&nbsp;address&nbsp;</td>
+<td class=\"bgleft\">&nbsp;netmask&nbsp;</td>
+<td class=\"bgleft\">&nbsp;broadcast&nbsp;</td>
+<td class=\"bgleft\">&nbsp;</td>
+<td class=\"bgleft\">&nbsp;</td>
+</tr>"
+for iface in *; do
+	type=0
+	read type < $iface/type
+	if [ $type -eq 1 ]; then
+echo '<tr>'
+		ip4addr=$(getaddr $iface)
+		if [ -d $iface/wireless ]; then
+echo "<form action=\"cgi\">
+<input name=\"cmd\" type=\"hidden\" value=\"netcfg\">
+<input name=\"dev\" type=\"hidden\" value=\"$iface\">
+<input name=\"type\" type=\"hidden\" value=\"2\">
+<td style=\"text-align:center;\" title=\"wireless\">&#xf1eb;</td>
+<td>&nbsp;$iface&nbsp;</td>
+<td></td>
+<td><input $ip4style name=\"inet\" value=\"$ip4addr\" readonly></td>
+<td><input $ip4style name=\"nmask\" value=\"0.0.0.0\" readonly></td>
+<td><input $ip4style name=\"bcast\" value=\"0.0.0.0\" readonly></td>
+<td><input $recstyle></td>
+<td></td>
+<td></td>"
+		else
+echo "<form action=\"cgi\">
+<input name=\"cmd\" type=\"hidden\" value=\"netcfg\">
+<input name=\"dev\" type=\"hidden\" value=\"$iface\">
+<input name=\"type\" type=\"hidden\" value=\"1\">
+<td style=\"text-align:center;\" title=\"wired\">&#xf1e6;</td>
+<td>&nbsp;$iface&nbsp;</td>
+<td><input type=\"checkbox\" name=\"auto\" title=\"automatic configuration\"></td>
+<td><input $ip4style name=\"inet\" value=\"0.0.0.0\"></td>
+<td><input $ip4style name=\"nmask\" value=\"0.0.0.0\"></td>
+<td><input $ip4style name=\"bcast\" value=\"0.0.0.0\"></td>
+<td><input $resstyle></td>
+<td><input type=\"submit\" value=\"&#xf0c7;\" title=\"apply changes\"></td>"
+		fi
+echo '</form>
+</tr>'
+	fi
+done
+echo '</table>
+</body>
+</html>'
+cd $pwd
