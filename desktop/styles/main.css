@@ -124,7 +124,7 @@ div.pad {
 }
 @font-face {
 	font-family:fontawesome;
-	src: url(/files/fontawesome-webfont.ttf);
+	src:url(/files/fontawesome-webfont.woff);
 }
 label.icon {
 	font-family:fontawesome;
