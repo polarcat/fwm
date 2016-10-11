@@ -16,9 +16,11 @@ getaddr()
 	done
 }
 
+fg="#555"
+color="style=\"color:$fg;\""
 ip4style="type=\"text\" maxlength=\"15\" size=\"11\""
-resstyle="type=\"reset\" value=\"&#xf021;\" title=\"reset\""
-recstyle="type=\"submit\" value=\"&#xf021;\" title=\"reset\""
+resstyle="type=\"reset\" value=\"&#xf021;\" title=\"reset\" $color"
+recstyle="type=\"submit\" value=\"&#xf021;\" title=\"reset\" $color"
 
 pwd=$PWD
 cd /sys/class/net/
@@ -36,20 +38,22 @@ echo "<table class=\"legend\" id=\"devices\">
 for iface in *; do
 	type=0
 	read type < $iface/type
-	if [ $type -eq 1 ]; then
+	if [ $type -ne 1 ]; then
+		continue
+	fi
+	$pwd/$base_/getip $iface | while read ip mask bcast hw; do
 echo '<tr>'
-		ip4addr=$(getaddr $iface)
 		if [ -d $iface/wireless ]; then
 echo "<form action=\"cgi\">
 <input name=\"cmd\" type=\"hidden\" value=\"netcfg\">
 <input name=\"dev\" type=\"hidden\" value=\"$iface\">
 <input name=\"type\" type=\"hidden\" value=\"2\">
-<td style=\"text-align:center;\" title=\"wireless\">&#xf1eb;</td>
+<td style=\"text-align:center;color:$fg;\" title=\"wireless\">&#xf1eb;</td>
 <td>&nbsp;$iface&nbsp;</td>
 <td></td>
-<td><input $ip4style name=\"inet\" value=\"$ip4addr\" readonly></td>
-<td><input $ip4style name=\"nmask\" value=\"0.0.0.0\" readonly></td>
-<td><input $ip4style name=\"bcast\" value=\"0.0.0.0\" readonly></td>
+<td><input $ip4style name=\"inet\" value=\"$ip\" readonly></td>
+<td><input $ip4style name=\"nmask\" value=\"$mask\" readonly></td>
+<td><input $ip4style name=\"bcast\" value=\"$bcast\" readonly></td>
 <td><input $recstyle></td>
 <td></td>
 <td></td>"
@@ -58,18 +62,18 @@ echo "<form action=\"cgi\">
 <input name=\"cmd\" type=\"hidden\" value=\"netcfg\">
 <input name=\"dev\" type=\"hidden\" value=\"$iface\">
 <input name=\"type\" type=\"hidden\" value=\"1\">
-<td style=\"text-align:center;\" title=\"wired\">&#xf1e6;</td>
+<td style=\"text-align:center;color:$fg;\" title=\"wired\">&#xf1e6;</td>
 <td>&nbsp;$iface&nbsp;</td>
 <td><input type=\"checkbox\" name=\"auto\" title=\"automatic configuration\"></td>
-<td><input $ip4style name=\"inet\" value=\"0.0.0.0\"></td>
-<td><input $ip4style name=\"nmask\" value=\"0.0.0.0\"></td>
-<td><input $ip4style name=\"bcast\" value=\"0.0.0.0\"></td>
+<td><input $ip4style name=\"inet\" value=\"$ip\"></td>
+<td><input $ip4style name=\"nmask\" value=\"$mask\"></td>
+<td><input $ip4style name=\"bcast\" value=\"$bcast\"></td>
 <td><input $resstyle></td>
-<td><input type=\"submit\" value=\"&#xf0c7;\" title=\"apply changes\"></td>"
+<td><input type=\"submit\" value=\"&#xf0c7;\" $color title=\"apply changes\"></td>"
 		fi
 echo '</form>
 </tr>'
-	fi
+	done
 done
 echo '</table>
 </body>
