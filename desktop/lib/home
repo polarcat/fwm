@@ -25,12 +25,12 @@ rxtx()
 dedup()
 {
 	local prev=$1
-	echo "$1"
+	echo "<a class=menu href=/files/who.txt>$1<a>"
 	while [ $# -ne 0 ]; do
 		if [ "$1" = "#" -o "$1" = "users" ]; then
 			break
 		elif [ "$prev" != "$1" ]; then
-			echo "$1"
+			echo "<a class=menu href=/files/who.txt>$1<a>"
 		else
 			prev=$1
 		fi
@@ -40,9 +40,9 @@ dedup()
 
 . $base_/menu "home" "home"
 
-echo "<label class=icon style=font-size:22px;>&#xf0c0
-<a class=menu href=/files/who.txt>$(dedup $(who -q))</a>
-</label><br><br>"
+echo "<label class=icon style=font-size:22px;>&#xf0c0"
+dedup $(who -q)
+echo "</label><br><br>"
 who -a -H > files/who.txt
 echo "<a class=menu href=cgi?netstat><b>netstat</b></a><br><br>
 <table class=legend>
