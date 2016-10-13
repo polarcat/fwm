@@ -22,60 +22,83 @@ rxtx()
 	echo "-"
 }
 
+dedup()
+{
+	local prev=$1
+	echo "$1"
+	while [ $# -ne 0 ]; do
+		if [ "$1" = "#" -o "$1" = "users" ]; then
+			break
+		elif [ "$prev" != "$1" ]; then
+			echo "$1"
+		else
+			prev=$1
+		fi
+		shift 1
+	done
+}
+
 . $base_/menu "home" "home"
 
-echo "<a class=\"menu\" href=\"/files/who.txt\"><b>users</b></a><br><br>"
-echo "<span>$(who -q)</span><br><br>"
+echo "<label class=icon style=font-size:22px;>&#xf0c0
+<a class=menu href=/files/who.txt>$(dedup $(who -q))</a>
+</label><br><br>"
 who -a -H > files/who.txt
-echo "<a class=\"menu\" href=\"cgi?netstat\"><b>netstat</b></a><br><br>
-<table class=\"legend\">
+echo "<a class=menu href=cgi?netstat><b>netstat</b></a><br><br>
+<table class=legend>
 <tr>
-<td class=\"bgleft\">&nbsp;&nbsp;</td>
-<td class=\"bgleft\">&nbsp;tcp addr&nbsp;</td>
-<td class=\"bgleft\">&nbsp;mac addr&nbsp;</td>
-<td class=\"bgleft\">&nbsp;received&nbsp;</td>
-<td class=\"bgleft\">&nbsp;transmitted&nbsp;</td>
+<td class=bgleft></td>
+<td class=bgleft>tcp addr</td>
+<td class=bgleft>mac addr</td>
+<td class=bgleft>received</td>
+<td class=bgleft>transmitted</td>
 </tr>"
-
+row=0
 while read iface line; do
 	if [ "$iface" == "Inter-|" -o "$iface" = "face" ]; then
 		continue
 	fi
+	class=$(alter_ $row)
+	row=$((row + 1))
 	iface=$(getvar_ ':' $iface)
 	rx=$(($(index_ ' ' 1 $line) / 1024 / 1024))MiB
 	tx=$(($(index_ ' ' 9 $line) / 1024 / 1024))MiB
 	$base_/getip $iface | while read ip mask bcast hw; do
-		echo "<tr><td>&nbsp;$iface&nbsp;</td>
-<td>&nbsp;$ip&nbsp;</td>
-<td>&nbsp;$hw&nbsp;</td>
-<td>&nbsp;$rx&nbsp;</td>
-<td>&nbsp;$tx&nbsp;</td></tr>"
+		echo "<tr>
+<td $class>$iface</td>
+<td $class>$ip</td>
+<td $class>$hw</td>
+<td $class>$rx</td>
+<td $class>$tx</td>
+</tr>"
 	done
 done < /proc/net/dev
 echo "</table>
 <br>
 <b>memory</b><br><br>
-<table class=\"legend\">"
+<table class=legend>"
+row=0
 free -h -t | while read title total used free share cache available; do
 	i=$((i + 1))
 	echo -n "<tr>"
 	if [ $i -eq 1 ]; then
-		class=" class=\"bgleft\""
-		echo "<td$class>&nbsp;&nbsp;</td>"
+		class="class=bgleft"
+		echo "<td $class></td>"
 	else
-		class=''
+		class=$(alter_ $row)
+		row=$((row + 1))
 	fi
-	echo "<td$class>&nbsp;$title&nbsp;</td>
-<td$class>&nbsp;$total&nbsp;</td>
-<td$class>&nbsp;$used&nbsp;</td>
-<td$class>&nbsp;$free&nbsp;</td>
-<td$class>&nbsp;$share&nbsp;</td>
-<td$class>&nbsp;$cache&nbsp;</td>
-<td$class>&nbsp;$available&nbsp;</td>"
+	echo "<td $class>$title</td>
+<td $class>$total</td>
+<td $class>$used</td>
+<td $class>$free</td>
+<td $class>$share</td>
+<td $class>$cache</td>
+<td $class>$available</td>"
 	if [ $i -eq 1 ]; then
-		echo "<td$class>&nbsp;$use&nbsp;</td>"
+		class="class=bgleft"
 	else
-		echo -n "<td style=\"color:#111;font-family:Monospace\">&nbsp;"
+		echo -n "<td $class style=color:#111;font-family:Monospace>"
 		if [ $i -eq 2 ]; then
 			pct=$(mempct "Mem:")
 		elif [ $i -eq 3 ];then
@@ -88,52 +111,47 @@ free -h -t | while read title total used free share cache available; do
 		cur=$(($pct / 10))
 		end=$((10 - $cur))
 		for ((n=0;n<$cur;n++)); do
-#			echo -n "o"
 			echo -n "&#9632;"
 		done
 		for ((n=0;n<$end;n++)); do
-#			echo -n "-"
 			echo -n "&#9633;"
-#			echo -n "&nbsp;"
 		done
-		echo "&nbsp;$pct%&nbsp;</td>"
+		echo "&nbsp;$pct%</td>"
 	fi
 echo "</tr>"
 done
 echo "</table>
 <br><b>storage</b><br><br>
-<table class=\"legend\">"
-
+<table class=legend>"
+row=0
 df -h | while read fs size used avail use rest; do
 	i=$((i + 1))
 	if [ $i -eq 1 ]; then
-		class=" class=\"bgleft\""
+		class=" class=bgleft"
 	else
-		class=''
+		class=$(alter_ $row)
+		row=$((row + 1))
 	fi
 	echo "<tr>
-<td$class>&nbsp;$fs&nbsp;</td>
-<td$class>&nbsp;$size&nbsp;</td>
-<td$class>&nbsp;$used&nbsp;</td>
-<td$class>&nbsp;$avail&nbsp;</td>
-<td$class>&nbsp;$rest&nbsp;</td>"
+<td $class>$fs</td>
+<td $class>$size</td>
+<td $class>$used</td>
+<td $class>$avail</td>
+<td $class>$rest</td>"
 	if [ $i -eq 1 ]; then
-		echo "<td$class>&nbsp;$use&nbsp;</td>"
+		echo "<td $class>$use</td>"
 	else
-		echo -n "<td style=\"color:#111;font-family:Monospace\">&nbsp;"
+		echo -n "<td $class style=color:#111;font-family:Monospace>"
 		pct=$(getvar_ '%' $use)
 		cur=$(($pct / 10))
 		end=$((10 - $cur))
 		for ((n=0;n<$cur;n++)); do
-#			echo -n "o"
 			echo -n "&#9632;"
 		done
 		for ((n=0;n<$end;n++)); do
-#			echo -n "-"
 			echo -n "&#9633;"
-#			echo -n "&nbsp;"
 		done
-		echo "&nbsp;$use&nbsp;</td>"
+		echo "&nbsp;$use</td>"
 	fi
 echo "</tr>"
 done
@@ -142,12 +160,12 @@ echo "</table>
 <b>system</b><br><br>
 <span>$(uname -a)</span><br>
 <span>$(uptime)</span><br><br>
-<table class=\"legend\">
+<table class=legend>
 <tr>
-<td class=\"bgleft\">cpu&nbsp;&nbsp;&nbsp;</td>
-<td class=\"bgleft\">model&nbsp;</td>
-<td class=\"bgleft\">MHz&nbsp;</td>
-<td class=\"bgleft\">cache&nbsp;</td>
+<td class=bgleft>cpu</td>
+<td class=bgleft>model</td>
+<td class=bgleft>MHz</td>
+<td class=bgleft>cache</td>
 </tr>"
 
 ifs=$IFS
@@ -162,7 +180,7 @@ while read var val; do
 	*) str='';;
 	esac
 	if [ -n "$str" ]; then
-		echo "<td>$str&nbsp;&nbsp;</td>"
+		echo "<td>$str</td>"
 		n=$((n + 1))
 	fi
 	if [ $n -eq 4 ]; then
@@ -173,13 +191,36 @@ done < /proc/cpuinfo
 IFS=$ifs
 echo "</table><br>
 <b>processes</b><br><br>"
-
-pstree -a -p -g -u | sed 's/ /\&nbsp;/g' | while read line; do
-	case $line in
-	"&nbsp;&nbsp;|-"[a-zA-Z]*) echo "<b style=\"color:#000;\">$line</b><br>";;
-	*) echo "<span>$line</span><br>";;
-	esac
+row=0
+list=0
+top -n1 -b -c -w 1000 | while read pid user pr ni virt res shr st cpu mem time cmd; do
+	if [ "$pid" = "PID" ]; then
+		echo "<table class=legend>"
+		class=" class=bgleft"
+		list=1
+	elif [ "$pid" != "PID" -a $list -eq 0 ]; then
+		echo "$pid $user $pr $ni $virt $res $shr $st $cpu $mem $time $cmd<br>"
+		continue
+	else
+		class=$(alter_ $row)
+		row=$((row + 1))
+	fi
+	echo "<tr>
+<td $class>$pid</td>
+<td $class>$user</td>
+<td $class>$pr</td>
+<td $class>$ni</td>
+<td $class>$virt</td>
+<td $class>$res</td>
+<td $class>$shr</td>
+<td $class>$st</td>
+<td $class>$cpu</td>
+<td $class>$mem</td>
+<td $class>$time</td>
+<td $class>$cmd</td>
+</tr>"
 done
-
-echo '</body>
+echo '</tr>
+</table>
+</body>
 </html>'

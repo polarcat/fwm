@@ -1,10 +1,14 @@
-header, footer {
+@font-face {
+	font-family:fontawesome;
+	src:url(/files/fontawesome-webfont.woff);
+}
+header,footer {
 	padding:0em;
 	color:#111;
-	background-color:#5983B1;
+	background-color:#89B3E1;
 	clear:left;
 	text-align:left;
-	font-family:Arial, Helvetica, sans-serif;
+	font-family:Arial,Helvetica,sans-serif,fontawesome;
 }
 body {
 	padding:0em;
@@ -12,38 +16,106 @@ body {
 	background-color:#fefefe;
 	clear:left;
 	text-align:left;
-	font-family:Arial, Helvetica, sans-serif;
-}
-a:link.menu {
-	background-color:transparent;
-	text-decoration:none
-}
-a:visited.menu {
-	background-color:transparent;
-	text-decoration:none
-}
-a:hover.menu {
-	background-color:transparent;
-	text-decoration:underline
-}
-a:active.menu  {
-	background-color:transparent;
-	text-decoration:underline
+	font-family:Arial,Helvetica,sans-serif,fontawesome;
 }
 table {
 	border:0;
 	padding:0;
 	border-spacing:0.5em 0; /* horz, vert*/
 }
+input {
+	font-family:Arial,Helvetica,sans-serif,fontawesome;
+	border:1px solid #aaa;
+	border-radius: 8px;
+	-webkit-border-radius: 8px;
+	padding:3px 5px;
+}
+button {
+	font-family:Arial,Helvetica,sans-serif,fontawesome;
+	border:1px solid #aaa;
+	border-radius: 8px;
+	-webkit-border-radius: 8px;
+	padding:3px 5px;
+}
+a:link.selected {
+	color:#fff;
+	background-color:transparent;
+	text-decoration:none
+}
+a:visited.selected {
+	color:#fff;
+	background-color:transparent;
+	text-decoration:none
+}
+a:hover.selected {
+	color:#fff;
+	background-color:transparent;
+	text-decoration:none
+}
+a:active.selected {
+	color:#fff;
+	background-color:transparent;
+	text-decoration:none
+}
+a:link.home {
+	color:#304A67;
+	background-color:transparent;
+	text-decoration:none
+}
+a:visited.home {
+	color:#304A67;
+	background-color:transparent;
+	text-decoration:none
+}
+a:hover.home {
+	color:#304A67;
+	background-color:transparent;
+	text-decoration:underline
+}
+a:active.home {
+	color:#304A67;
+	background-color:transparent;
+	text-decoration:underline
+}
+a:link.menu {
+	color:#333;
+	background-color:transparent;
+	text-decoration:none
+}
+a:visited.menu {
+	color:#333;
+	background-color:transparent;
+	text-decoration:none
+}
+a:hover.menu {
+	color:#333;
+	background-color:transparent;
+	text-decoration:underline
+}
+a:active.menu {
+	color:#333;
+	background-color:transparent;
+	text-decoration:underline
+}
+table.menu {
+	border-spacing:16px 0px;
+	border-collapse:separate;
+	background-color:transparent;
+}
+td.menu {
+	text-align:center;
+}
 table.button {
 	border-spacing:0.1em 0; /* horz, vert*/
 }
 table.legend {
 	border-spacing:0 0; /* horz, vert*/
+	border-collapse:separate;
 	border:1px solid #6993C1;
 }
 table.tags {
-	border-spacing:0.1em 0.2em; /* horz, vert*/
+	border-spacing:0 0; /* horz, vert*/
+	border-collapse:separate;
 	border:0px solid #6993C1;
 }
 td.bright {
@@ -52,8 +124,19 @@ td.bright {
 	text-align:center
 }
 td.bgleft {
+	border:3px solid #89b3e1;
 	color:#303030;
 	background-color:#89b3e1;
+	text-align:left
+}
+td.even {
+	background-color:#eee;
+}
+td.odd {
+	background-color:transparent;
+}
+td {
+	border:2px solid transparent;
 	text-align:left
 }
 td.bgvoid {
@@ -122,12 +205,21 @@ div.header {
 div.pad {
 	border:0px;
 }
-@font-face {
-	font-family:fontawesome;
-	src:url(/files/fontawesome-webfont.woff);
-}
 label.icon {
 	font-family:fontawesome;
 	font-size:32px;
-	color:#fff;
+	color:#86B280;
+}
+input[type="checkbox"] + label {
+	display:none;
+}
+input[type="checkbox"]:checked + label {
+	display:none;
+}
+label.checkbox {
+	font-family:Arial,Helvetica,sans-serif,fontawesome;
+	border:1px solid #aaa;
+	border-radius: 8px;
+	-webkit-border-radius: 8px;
+	padding:3px 5px;
 }

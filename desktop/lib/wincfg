@@ -8,7 +8,7 @@ image=''
 w=24
 h=24
 
-echo "<table id=\"wins\">"
+echo "<table id=wins>"
 
 wmctrl -l -p | sort |
 while read wid desktop pid user name; do
@@ -17,7 +17,7 @@ while read wid desktop pid user name; do
 		style=''
 		bgcolor="transparent"
 	else
-		style="style=\"background-color:$color1\";"
+		style="style=background-color:$color1;"
 		bgcolor="$color1"
 	fi
 
@@ -27,42 +27,37 @@ while read wid desktop pid user name; do
 
 	icon=$(xprop -id $wid | grep -E "^WM_CLASS.*=" | cut -f2 -d'"')
 
-	if [ -f files/icons/$icon-alt.png ]; then
-		image=files/icons/$icon-alt.png
-	elif [ -f files/icons/$icon.png ]; then
-		image=files/icons/$icon.png
-	else
-		image=$(find /usr/share/{icons,pixmaps}/ -name $icon.png | grep "$wx$h")
-		if [ -z "$image" ]; then
-			image=files/icons/application.png
-		else
-			cp $image files/icons
-			image=files/icons/$(basename $image)
-		fi
-	fi
+#	if [ -f files/icons/$icon-alt.png ]; then
+#		image=files/icons/$icon-alt.png
+#	elif [ -f files/icons/$icon.png ]; then
+#		image=files/icons/$icon.png
+#	else
+#		image=$(find /usr/share/{icons,pixmaps}/ -name $icon.png | grep "$wx$h")
+#		if [ -z "$image" ]; then
+#			image=files/icons/application.png
+#		else
+#			cp $image files/icons
+#			image=files/icons/$(basename $image)
+#		fi
+#	fi
 
 	echo "<tr $style>
+<td><a class=menu style=color:#DE5958; href=cgi?close=$wid>&#xf00d;</a></td>
 <td>
-<a href=\"cgi?close=$wid\">
-<img class=\"icon\"
-src=\"/files/icons/close0-alt.png\" border=\"0\" title=\"close window\">
-</a>
-</td>
-<td>
-<form action=\"cgi?\" method=\"get\">
-<button class=\"framed\" title=\"show window\" type=\"submit\" name=\"close\" value=\"$wid\">
-<table class=\"button\">
+<form action=cgi? method=get>
+<button class=framed title=show window type=submit name=close value=$wid>
+<table class=button>
 <tr>
-<td><img class=\"icon\" src=\"/$image\"/></td>
+<td><span>&#xf013;</span>
 <td>$name</td>
 </tr>
 </table>
 </button>
 </form>
 </td>
-<td title=\"command\">$cmd</td>
-<td><a href=\"cgi?pidinfo=$pid\" title=\"show process details\">$pid</a></td>
-<td><a href=\"cgi?wininfo=$wid\" title=\"show window details\">$wid</a></td>
+<td title=command>$cmd</td>
+<td><a href=cgi?pidinfo=$pid title=show process details>$pid</a></td>
+<td><a href=cgi?wininfo=$wid title=show window details>$wid</a></td>
 </tr>"
 done
 echo '</table>

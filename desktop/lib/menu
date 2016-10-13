@@ -9,14 +9,13 @@ list+="|scrcfg:screens"
 list+="|tagcfg:tags"
 list+="|netcfg:network"
 
-# using table makes it working with browsers with weak CSS support
 echo '</head>
 <body style="background-color:#ffffff">
 <header>
-<table style="width:100%;">
+<table style=width:100%;>
 <tr>
 <td>
-<table style="padding:4px;">
+<table class=menu>
 <tr>'
 if [ $# -eq 2 ]; then
 	ifs="$IFS"
@@ -25,20 +24,18 @@ if [ $# -eq 2 ]; then
 		tag=$(getvar_ ':' $item)
 		val=$(getval_ ':' $item)
 		if [ "$2" = "$tag" ]; then
-			bg="style=\"color:#fff\";text-decoration:underline;"
+			class="selected"
 		elif [ "$2" != "$tag" -a "$tag" = "home" ]; then
-			bg="style=\"color:#304A67\";text-decoration:underline;"
+			class="home"
 		else
-			bg="style=\"color:#111\";text-decoration:none;"
+			class="menu"
 		fi
 		if [ "$tag" = "home" ]; then
-			echo "<td style=\"padding:8px;\">
-<label class=\"icon\">
-<a $bg class=\"menu\" href=\"cgi?$tag\">&#xf015;</a></td>
-</label>"
+			echo "<td class=menu><label class=icon>
+<a class=$class href=cgi?$tag>&#xf015;</a></td></label>"
 		else
-			echo "<td style=\"padding:8px;\">
-<a $bg class=\"menu\" href=\"cgi?$tag\"><b>$val</b></a></td>"
+			echo "<td class=menu>
+<a class=$class href=cgi?$tag><b>$val</b></a></td>"
 		fi
 	done
 	IFS="$ifs"
