@@ -17,17 +17,22 @@ for scr in $(ls -1 ~/.yawm); do
 			echo "<tr>
 <td><input type=text name=$i value=$tag></td>
 <td>
-<button class=image style=color:#555; type=reset value=reset>&#xf021;</button>
+<button class=symbol style=color:#555; type=reset value=reset>&#xf021;</button>
 </td>
 <td>
-<label class=checkbox style='color:#DE5958;border:1px solid #aaa;'>
-<input type=checkbox name=$i.del>&#xf014;</label>
+<div id=toggle>
+<label title='mark for deletion'>
+<input type=checkbox name=$i.del hidden><span>&#xf014;</span>
+</label>
+</div>
 </td>
 </tr>"
 		done
 	echo '<tr>
-<td><input type=submit value=new name=tag></td>
-<td><input type=submit value=apply></td>
+<td>
+<button class=symbol type=submit value=new name=tag title="new tag">&#xf067;</button>
+</td>
+<td><input class=symbol type=submit value=&#xf0c7; title="apply canges"></td>
 </tr>
 </table>
 </td></tr>

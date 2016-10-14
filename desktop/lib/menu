@@ -31,7 +31,7 @@ if [ $# -eq 2 ]; then
 			class="menu"
 		fi
 		if [ "$tag" = "home" ]; then
-			echo "<td class=menu><label class=icon>
+			echo "<td class=menu><label class=symbol>
 <a class=$class href=cgi?$tag>&#xf015;</a></td></label>"
 		else
 			echo "<td class=menu>

@@ -56,11 +56,11 @@ echo "<form action=cgi>
 <input name=type type=hidden value=2>
 <td $class style=text-align:center;color:$fg; title=wireless>&#xf1eb;</td>
 <td $class>$iface</td>
-<td $class></td>
+<td $class style=color:#aaa;>&nbsp;&nbsp;&#xf00c;</td>
 <td $class><input $ip4style name=inet value=$ip readonly></td>
 <td $class><input $ip4style name=nmask value=$mask readonly></td>
 <td $class><input $ip4style name=bcast value=$bcast readonly></td>
-<td $class><input $recstyle></td>
+<td $class><input class=symbol $recstyle></td>
 <td $class></td>"
 		else
 echo "<form action=cgi>
@@ -70,13 +70,19 @@ echo "<form action=cgi>
 <td $class style=text-align:center;color:$fg; title=wired>&#xf1e6;</td>
 <td $class >$iface</td>
 <td $class>
-<input type=checkbox name=auto title=automatic configuration>
+<div id=ckbtn>
+<label title='mark for automatic configuration'>
+<input type=checkbox name=auto hidden><span>&nbsp;&nbsp;&#xf00c;</span>
+</label>
+</div>
 </td>
 <td $class><input $ip4style name=inet value=$ip></td>
 <td $class><input $ip4style name=nmask value=$mask></td>
 <td $class><input $ip4style name=bcast value=$bcast></td>
-<td $class><input $resstyle></td>
-<td $class><input type=submit value=&#xf0c7; $color title=apply changes></td>"
+<td $class><input class=symbol $resstyle></td>
+<td $class>
+<input class=symbol type=submit value=&#xf0c7; $color title='apply changes'>
+</td>"
 		fi
 echo '</form>
 </tr>'

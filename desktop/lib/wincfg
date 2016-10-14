@@ -26,29 +26,24 @@ while read wid desktop pid user name; do
 	fi
 
 	icon=$(xprop -id $wid | grep -E "^WM_CLASS.*=" | cut -f2 -d'"')
-
-#	if [ -f files/icons/$icon-alt.png ]; then
-#		image=files/icons/$icon-alt.png
-#	elif [ -f files/icons/$icon.png ]; then
-#		image=files/icons/$icon.png
-#	else
-#		image=$(find /usr/share/{icons,pixmaps}/ -name $icon.png | grep "$wx$h")
-#		if [ -z "$image" ]; then
-#			image=files/icons/application.png
-#		else
-#			cp $image files/icons
-#			image=files/icons/$(basename $image)
-#		fi
-#	fi
-
+	case "$icon" in
+	*[Tt]erm*) glyph="[&#xf120;";;
+	[Cc][Pp][Uu]*|*[Mm]on*) glyph="&#xf1fe;";;
+	*[Dd]ict*) glyph="&#xf02d;";;
+	[Nn]avigator|[Bb]rowser) glyph="&#xf0ac;";;
+	[Cc]hrom*) glyph="&#xf268;";;
+	[Ff]irefox) glyph="&#xf269;";;
+	*[Cc]lock*) glyph="&#xf017;";;
+	*) glyph="&#xf013;";;
+	esac
 	echo "<tr $style>
-<td><a class=menu style=color:#DE5958; href=cgi?close=$wid>&#xf00d;</a></td>
+<td><a class=symbol style=color:#DE5958; href=cgi?close=$wid>&#xf00d;</a></td>
 <td>
 <form action=cgi? method=get>
 <button class=framed title=show window type=submit name=close value=$wid>
 <table class=button>
 <tr>
-<td><span>&#xf013;</span>
+<td><span>$glyph</span>
 <td>$name</td>
 </tr>
 </table>

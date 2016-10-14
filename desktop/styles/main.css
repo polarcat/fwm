@@ -18,24 +18,39 @@ body {
 	text-align:left;
 	font-family:Arial,Helvetica,sans-serif,fontawesome;
 }
-table {
-	border:0;
-	padding:0;
-	border-spacing:0.5em 0; /* horz, vert*/
-}
 input {
-	font-family:Arial,Helvetica,sans-serif,fontawesome;
+	font-family:Arial,Helvetica,sans-serif;
 	border:1px solid #aaa;
-	border-radius: 8px;
-	-webkit-border-radius: 8px;
+	border-radius:8px;
+	-webkit-border-radius:8px;
 	padding:3px 5px;
+}
+input.symbol {
+	font-family:fontawesome;
 }
 button {
-	font-family:Arial,Helvetica,sans-serif,fontawesome;
+	font-family:fontawesome;
 	border:1px solid #aaa;
-	border-radius: 8px;
-	-webkit-border-radius: 8px;
+	border-radius:8px;
+	-webkit-border-radius:8px;
 	padding:3px 5px;
+}
+button.symbol {
+	font-family:fontawesome;
+}
+button.framed {
+	width:100%;
+	height:100%;
+	color:#101010;
+	border:1px solid #6993C1;
+	background-color:transparent
+}
+button.image {
+	display:inline-block;
+	height:100%;
+	width:100%;
+	padding:0px;
+	margin:0px;
 }
 a:link.selected {
 	color:#fff;
@@ -97,13 +112,35 @@ a:active.menu {
 	background-color:transparent;
 	text-decoration:underline
 }
+a:link.symbol {
+	color:#333;
+	background-color:transparent;
+	text-decoration:none
+}
+a:visited.symbol {
+	color:#333;
+	background-color:transparent;
+	text-decoration:none
+}
+a:hover.symbol {
+	color:#333;
+	background-color:transparent;
+	text-decoration:none
+}
+a:active.symbol {
+	color:#333;
+	background-color:transparent;
+	text-decoration:none
+}
+table {
+	border:0;
+	padding:0;
+	border-spacing:0.5em 0; /* horz, vert*/
+}
 table.menu {
 	border-spacing:16px 0px;
 	border-collapse:separate;
 	background-color:transparent;
-}
-td.menu {
-	text-align:center;
 }
 table.button {
 	border-spacing:0.1em 0; /* horz, vert*/
@@ -117,6 +154,13 @@ table.tags {
 	border-spacing:0 0; /* horz, vert*/
 	border-collapse:separate;
 	border:0px solid #6993C1;
+}
+td {
+	border:2px solid transparent;
+	text-align:left
+}
+td.menu {
+	text-align:center;
 }
 td.bright {
 	color:#303030;
@@ -135,28 +179,10 @@ td.even {
 td.odd {
 	background-color:transparent;
 }
-td {
-	border:2px solid transparent;
-	text-align:left
-}
 td.bgvoid {
 	color:#89b3e1;
 	background-color:#89b3e1;
 	text-align:left
-}
-button.framed {
-	width:100%;
-	height:100%;
-	color:#101010;
-	border:1px solid #6993C1;
-	background-color:transparent
-}
-button.image {
-	display:inline-block;
-	height:100%;
-	width:100%;
-	padding:0px;
-	margin:0px;
 }
 img.icon {
 	width:12px;
@@ -205,21 +231,82 @@ div.header {
 div.pad {
 	border:0px;
 }
-label.icon {
+label.symbol {
 	font-family:fontawesome;
 	font-size:32px;
 	color:#86B280;
 }
-input[type="checkbox"] + label {
-	display:none;
-}
-input[type="checkbox"]:checked + label {
-	display:none;
-}
 label.checkbox {
-	font-family:Arial,Helvetica,sans-serif,fontawesome;
+	font-family:fontawesome;
 	border:1px solid #aaa;
-	border-radius: 8px;
-	-webkit-border-radius: 8px;
+	border-radius:8px;
+	-webkit-border-radius:8px;
 	padding:3px 5px;
 }
+#toggle {
+	font-family:fontawesome;
+	border:1px solid #aaa;
+	border-radius:8px;
+	-webkit-border-radius:8px;
+	padding:3px 5px;
+}
+#toggle:hover {
+	color:#DE5958;
+	border:1px solid red;
+}
+#toggle input:checked + span {
+	color:red;
+}
+#ckbtn {
+	font-family:fontawesome;
+/*
+	border:1px solid #aaa;
+	border-radius:16px;
+	-webkit-border-radius:16px;
+*/
+	color:transparent;
+}
+#ckbtn:hover {
+	color:#86B280;
+/*
+	border:1px solid #86B280;
+*/
+}
+#ckbtn input:checked + span {
+	color:green;
+}
+/*
+example:
+#<input type=checkbox id=\"ckbtn\"/ value=auto>
+#<label id=btn for=\"ckbtn\"></label>
+#btn {
+	font-family:fontawesome;
+	position:relative;
+	border:1px solid #aaa;
+	border-radius:1px;
+	-webkit-border-radius:1px;
+	background:white;
+}
+#btn:before {
+	visibility:hidden;
+	content:'\f10c';
+}
+#ckbtn {
+	display:none;
+	content:'\f096';
+}
+#ckbtn:checked + #btn:after {
+	font-family:fontawesome;
+	position:absolute;
+	border:0px solid #aaa;
+	border-radius:1px;
+	-webkit-border-radius:1px;
+	padding:0px 5px;
+	background:blue;
+	top:0px;
+	left:0px;
+	right:0px;
+	bottom:0px;
+	content:'\f00c';
+}
+*/

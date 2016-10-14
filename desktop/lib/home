@@ -40,7 +40,7 @@ dedup()
 
 . $base_/menu "home" "home"
 
-echo "<label class=icon style=font-size:22px;>&#xf0c0"
+echo "<label class=symbol style=font-size:22px;>&#xf0c0"
 dedup $(who -q)
 echo "</label><br><br>"
 who -a -H > files/who.txt
