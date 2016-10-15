@@ -113,21 +113,25 @@ a:active.menu {
 	text-decoration:underline
 }
 a:link.symbol {
+	font-family:fontawesome;
 	color:#333;
 	background-color:transparent;
 	text-decoration:none
 }
 a:visited.symbol {
+	font-family:fontawesome;
 	color:#333;
 	background-color:transparent;
 	text-decoration:none
 }
 a:hover.symbol {
+	font-family:fontawesome;
 	color:#333;
 	background-color:transparent;
 	text-decoration:none
 }
 a:active.symbol {
+	font-family:fontawesome;
 	color:#333;
 	background-color:transparent;
 	text-decoration:none
