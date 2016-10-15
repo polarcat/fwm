@@ -27,6 +27,7 @@ input {
 }
 input.symbol {
 	font-family:fontawesome;
+	color:#333;
 }
 button {
 	font-family:fontawesome;
@@ -37,6 +38,7 @@ button {
 }
 button.symbol {
 	font-family:fontawesome;
+	color:#333;
 }
 button.framed {
 	width:100%;
@@ -150,6 +152,7 @@ table.button {
 	border-spacing:0.1em 0; /* horz, vert*/
 }
 table.legend {
+	width:100%;
 	border-spacing:0 0; /* horz, vert*/
 	border-collapse:separate;
 	border:1px solid #6993C1;
@@ -158,6 +161,12 @@ table.tags {
 	border-spacing:0 0; /* horz, vert*/
 	border-collapse:separate;
 	border:0px solid #6993C1;
+}
+table.info {
+	width:100%;
+	border-spacing:0 0; /* horz, vert*/
+	border-collapse:separate;
+	border:1px solid #6993C1;
 }
 td {
 	border:2px solid transparent;
@@ -177,16 +186,22 @@ td.bgleft {
 	background-color:#89b3e1;
 	text-align:left
 }
+td.info {
+	border:0px transparent;
+	color:#89b3e1;
+	background-color:transparent;
+	text-align:left
+}
 td.even {
 	background-color:#eee;
 }
 td.odd {
 	background-color:transparent;
 }
-td.bgvoid {
-	color:#89b3e1;
-	background-color:#89b3e1;
-	text-align:left
+td.split {
+	border:1px solid #89b3e1;
+	border-width: 0 0 0 1px;
+	background-color:#eee;
 }
 img.icon {
 	width:12px;
@@ -235,6 +250,9 @@ div.header {
 div.pad {
 	border:0px;
 }
+div.verticalLine {
+	border-left:thick solid #ff0000;
+}
 label.symbol {
 	font-family:fontawesome;
 	font-size:32px;
@@ -279,6 +297,26 @@ label.checkbox {
 #ckbtn input:checked + span {
 	color:green;
 }
+span.symbol {
+	font-family:fontawesome;
+	color:#333;
+}
+.details,
+.show,
+.hide:target {
+	display:none;
+}
+.hide:target + .show,
+.hide:target ~ .details {
+	display:block;
+}
+/* collapsible example:
+<div>
+<a id=hide1 href=#hide1 class=hide>+ show more</a>
+<a id=show1 href=#show1 class=show>- show more</a>
+<div class=details>more</div>
+</div>
+*/
 /*
 example:
 #<input type=checkbox id=\"ckbtn\"/ value=auto>

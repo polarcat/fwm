@@ -157,12 +157,31 @@ case "$data" in
 	. $base_/netcfg > $dir_/netcfg.html
 	echo "$dir_/netcfg.html"
 	;;
+/cgi?cmd=netcfg*)
+	data=$(getval_ '&' $data)
+	dev=$(index_ ' ' 1 $data)
+	dev=$(getval_ '=' $dev)
+	type=$(index_ ' ' 2 $data)
+	type=$(getval_ '=' $type)
+	trace_ "DEV: $dev TYPE: $type"
+	if [ -n "$type" -a $type -eq 2 ]; then
+		. $base_/netcfg "$type" "$dev" > $dir_/netcfg.html
+	elif [ -n "$type" -a $type -eq 1 ]; then
+		fixme="wired network setup"
+	fi
+	echo $dir_/netcfg.html
+	;;
+'post.wpa'*=*)
+	args=$(getval_ '&' $data) # strip post.wpa
+	echo $dir_/error.html
+	;;
 'post.run.'*=*)
 	data=$(getval_ '.' $data) # strip post
 	data=$(getval_ '.' $data) # strip run
 	cmd=$(getvar_ '=' $data)
 	arg=$(getval_ '=' $data)
 	trace_ "exec: $arg $cmd"
+	# FIXME: command should be in white-list
 	if [ -n "$arg" -a "$arg" == "term" ]; then
 		exec xterm -e "$cmd" >/dev/null &
 	else
