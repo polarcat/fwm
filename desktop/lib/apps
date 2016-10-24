@@ -11,7 +11,7 @@ mkdir -p files/icons
 
 . $base_/menu "apps" "apps"
 
-echo "<table id=\"apps\">"
+echo "<table id=apps>"
 
 ls -1 $appsdir/*.desktop | while read file; do
 	i=$((i + 1))
@@ -30,7 +30,7 @@ ls -1 $appsdir/*.desktop | while read file; do
 		style=''
 		bgcolor="transparent"
 	else
-		style="style=\"background-color:$color1\";"
+		style="style=background-color:$color1;"
 		bgcolor="$color1"
 	fi
 
@@ -55,18 +55,18 @@ ls -1 $appsdir/*.desktop | while read file; do
 
 	echo "<tr $style>
 <td>
-<form action=\"cgi?\" method=\"post\">
-<button class=\"framed\" title=\"run command\" type=\"submit\" name=\"post.run.$cmd\" value=\"$arg\">
-<table class=\"button\">
+<form action=cgi? method=post>
+<button class=framed title='run command' type=submit name=post.run.$cmd value=$arg>
+<table class=button>
 <tr>
-<td><img class=\"icon\" src=\"/$image\"/></td>
+<td><img class=\"icon\" src=/$image></td>
 <td>$cmd</td>
 </tr>
 </table>
 </button>
 </form>
 </td>
-<td>$name (<a href=\"cgi?cache=$file\" title=\"show details\">$comment</a>)</td>
+<td>$name (<a href=cgi?cache=$file title='show details'>$comment</a>)</td>
 </tr>"
 done
 echo '</table>

@@ -17,7 +17,7 @@ for scr in $(ls -1 ~/.yawm); do
 			echo "<tr>
 <td><input type=text name=$i value=$tag></td>
 <td>
-<button class=symbol style=color:#555; type=reset value=reset>&#xf021;</button>
+<button class=symbol type=reset value=reset>&#xf0e2;</button>
 </td>
 <td>
 <div id=toggle>
