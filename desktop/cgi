@@ -173,7 +173,8 @@ case "$data" in
 	;;
 'post.wpa'*=*)
 	args=$(getval_ '&' $data) # strip post.wpa
-	echo $dir_/error.html
+	. $base_/wpacli $args > $dir_/wpacli.html
+	echo $dir_/wpacli.html
 	;;
 'post.run.'*=*)
 	data=$(getval_ '.' $data) # strip post
