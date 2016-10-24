@@ -36,6 +36,8 @@
 #define CGI_TIMEOUT 30000 /* ms */
 #endif
 
+static int timeout;
+
 #define MAXBUF 64
 
 struct context {
@@ -524,10 +526,16 @@ clean:
 int main(int argc, char *argv[])
 {
 	const char *basedir, *portstr;
+	const char *timeoutstr;
 	int n, srv, tmp, port;
 	pid_t pid;
 	struct sockaddr_in addr;
 	struct context ctx;
+
+	if ((timeoutstr = getenv("DESKD_TIMEOUT")))
+		timeout = atoi(timeoutstr) * 1000;
+	if (!timeout)
+		timeout = CGI_TIMEOUT;
 
 	eval(!(portstr = getenv("DESKD_PORT")), return 1);
 	port = atoi(portstr);
