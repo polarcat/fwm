@@ -30,7 +30,7 @@ repoll:
 	ret = poll(&pfd, 1, timeout);
 	if (ret == 0) {
 		errno = EAGAIN;
-		ee("poll() timeout\n");
+		ee("poll(%d,%d) timeout\n", fd, timeout);
 		return -1;
 	}
 
@@ -75,7 +75,7 @@ size_t pullv(int fd, const struct iovec *iov, int8_t iovcnt, int timeout)
 {
 	int16_t events;
 
-	events = pollfd(fd, POLLIN, POLLFD_TIMEOUT);
+	events = pollfd(fd, POLLIN, timeout);
 	if (events < 0)
 		return -1;
 
