@@ -1,10 +1,5 @@
 #!/bin/bash
 
-. $base_/menu "network" "netcfg"
-echo '<br>'
-
-trace_ "3: $3"
-
 iface=$(getval_ '=' $1)
 net=$(getval_ '=' $2)
 key=$(getval_ '=' $3)
@@ -15,17 +10,24 @@ nok=1
 
 failed()
 {
-	echo "<span class=symbol style=color:red>
-<strong>$net</strong>: connection failed</span><br><pre>"
+	local msg="<span class=symbol style=color:red><strong>$net</strong>: connection failed</span>"
+	local astyle="style=text-decoration:none;"
+
+	echo "<div>
+<a class=hide id=hidewpacli href=#hidewpacli $astyle>&#xf0da; $msg</a>
+<a class=show id=showwpacli href=#showwpacli $astyle>&#xf0d7; $msg</a>
+<div class=details style=margin:4px;>
+<pre>"
 	cat $cfg
 	cat $err
-	echo '</pre>'
+	echo '</pre>
+</div>
+</div><br>'
 }
 
 waitcon()
 {
 	while read line; do
-		trace_ "LINE: $line"
 		if [ "$line" = "wpa_state=COMPLETED" ]; then
 			nok=0
 		fi
@@ -37,30 +39,21 @@ echo "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=wheel" > $cfg
 chmod 0600 $cfg
 if wpa_passphrase $net $key 2>$err 1>>$cfg; then
 	if sudo /etc/wpa_supplicant/wpa_reconfigure $PWD/$cfg >$err 2>&1; then
-		if wpa_cli status >$err 2>&1; then
-			for i in $(seq 1 20); do
-				trace_ "ATTEMPT $i"
+		for i in 1 2 3 4 5 6 7 8; do
+			if ! wpa_cli status >$err 2>&1; then
+				break
+			else
 				waitcon
 				if [ $nok -eq 0 ]; then
 					break
 				fi
-				sleep 1
-			done
-		fi
+			fi
+			sleep 1
+		done
 	fi
 fi
 
-if [ $nok -eq 0 ]; then
-	echo "<span>OK</span><br>"
-else
+if [ $nok -ne 0 ]; then
+	status=1
 	failed
 fi
-
-echo "<form action=cgi>
-<input name=cmd type=hidden value=netcfg>
-<input name=dev type=hidden value=$iface>
-<input name=type type=hidden value=2>
-<button class=symbol type=submit title='back to settings'>&#xf0e2</button>
-</form>
-</body>
-</html>"
