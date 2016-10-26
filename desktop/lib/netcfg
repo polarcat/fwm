@@ -20,6 +20,7 @@ getaddr()
 
 network=''
 state=''
+activefg='#304A67'
 file=$pwd/files/wlanstatus.txt
 
 getname()
@@ -34,8 +35,10 @@ getname()
 		wpa_state=*) state=$(getval_ '=' $line);;
 		esac
 	done < $file
-	if [ "$state" != "wpa_state=COMPLETED" ]; then
+	if [ "$state" != "COMPLETED" ]; then
 		state='&#xf128;'
+		activefg='#DE5958'
+		network=$state
 	fi
 }
 
@@ -103,18 +106,18 @@ for iface in *; do
 <input name=dev type=hidden value=$iface>
 <input name=type type=hidden value=2>
 <td $class style=text-align:center; title=wireless>
-<span class=symbol>&#xf1eb;</span>
+<span class=symbol style=color:$activefg;>&#xf1eb;</span>
 </td>
 <td $class>
 <a class=menu href=/files/${iface}-info.txt title=details>
-<span>&nbsp;<b>$iface</b></span>
+<span>&nbsp;<b style=color:$activefg;>$iface</b></span>
 </a>
-<td $class >
+<td $class>
 <a class=menu href=/files/wlanstatus.txt title=details>
-<span>&nbsp;<b>$network</b></span>
+<span>&nbsp;<b style=color:$activefg;>$network</b></span>
 </a>
 </td>
-<td $class style=color:#aaa;>&nbsp;&nbsp;&#xf00c;</td>
+<td $class><div id=ckbtn1>&#xf00c;</div></td>
 <td $class><input $ip4style name=inet value=$ip readonly></td>
 <td $class><input $ip4style name=nmask value=$mask readonly></td>
 <td $class><input $ip4style name=bcast value=$bcast readonly></td>"
@@ -126,7 +129,7 @@ for iface in *; do
 </td>"
 	fi
 echo "<td $class></td>"
-		else
+		else # wired interface
 			echo "<form action=cgi>
 <input name=cmd type=hidden value=netcfg>
 <input name=dev type=hidden value=$iface>
@@ -139,7 +142,7 @@ echo "<td $class></td>"
 <td $class>
 <div id=ckbtn>
 <label title='mark for automatic configuration'>
-<input type=checkbox name=auto hidden><span>&nbsp;&nbsp;&#xf00c;</span>
+<input type=checkbox name=auto hidden><span>&#xf00c;</span>
 </label>
 </div>
 </td>
