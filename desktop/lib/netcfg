@@ -21,10 +21,12 @@ getaddr()
 network=''
 state=''
 activefg='#304A67'
+wlanip=''
 file=$pwd/files/wlanstatus.txt
 
 getname()
 {
+	wlanip=''
 	if ! wpa_cli status >$file 2>&1; then
 		network='<span style=color:red;>error</span>'
 		return
@@ -33,6 +35,7 @@ getname()
 		case $line in
 		ssid=*) network=$(getval_ '=' $line);;
 		wpa_state=*) state=$(getval_ '=' $line);;
+		ip_address=*) wlanip=$(getval_ '= ' $line);;
 		esac
 	done < $file
 	if [ "$state" != "COMPLETED" ]; then
@@ -91,13 +94,22 @@ for iface in *; do
 		class="class=odd"
 	fi
 	i=$((i + 1))
-	getname
-	if [ -z "$network" ]; then
-		network="<span syle=color:red;>$state</span>"
-	fi
 	$pwd/$base_/getip $iface | while read ip mask bcast hw; do
-	echo '<tr>'
+		echo '<tr>'
 		if [ -d $iface/wireless ]; then
+			for n in 1 2 3 4 5 6 7 8; do
+				getname
+				if [ -n "$wlanip" ]; then
+					ip=$wlanip
+					break
+				fi
+				sleep 1
+			done
+			if [ -z "$ip" ]; then
+				state='&#xf128;'
+				activefg='#DE5958'
+				network=$state
+			fi
 			echo "List of $iface capabilities
 " > $pwd/files/$iface-info.txt
 			wlaninfo >> $pwd/files/$iface-info.txt
