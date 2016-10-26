@@ -1,0 +1,18 @@
+#!/bin/sh
+
+if [ $# -eq 0 ]; then
+	echo "Usage: $0 <config|'default'>"
+elif [ "$1" = "default" ]; then
+	pwd=$(dirname $0)
+	cd $pwd
+	ln -sf wpa_supplicant.default wpa_supplicant.conf
+	if ! wpa_cli status; then
+		/etc/init.d/wpa_supplicant restart
+	fi
+else
+	pwd=$(dirname $0)
+	cd $pwd
+	wpa_cli flush
+	ln -sf $1 wpa_supplicant.conf
+	wpa_cli reconfigure
+fi
