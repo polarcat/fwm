@@ -287,9 +287,9 @@ label.checkbox {
 	color:red;
 }
 #ckbtn1 {
+	text-align:center;
 	width:16px;
 	height:16px;
-	margin:4px 4px;
 	font-family:fontawesome;
 	font-size:12px;
 	-webkit-border-radius:6px;
@@ -304,9 +304,9 @@ label.checkbox {
 	user-select:none;
 }
 #ckbtn {
+	text-align:center;
 	width:16px;
 	height:16px;
-	margin:4px 4px;
 	font-family:fontawesome;
 	font-size:12px;
 	-webkit-border-radius:6px;
