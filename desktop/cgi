@@ -173,8 +173,16 @@ case "$data" in
 	;;
 'post.wpa'*=*)
 	args=$(getval_ '&' $data) # strip post.wpa
+	dev=$(index_ ' ' 1 $args)
+	dev=$(getval_ '=' $dev)
+	status=0
 	. $base_/wpacli $args > $dir_/wpacli.html
-	echo $dir_/wpacli.html
+	if [ $status -ne 0 ]; then
+		. $base_/netcfg 2 $dev > $dir_/netcfg.html
+	else
+		. $base_/netcfg > $dir_/netcfg.html
+	fi
+	echo $dir_/netcfg.html
 	;;
 'post.run.'*=*)
 	data=$(getval_ '.' $data) # strip post

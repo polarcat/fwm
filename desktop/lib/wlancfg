@@ -1,12 +1,13 @@
 #!/bin/bash
 
+cat $dir_/wpacli.html
+
 wpa_cli scan $iface 1>&2
 sleep 2
 echo "<form action=cgi>
 <input name=cmd type=hidden value=netcfg>
 <input name=dev type=hidden value=$iface>
 <input name=type type=hidden value=2>
-<br>
 <b>
 <button class=symbol type=submit title='re-scan wireless networks'>
 &#xf1eb;&nbsp;&nbsp;&#xf021;
