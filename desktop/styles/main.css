@@ -267,10 +267,17 @@ label.checkbox {
 }
 #toggle {
 	font-family:fontawesome;
+	color:#333;
 	border:1px solid #aaa;
 	border-radius:8px;
 	-webkit-border-radius:8px;
 	padding:3px 5px;
+	-webkit-user-select:none;
+	-khtml-user-select:none;
+	-moz-user-select:none;
+	-ms-user-select:none;
+	-o-user-select:none;
+	user-select:none;
 }
 #toggle:hover {
 	color:#DE5958;
@@ -279,20 +286,42 @@ label.checkbox {
 #toggle input:checked + span {
 	color:red;
 }
-#ckbtn {
+#ckbtn1 {
+	width:16px;
+	height:16px;
+	margin:4px 4px;
 	font-family:fontawesome;
-/*
+	font-size:12px;
+	-webkit-border-radius:6px;
+	border-radius:6px;
 	border:1px solid #aaa;
-	border-radius:16px;
-	-webkit-border-radius:16px;
-*/
+	color:#aaa;
+	-webkit-user-select:none;
+	-khtml-user-select:none;
+	-moz-user-select:none;
+	-ms-user-select:none;
+	-o-user-select:none;
+	user-select:none;
+}
+#ckbtn {
+	width:16px;
+	height:16px;
+	margin:4px 4px;
+	font-family:fontawesome;
+	font-size:12px;
+	-webkit-border-radius:6px;
+	border-radius:6px;
+	border:1px solid #aaa;
 	color:transparent;
+	-webkit-user-select:none;
+	-khtml-user-select:none;
+	-moz-user-select:none;
+	-ms-user-select:none;
+	-o-user-select:none;
+	user-select:none;
 }
 #ckbtn:hover {
 	color:#86B280;
-/*
-	border:1px solid #86B280;
-*/
 }
 #ckbtn input:checked + span {
 	color:green;
@@ -301,14 +330,82 @@ span.symbol {
 	font-family:fontawesome;
 	color:#333;
 }
+.static {
+	color:black;
+	font-family:fontawesome;
+	font-size:16px;
+	width:16px;
+	height:16px;
+	background-color:transparent;
+	display:block;
+	margin:0;
+	padding:0;
+	border:1px solid #eee;
+	border-radius:50%;
+	border-bottom:1px solid #777;
+	border-left:1px solid #777;
+	border-top:1px solid #777;
+	border-right:1px solid #777;
+}
+.loader {
+	font-family:fontawesome;
+	font-size:16px;
+	margin:0;
+	padding:0;
+	border:1px solid #eee;
+	border-radius:50%;
+	border-bottom:1px solid #555;
+	border-left:1px solid #555;
+	border-top:1px solid #555;
+	border-right:1px solid #555;
+	width:16px;
+	height:16px;
+	-webkit-animation:spin 1s linear infinite;
+	animation:spin 1s linear infinite;
+}
+/* loader example
+<div>
+<a class=hide id=hidespin href=#hidespin><div class="static">
+<b style=color:red;>.</b></div></a>
+<a class=show id=showspin href=#showspin><div class="loader">
+<b style=color:red;>.</b></div></a>
+</div>
+<br>
+*/
+@-webkit-keyframes spin {
+	0% { -webkit-transform: rotate(0deg); }
+	100% { -webkit-transform: rotate(360deg); }
+}
+
+@keyframes spin {
+	0% { transform: rotate(0deg); }
+	100% { transform: rotate(360deg); }
+}
+.hide:link {
+	text-decoration:none;
+}
+.hide:visited {
+	background-color:transparent;
+	text-decoration:none;
+}
+.hide:hover {
+	background-color:transparent;
+	text-decoration:none;
+}
+.hide:active {
+	background-color:transparent;
+	text-decoration:none;
+}
 .details,
 .show,
 .hide:target {
 	display:none;
+	text-decoration:none;
 }
 .hide:target + .show,
 .hide:target ~ .details {
 	display:block;
+	text-decoration:none;
 }
 /* collapsible example:
 <div>
