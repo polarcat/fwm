@@ -8,39 +8,35 @@ for scr in $(ls -1 ~/.yawm); do
 	echo "<form action=cgi>
 <input name=cmd type=hidden value=tagcfg>
 <input name=scr type=hidden value=$scr>
-<table class=legend id=legend$scr>
-<tr><td class=bright>screen $scr</td></tr>
-<tr><td>
-<table class=tags border=0 id=scr$scr>"
-		for i in $(ls -1 ~/.yawm/$scr/tags/); do
-			tag=$(cat ~/.yawm/$scr/tags/$i/.name)
-			echo "<tr>
-<td><input type=text name=$i value=$tag></td>
+<table class=blank style=border-spacing:4px;>
+<tr><td class=info>screen $scr</td></tr>"
+	for i in $(ls -1 ~/.yawm/$scr/tags/); do
+		tag=$(cat ~/.yawm/$scr/tags/$i/.name)
+		echo "<tr>
 <td>
-<button class=symbol type=reset value=reset>&#xf0e2;</button>
+<div class=input>
+<input type=text style=border:none; name=$i value=$tag>
+<button class=symbol style=border:none; type=reset value=reset>&#xf0e2;</button>
+</div>
 </td>
 <td>
-<div id=toggle>
-<label title='mark for deletion'>
-<input type=checkbox name=$i.del hidden><span>&#xf014;</span>
-</label>
+<div class=checkbox title='mark for deletion'>
+<input type=checkbox id=trash$scr$i name=$i.del hidden>
+<label for=trash$scr$i>&#xf014;</label>
 </div>
 </td>
 </tr>"
-		done
+	done
 	echo '<tr>
 <td>
 <button class=symbol type=submit value=new name=tag title="new tag">&#xf067;</button>
+<input class=symbol type=submit value=&#xf0c7; title="apply canges">
 </td>
-<td><input class=symbol type=submit value=&#xf0c7; title="apply canges"></td>
 </tr>
 </table>
-</td></tr>
-</table>
-</form>
-<br>'
+</form>'
 	;;
 	esac
 done
-echo '</body>
-</html>'
+
+. $base_/tail

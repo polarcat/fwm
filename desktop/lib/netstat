@@ -44,14 +44,20 @@ route()
 	echo "</tr>"
 }
 
-echo "<b>routes</b><br><br>
+echo "<table class=blank>
+<tr><td><b>routes</b><br><br></td></tr>
+<tr>
+<td>
 <table class=legend>"
 while read line; do
 	route $line
 done < /proc/net/route
 echo "</table>
-<br>
-<b>connections</b><br><br>
+</td>
+</tr>
+<tr><td><br><b>connections</b><br><br></td></tr>
+<tr>
+<td>
 <table class=legend>
 <tr>
 <td class=bgleft>proto</td>
@@ -74,10 +80,13 @@ netstat -a -n -p | while read proto rq sq laddr raddr state pid; do
 <td $class>$raddr</td>
 <td $class>$state</td>
 <td $class>$pid</td>
-<tr>"
+</tr>"
 		;;
 	esac
 done
 echo '</table>
-</body>
-</html>'
+</td>
+</tr>
+</table>'
+
+. $base_/tail

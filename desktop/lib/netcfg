@@ -22,12 +22,11 @@ network=''
 state=''
 activefg='#304A67'
 wlanip=''
-file=$pwd/files/wlanstatus.txt
 
 getname()
 {
 	wlanip=''
-	if ! wpa_cli status >$file 2>&1; then
+	if ! wpa_cli status >$pwd/$1 2>&1; then
 		network='<span style=color:red;>error</span>'
 		return
 	fi
@@ -37,7 +36,7 @@ getname()
 		wpa_state=*) state=$(getval_ '=' $line);;
 		ip_address=*) wlanip=$(getval_ '= ' $line);;
 		esac
-	done < $file
+	done < $pwd/$1
 	if [ "$state" != "COMPLETED" ]; then
 		state='&#xf128;'
 		activefg='#DE5958'
@@ -70,111 +69,139 @@ modes
 ip4style="type=text maxlength=15 size=11"
 
 cd /sys/class/net/
-echo "<table class=legend id=devices>
+echo "<table class=blank>
 <tr>
-<td class=bgleft>type</td>
-<td class=bgleft>interface</td>
-<td class=bgleft>network</td>
-<td class=bgleft>auto</td>
-<td class=bgleft>address</td>
-<td class=bgleft>netmask</td>
-<td class=bgleft>broadcast</td>
-<td class=bgleft></td>
-<td class=bgleft></td>
-</tr>"
+<td>
+<table class=blank>
+<tr>
+<td class=info>interface</td>
+<td class=info>address</td>
+<td class=info>netmask</td>
+<td class=info>broadcast</td>
+<td class=info style=text-align:center;>
+<div class=tooltip>auto<span class=tooltiptext>automatic configuration</span>
+</div>
+</td>
+<td class=info></td>
+<td class=info style=text-align:center;>status</td>
+</tr>
+<tr><td></td></tr>"
+row=0
 for iface in *; do
 	type=0
 	read type < $iface/type
 	if [ $type -ne 1 ]; then
 		continue
 	fi
-	if [ $((i % 2)) -eq 0 ]; then
-		class="class=even"
-	else
-		class="class=odd"
-	fi
-	i=$((i + 1))
+	class=$(alter_ $row)
+	row=$((row + 1))
+	status=/files/${iface}-status.txt
 	$pwd/$base_/getip $iface | while read ip mask bcast hw; do
 		echo '<tr>'
 		if [ -d $iface/wireless ]; then
-			for n in 1 2 3 4 5 6 7 8; do
-				getname
+			type=2
+			title=wireless
+			glyph='&#xf1eb;'
+			disabled=disabled
+			checked=checked
+			readonly=readonly
+			cmd=iwup
+			for i in 1 2 3 4 5 6 7 8; do
+				getname $status
 				if [ -n "$wlanip" ]; then
 					ip=$wlanip
 					break
 				fi
 				sleep 1
 			done
-			if [ -z "$ip" ]; then
+			if [ -n "$ip" ]; then
+				input="class=active"
+				astyle="style=color:#2764a9;border-color:#2764a9;"
+			else
 				state='&#xf128;'
 				activefg='#DE5958'
 				network=$state
+				astyle="style=color:#333;"
 			fi
 			echo "List of $iface capabilities
 " > $pwd/files/$iface-info.txt
 			wlaninfo >> $pwd/files/$iface-info.txt
-			echo "<form action=cgi>
-<input name=cmd type=hidden value=netcfg>
-<input name=dev type=hidden value=$iface>
-<input name=type type=hidden value=2>
-<td $class style=text-align:center; title=wireless>
-<span class=symbol style=color:$activefg;>&#xf1eb;</span>
-</td>
-<td $class>
-<a class=menu href=/files/${iface}-info.txt title=details>
-<span>&nbsp;<b style=color:$activefg;>$iface</b></span>
-</a>
-<td $class>
-<a class=menu href=/files/wlanstatus.txt title=details>
-<span>&nbsp;<b style=color:$activefg;>$network</b></span>
-</a>
-</td>
-<td $class><div id=ckbtn1>&#xf00c;</div></td>
-<td $class><input $ip4style name=inet value=$ip readonly></td>
-<td $class><input $ip4style name=nmask value=$mask readonly></td>
-<td $class><input $ip4style name=bcast value=$bcast readonly></td>"
-	if [ -n "$1" -a $1 -eq 2 ]; then
-		echo "<td $class></td>"
-	else
+		else
+			type=1
+			title=wired
+			glyph='&#xf0e8;'
+			disabled=''
+			checked=''
+			readonly=''
+			cmd=ifup
+			read network < $iface/operstate
+			if [ "$network" = "up" ]; then
+				input="class=active"
+				network='&#xf0c1;'
+				astyle="style=color:#36a927;border-color:#36a927;"
+			else
+				network='&#xf127;'
+				astyle="style=color:#333;"
+			fi
+			ifconfig $iface >$pwd/$status 2>&1
+		fi
+		if [ "$ip" = '-' ]; then
+			ip=''
+		fi
+		if [ "$mask" = '-' ]; then
+			mask=''
+		fi
+		if [ "$bcast" = '-' ]; then
+			bcast=''
+		fi
 		echo "<td $class>
-<input class=symbol type=submit value=&#xf141; title=more>
-</td>"
-	fi
-echo "<td $class></td>"
-		else # wired interface
-			echo "<form action=cgi>
-<input name=cmd type=hidden value=netcfg>
-<input name=dev type=hidden value=$iface>
-<input name=type type=hidden value=1>
-<td $class style=text-align:center; title=wired>
-<span class=symbol>&#xf0e8;</span>
+<div>
+<a class=hide id=hide$iface href=#hide$iface $astyle>$glyph $iface</a>
+<div class=details>
+<table style=margin:0;padding:0;>
+<tr>
+<td>
+<a class=plain id=show$iface href=#show$iface $astyle>$glyph $iface &nbsp;</a>
 </td>
-<td $class >$iface</td>
-<td $class >&nbsp;local</td>
-<td $class>
-<div id=ckbtn>
-<label title='mark for automatic configuration'>
-<input type=checkbox name=auto hidden><span>&#xf00c;</span>
-</label>
+<td>
+<form action=cgi>
+<input type=hidden name=cmd value=ifdown>
+<input type=hidden name=dev value=$iface>
+<input class=symbol type=submit value=&#xf08b; title=disconnect>
+</form>
+</td>
+</tr>
+</table>
+</div>
 </div>
 </td>
-<td $class><input $ip4style name=inet value=$ip></td>
-<td $class><input $ip4style name=nmask value=$mask></td>
-<td $class><input $ip4style name=bcast value=$bcast></td>
-<td $class><input class=symbol type=reset value=&#xf0e2; title=reset></td>
-<td $class>
-<input class=symbol type=submit value=&#xf0c7; title='apply changes'>
-</td>"
-		fi
-		echo '</form>
-</tr>'
+<form action=cgi>
+<input type=hidden name=cmd value=$cmd>
+<input type=hidden name=dev value=$iface>
+<td $class><input $ip4style name=inet value='$ip' $readonly></td>
+<td $class><input $ip4style name=mask value='$mask' $readonly></td>
+<td $class><input $ip4style name=bcast value='$bcast' $readonly></td>
+<td $class><input type=checkbox name=auto $checked $disabled></td>
+<td $class style=text-align:center;>"
+	if [ $type -eq 1 ]; then
+		echo "<input class=symbol type=submit value=&#xf0c7; title=apply>"
+	else
+		echo "<input class=symbol type=submit value=&#xf021; title=scan>"
+	fi
+	echo "</td>
+<td $class style=text-align:center;>
+<a class=menu href=$status title=details>$network</a>
+</td>
+</form>
+</tr>"
 	done
 done
-echo '</table>'
+echo '</table>
+</td>
+</tr>'
 cd $pwd
 
-if [ $# -eq 2 -a $1 -eq 2 ]; then
-	echo '<br>'
+if [ $# -eq 2 ]; then
 	for i in 1 2 3; do # 3 attempts to recover
 		iface=$2
 		err=$dir_/${iface}.err
@@ -183,14 +210,19 @@ if [ $# -eq 2 -a $1 -eq 2 ]; then
 			. $base_/wlancfg
 			break
 		else
-			echo "<pre><strong>[$i] wpa_cli</strong>: "
+			echo "<tr><td></td></tr>
+<tr><td>
+<pre><strong>[$i] wpa_cli</strong>:"
 			cat $dir_/${iface}.err
 			echo -n "<strong>recovering...</strong>"
 			sudo /etc/wpa_supplicant/wpa_reconfigure default >$err 2>&1
-			echo '</pre>'
+			echo '</pre>
+</td>
+</tr>'
 		fi
 	done
 fi
 
-echo '</body>
-</html>'
+echo '</table>'
+
+. $base_/tail

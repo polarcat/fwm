@@ -8,8 +8,14 @@ image=''
 w=24
 h=24
 
-echo "<table id=wins>"
-
+echo "<table class=blank>
+<tr>
+<td class=info style=text-align:center;>&#xf057;</td>
+<td class=info>title</td>
+<td class=info>command</td>
+<td class=info>process</td>
+<td class=info>window</td>
+</tr>"
 wmctrl -l -p | sort |
 while read wid desktop pid user name; do
 	i=$((i + 1))
@@ -37,24 +43,25 @@ while read wid desktop pid user name; do
 	*) glyph="&#xf013;";;
 	esac
 	echo "<tr $style>
-<td><a class=symbol style=color:#DE5958; href=cgi?close=$wid>&#xf00d;</a></td>
-<td>
+<td class=symbol>
+<a class=symbol style=color:#DE5958; href=cgi?close=$wid>&#xf00d;</a>
+</td>
+<td class=pad>
 <form action=cgi? method=get>
 <button class=framed title=show window type=submit name=close value=$wid>
 <table class=button>
 <tr>
-<td><span>$glyph</span>
-<td>$name</td>
+<td class=pad>$glyph&nbsp;&nbsp;$name</td>
 </tr>
 </table>
 </button>
 </form>
 </td>
-<td title=command>$cmd</td>
-<td><a href=cgi?pidinfo=$pid title=show process details>$pid</a></td>
-<td><a href=cgi?wininfo=$wid title=show window details>$wid</a></td>
+<td class=pad title=command>$cmd</td>
+<td class=pad><a href=cgi?pidinfo=$pid title='show details'>$pid</a></td>
+<td class=pad><a href=cgi?wininfo=$wid title='show details'>$wid</a></td>
 </tr>"
 done
-echo '</table>
-</body>
-</html>'
+echo '</table>'
+
+. $base_/tail

@@ -59,7 +59,7 @@ ls -1 $appsdir/*.desktop | while read file; do
 <button class=framed title='run command' type=submit name=post.run.$cmd value=$arg>
 <table class=button>
 <tr>
-<td><img class=\"icon\" src=/$image></td>
+<td><img class=icon src=/$image></td>
 <td>$cmd</td>
 </tr>
 </table>
@@ -69,6 +69,6 @@ ls -1 $appsdir/*.desktop | while read file; do
 <td>$name (<a href=cgi?cache=$file title='show details'>$comment</a>)</td>
 </tr>"
 done
-echo '</table>
-</body>
-</html>'
+echo '</table>'
+
+. $base_/tail

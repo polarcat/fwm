@@ -2,32 +2,38 @@
 
 cat $dir_/wpacli.html
 
+#<input class=symbol type=submit title='re-scan wireless networks' value=&#xf1eb;&nbsp;&nbsp;&#xf021;>
+
 wpa_cli scan $iface 1>&2
 sleep 2
-echo "<form action=cgi>
+echo "<tr><td><br></td></tr>
+<tr>
+<td>
+<form action=cgi>
 <input name=cmd type=hidden value=netcfg>
 <input name=dev type=hidden value=$iface>
 <input name=type type=hidden value=2>
-<b>
 <button class=symbol type=submit title='re-scan wireless networks'>
 &#xf1eb;&nbsp;&nbsp;&#xf021;
 </button>
-</b>
 </form>
-<br>
-<table class=legend id=wlan>
+</td>
+</tr>
+<tr><td><br></td></tr>
 <tr>
-<td class=bgleft></td>
-<td class=bgleft>network</td>
-<td class=bgleft>signal</td>
-<td class=bgleft></td>
-<td class=bgleft>&nbsp;frequency</td>
-<td class=bgleft>hotspot</td>"
+<td>
+<table class=blank style=width:100%;>
+<tr>
+<td class=info>network</td>
+<td class=info>signal</td>
+<td class=info>&nbsp;frequency</td>
+<td class=info>hotspot</td>
+</tr>
+<tr><td></td></tr>"
 row=0
 title=''
 wpa_cli scan_results | while read bssid freq sig flg ssid; do
 	trace_ "$bssid | $freq | $sig | $flg | $ssid"
-	echo "<tr>"
 	case "$bssid" in
 	Selected|OK|bssid) continue;;
 	esac
@@ -37,12 +43,11 @@ wpa_cli scan_results | while read bssid freq sig flg ssid; do
 		frq="5GHz"
 	fi
 	if [ "$flg" = "[ESS]" ]; then
-		glyph="&#xf09c;" # open
+		lock="&#xf09c;" # open
 	else
-		glyph="&#xf023;"
+		lock="&#xf023;"
 	fi
 	class=$(alter_ $row)
-	split=$(alter_ $row "split")
 	row=$((row + 1))
 	lvl="&nbsp;"
 	if [ $sig -gt -50 ]; then
@@ -64,27 +69,28 @@ wpa_cli scan_results | while read bssid freq sig flg ssid; do
 		sig="weak"
 	fi
 	astyle="style=text-decoration:none;"
-	echo "<td $class><span class=symbol>$glyph</span></td>
+	echo "<tr>
 <td $class>
 <div>
-<a class=hide id=hide$row href=#hide$row $astyle>&#xf0da; $ssid</a>
-<a class=show id=show$row href=#show$row $astyle>&#xf0d7; $ssid</a>
+<a class=hide id=hide$row href=#hide$row $astyle>$lock &#xf0da; $ssid</a>
+<a class=show id=show$row href=#show$row $astyle>$lock &#xf0d7; $ssid</a>
 <div class=details style=margin:4px;>
 <form name=$row action=cgi? method=post>
 <input name=post.wpa type=hidden>
 <input name=dev value=$iface type=hidden>
 <span class=symbol>&nbsp;&#xf084;&nbsp;</span>
 <input class=text type=text name=username value=$ssid hidden>
-<input class=text type=password name=key>
+<input class=text type=password name=key title=key>
 <input class=symbol type=submit value=&#xf090; title=connect>
 </form>
 </div>
 </div>
 </td>
-<td $class title=$sig style=color:$clr;font-family:Monospace>$lvl</td>
-<td $split></td>
+<td $class title=$sig style=color:$clr;>$lvl</td>
 <td $class title=$freq>&nbsp;$frq</td>
 <td $class>&nbsp;$bssid</td>
 </tr>"
 done
-echo '</table>'
+echo '</table>
+</td>
+</tr>'

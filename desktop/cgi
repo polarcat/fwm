@@ -171,6 +171,30 @@ case "$data" in
 	fi
 	echo $dir_/netcfg.html
 	;;
+/cgi?cmd=ifup*)
+	data=$(getval_ '&' $data)
+	dev=$(index_ ' ' 1 $data)
+	dev=$(getval_ '=' $dev)
+	trace_ "DEV: $dev UP"
+	. $base_/netcfg "$dev" > $dir_/netcfg.html
+	echo $dir_/netcfg.html
+	;;
+/cgi?cmd=iwup*)
+	data=$(getval_ '&' $data)
+	dev=$(index_ ' ' 1 $data)
+	dev=$(getval_ '=' $dev)
+	trace_ "DEV: $dev UP"
+	. $base_/netcfg "$dev" wlan > $dir_/netcfg.html
+	echo $dir_/netcfg.html
+	;;
+/cgi?cmd=ifdown*)
+	data=$(getval_ '&' $data)
+	dev=$(index_ ' ' 1 $data)
+	dev=$(getval_ '=' $dev)
+	trace_ "DOWN DEV: $dev"
+	. $base_/netcfg "$dev" > $dir_/netcfg.html
+	echo $dir_/netcfg.html
+	;;
 'post.wpa'*=*)
 	args=$(getval_ '&' $data) # strip post.wpa
 	dev=$(index_ ' ' 1 $args)

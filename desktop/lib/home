@@ -24,13 +24,16 @@ rxtx()
 
 dedup()
 {
+	local ref=/files/who.txt
 	local prev=$1
-	echo "<a class=menu href=/files/who.txt>$1<a>"
+	local style="style=color:#669260;font-weight:bold;"
+
+	echo "<li class=menu><a $style href=$ref>$1</a></li>"
 	while [ $# -ne 0 ]; do
 		if [ "$1" = "#" -o "$1" = "users" ]; then
 			break
 		elif [ "$prev" != "$1" ]; then
-			echo "<a class=menu href=/files/who.txt>$1<a>"
+			echo "<li class=menu><a $style href=$ref>$1</a></li>"
 		else
 			prev=$1
 		fi
@@ -40,11 +43,24 @@ dedup()
 
 . $base_/menu "home" "home"
 
-echo "<label class=symbol style=font-size:22px;>&#xf0c0"
+echo "<table class=blank>
+<tr>
+<td>
+<span class=home style=font-size:160%;>&#xf0c0&nbsp;</span>
+</td>
+<td>
+<ul class=menu>"
 dedup $(who -q)
-echo "</label><br><br>"
+echo '</ul>
+</td>
+</tr>
+</table>
+<br>'
 who -a -H > files/who.txt
 echo "<a class=menu href=cgi?netstat><b>netstat</b></a><br><br>
+<table class=blank>
+<tr>
+<td>
 <table class=legend>
 <tr>
 <td class=bgleft></td>
@@ -74,8 +90,11 @@ while read iface line; do
 	done
 done < /proc/net/dev
 echo "</table>
-<br>
-<b>memory</b><br><br>
+</td>
+</tr>
+<tr><td><br><b>memory</b><br><br></td></tr>
+<tr>
+<td>
 <table class=legend>"
 row=0
 free -h -t | while read title total used free share cache available; do
@@ -98,7 +117,6 @@ free -h -t | while read title total used free share cache available; do
 	if [ $i -eq 1 ]; then
 		class="class=bgleft"
 	else
-		echo -n "<td $class style=color:#111;font-family:Monospace>"
 		if [ $i -eq 2 ]; then
 			pct=$(mempct "Mem:")
 		elif [ $i -eq 3 ];then
@@ -108,8 +126,14 @@ free -h -t | while read title total used free share cache available; do
 		else
 			pct=100
 		fi
-		cur=$(($pct / 10))
-		end=$((10 - $cur))
+		cur=$((pct / 10))
+		end=$((10 - cur))
+		ch=$((10 - cur))
+		if [ $ch -eq 10 ]; then
+			ch=a
+		fi
+		bg="#$ch$ch$ch"
+		echo -n "<td $class style=color:$bg;>"
 		for ((n=0;n<$cur;n++)); do
 			echo -n "&#9632;"
 		done
@@ -121,7 +145,11 @@ free -h -t | while read title total used free share cache available; do
 echo "</tr>"
 done
 echo "</table>
-<br><b>storage</b><br><br>
+</td>
+</tr>
+<tr><td><br><b>storage</b><br><br></td></tr>
+<tr>
+<td>
 <table class=legend>"
 row=0
 df -h | while read fs size used avail use rest; do
@@ -141,10 +169,15 @@ df -h | while read fs size used avail use rest; do
 	if [ $i -eq 1 ]; then
 		echo "<td $class>$use</td>"
 	else
-		echo -n "<td $class style=color:#111;font-family:Monospace>"
 		pct=$(getvar_ '%' $use)
 		cur=$(($pct / 10))
 		end=$((10 - $cur))
+		ch=$((10 - cur))
+		if [ $ch -eq 10 ]; then
+			ch=a
+		fi
+		bg="#$ch$ch$ch"
+		echo -n "<td $class style=color:$bg;>"
 		for ((n=0;n<$cur;n++)); do
 			echo -n "&#9632;"
 		done
@@ -156,10 +189,13 @@ df -h | while read fs size used avail use rest; do
 echo "</tr>"
 done
 echo "</table>
-<br>
-<b>system</b><br><br>
-<span>$(uname -a)</span><br>
-<span>$(uptime)</span><br><br>
+</td>
+</tr>
+<tr><td><br><b>system</b><br><br></td></tr>
+<tr><td><span>$(uname -a)</span></td></tr>
+<tr><td><span>$(uptime)</span><br><br></td></tr>
+<tr>
+<td>
 <table class=legend>
 <tr>
 <td class=bgleft>cpu</td>
@@ -189,7 +225,11 @@ while read var val; do
 	fi
 done < /proc/cpuinfo
 IFS=$ifs
-echo "</table><br>
+echo "</table>
+</td>
+</tr>
+</table>
+<br>
 <b>processes</b><br><br>"
 row=0
 list=0
@@ -205,6 +245,7 @@ top -n1 -b -c -w 1000 | while read pid user pr ni virt res shr st cpu mem time c
 		class=$(alter_ $row)
 		row=$((row + 1))
 	fi
+	cmd=$(echo $cmd | sed 's/[<]/\&#60;/g;s/[>]/\&#62;/g')
 	echo "<tr>
 <td $class>$pid</td>
 <td $class>$user</td>
@@ -217,10 +258,9 @@ top -n1 -b -c -w 1000 | while read pid user pr ni virt res shr st cpu mem time c
 <td $class>$cpu</td>
 <td $class>$mem</td>
 <td $class>$time</td>
-<td $class>$cmd</td>
-</tr>"
+<td $class><pre>$cmd</pre></td>"
 done
 echo '</tr>
-</table>
-</body>
-</html>'
+</table>'
+
+. $base_/tail

@@ -10,40 +10,43 @@ list+="|tagcfg:tags"
 list+="|netcfg:network"
 
 echo '</head>
-<body style="background-color:#ffffff">
+<body>
 <header>
-<table style=width:100%;>
-<tr>
-<td>
-<table class=menu>
+<div class=menu>
+<table class=blank>
 <tr>'
+if [ "$2" = "home" ]; then
+	style='style=color:#444;'
+fi
+echo "<td class=blank>
+<a class=home $style href=cgi?home>&nbsp;&#xf015;&nbsp;</a>
+</td>
+<td>
+<ul class=menu>"
 if [ $# -eq 2 ]; then
 	ifs="$IFS"
 	IFS='|'
 	for item in $list; do
 		tag=$(getvar_ ':' $item)
 		val=$(getval_ ':' $item)
-		if [ "$2" = "$tag" ]; then
-			class="selected"
-		elif [ "$2" != "$tag" -a "$tag" = "home" ]; then
-			class="home"
-		else
-			class="menu"
-		fi
 		if [ "$tag" = "home" ]; then
-			echo "<td class=menu><label class=symbol>
-<a class=$class href=cgi?$tag>&#xf015;</a></td></label>"
-		else
-			echo "<td class=menu>
-<a class=$class href=cgi?$tag><b>$val</b></a></td>"
+			continue
 		fi
+		if [ "$2" = "$tag" -a "$tag" != "home" ]; then
+			style='style="'
+			style+='color:#000;'
+			style+='border-bottom:1px solid #000;'
+			style+='"'
+		else
+			style='style="border:1px solid transparent;"'
+		fi
+		echo "<li class=menu><a $style href=cgi?$tag>$val</a></li>"
 	done
 	IFS="$ifs"
 fi
-echo '</tr>
-</table>
+echo '</ul>
 </td>
 </tr>
 </table>
-</header>
-<br>'
+</div>
+</header><div style=margin:8px>'
