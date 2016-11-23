@@ -753,11 +753,16 @@ static int window_docked(xcb_window_t win)
 	char *path;
 	struct stat st;
 	int rc;
+	xcb_atom_t atom;
+	int count;
 
 	if (!basedir)
 		return 0;
 
-	get_sprop(&class, win, XCB_ATOM_WM_CLASS, UCHAR_MAX);
+	atom = XCB_ATOM_WM_CLASS;
+	count = 0;
+more:
+	get_sprop(&class, win, atom, UCHAR_MAX);
 	if (!class.ptr) {
 		ww("unable to detect window class\n");
 		return 0;
@@ -773,6 +778,11 @@ static int window_docked(xcb_window_t win)
 	if (stat(path, &st) == 0) {
 		rc = 1;
 		ii("win 0x%x is docked\n", win);
+	} else if (++count < 2) {
+		free(class.ptr);
+		free(path);
+		atom = XCB_ATOM_WM_NAME;
+		goto more;
 	}
 
 out:
