@@ -54,6 +54,7 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_DOCK (1 << 0)
 #define CLI_FLG_TRAY (1 << 1)
 #define CLI_FLG_BORDER (1 << 2)
+#define CLI_FLG_CENTER (1 << 3)
 
 #define SCR_FLG_PANEL_TOP (1 << 0)
 
@@ -742,12 +743,12 @@ static uint8_t tray_window(xcb_window_t win)
 }
 
 /*
- * Dock dir structure:
+ * Specially positioned window
  *
- * /<basedir>/dock/{<winclass1>,<winclassN>}
+ * /<basedir>/{dock,center}/{<winclass1>,<winclassN>}
  */
 
-static int window_docked(xcb_window_t win)
+static int window_position(xcb_window_t win, const char *dir, uint8_t dirlen)
 {
 	struct sprop class;
 	char *path;
@@ -769,15 +770,15 @@ more:
 	}
 
 	rc = 0;
-	class.len += baselen + sizeof("/dock/");
+	class.len += baselen + dirlen + 1;
 	path = calloc(1, class.len);
 	if (!path)
 		goto out;
 
-	snprintf(path, class.len, "%s/dock/%s", basedir, class.str);
-	if (stat(path, &st) == 0) {
+	snprintf(path, class.len, "%s/%s/%s", basedir, dir, class.str);
+	dd("win 0x%x path %s\n", win, path);
+	if (class.str[0] && stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
 		rc = 1;
-		ii("win 0x%x is docked\n", win);
 	} else if (++count < 2) {
 		free(class.ptr);
 		free(path);
@@ -1697,7 +1698,15 @@ static struct client *client_add(xcb_window_t win, int tray, int winlist)
 	window_raise(win);
 	window_border_color(cli->win, border_normal);
 
-	if (tray || window_docked(win)) {
+	if (window_position(win, "dock", sizeof("dock")))
+		cli->flags |= CLI_FLG_DOCK;
+	else if (window_position(win, "center", sizeof("center")))
+		cli->flags |= CLI_FLG_CENTER;
+
+	if (cli->flags & CLI_FLG_CENTER) {
+		g->x = curscr->x + curscr->w / 2 - g->width / 2;
+		g->y = curscr->y + curscr->h / 2 - g->height / 2;
+	} else if (tray || cli->flags & CLI_FLG_DOCK) {
 		if (tray)
 			cli->flags |= CLI_FLG_TRAY;
 
