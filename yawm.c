@@ -32,6 +32,8 @@
 #include <X11/Xft/Xft.h>
 #include <X11/keysym.h>
 
+#define USE_CRC32 /* use crc32 function from misc header */
+
 #include "misc.h"
 #include "yawm.h"
 #include "list.h"
@@ -59,6 +61,7 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_TOPRIGHT (1 << 5)
 #define CLI_FLG_BOTLEFT (1 << 6)
 #define CLI_FLG_BOTRIGHT (1 << 7)
+#define CLI_FLG_EXCLUSIVE (1 << 8)
 
 #define SCR_FLG_PANEL_TOP (1 << 0)
 
@@ -167,6 +170,7 @@ struct client {
 	struct screen *scr;
 	struct tag *tag;
 	uint8_t flags;
+	uint32_t crc; /* based on class name */
 };
 
 #define list2client(item) list_entry(item, struct client, head)
@@ -346,6 +350,7 @@ static xcb_atom_t a_active_window;
 static xcb_atom_t a_has_vt;
 static xcb_atom_t a_embed_info;
 static xcb_atom_t a_net_wm_name;
+static xcb_atom_t a_net_wm_pid;
 
 static strlen_t actname_max = UCHAR_MAX - 1;
 
@@ -746,14 +751,21 @@ static uint8_t tray_window(xcb_window_t win)
 	return ret;
 }
 
-/*
- * Specially positioned window
+/* Specially treated window
  *
- * /<basedir>/<sub-dirs>/{<winclass1>,<winclassN>}
- * sub-dirs: {dock,center,top-left,top-right,bottom-left,bottom-right}
+ * 1) only single instance of given window will be allowed:
+ *
+ *    /<basedir>/exclusive/{<winclass1>,<winclassN>}
+ *
+ * 2) force window location:
+ *
+ *    /<basedir>/<sub-dirs>/{<winclass1>,<winclassN>}
+ *
+ *    sub-dirs: {dock,center,top-left,top-right,bottom-left,bottom-right}
+ *
  */
 
-static int window_position(xcb_window_t win, const char *dir, uint8_t dirlen)
+static uint32_t window_special(xcb_window_t win, const char *dir, uint8_t len)
 {
 	struct sprop class;
 	char *path;
@@ -761,6 +773,7 @@ static int window_position(xcb_window_t win, const char *dir, uint8_t dirlen)
 	int rc;
 	xcb_atom_t atom;
 	int count;
+	int pathlen;
 
 	if (!basedir)
 		return 0;
@@ -775,15 +788,15 @@ more:
 	}
 
 	rc = 0;
-	class.len += baselen + dirlen + 1;
-	path = calloc(1, class.len);
+	pathlen = baselen + len + class.len + 1;
+	path = calloc(1, pathlen);
 	if (!path)
 		goto out;
 
-	snprintf(path, class.len, "%s/%s/%s", basedir, dir, class.str);
-	dd("win 0x%x path %s\n", win, path);
+	snprintf(path, pathlen, "%s/%s/%s", basedir, dir, class.str);
 	if (class.str[0] && stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
-		rc = 1;
+		rc = crc32(class.str, class.len);
+		dd("special win 0x%x, path %s, crc 0x%x\n", win, path, rc);
 	} else if (++count < 2) {
 		free(class.ptr);
 		free(path);
@@ -1417,6 +1430,28 @@ static void retag_window(void *arg)
 	client_store(cli, 0);
 }
 
+static void window_retag(struct screen *scr, xcb_window_t win)
+{
+	struct client *cli;
+
+	if (!scr || !scr->tagmod)
+		return;
+
+	cli = scr2client(scr, win, WIN_TYPE_NORMAL);
+	if (!cli)
+		return;
+
+	/* re-tag window */
+	switch_window(scr, DIR_NEXT);
+	list_del(&cli->head);
+	list_add(&scr->tagmod->clients, &cli->head);
+	cli->tag = scr->tagmod;
+	window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
+	xcb_unmap_window_checked(dpy, cli->win);
+	xcb_flush(dpy);
+	client_store(cli, 0);
+}
+
 #if 0
 static void resize_window(xcb_window_t win, uint16_t w, uint16_t h)
 {
@@ -1603,18 +1638,68 @@ static struct screen *pointer2screen(void)
         return scr;
 }
 
+static pid_t win2pid(xcb_window_t win)
+{
+	pid_t pid;
+	struct sprop prop;
+
+	get_sprop(&prop, win, a_net_wm_pid, 1);
+	if (!prop.ptr)
+		return 0;
+
+	pid = 0;
+	if (prop.ptr->type == XCB_ATOM_CARDINAL && prop.ptr->format == 32)
+		pid = *((pid_t *) xcb_get_property_value(prop.ptr));
+
+	free(prop.ptr);
+	return pid;
+}
+
+/* attempt to destroy duplicate window and terminate associated process */
+static int window_dedup(struct client *cli, xcb_window_t win)
+{
+	pid_t pid;
+
+	list_del(&cli->head);
+	list_add(&curscr->tag->clients, &cli->head);
+	xcb_map_window(dpy, cli->win);
+	window_focus(curscr, cli->win, FOCUS_RAISE);
+	xcb_flush(dpy);
+
+	if ((pid = win2pid(win)) < 1) {
+		ii("failed to get pid of win 0x%x\n", win);
+		return -1;
+	} else if (kill(pid, SIGTERM) == 0) {
+		ii("de-dup win 0x%x, pid %d, crc 0x%x\n", cli->win, pid,
+		   cli->crc);
+		return 0;
+	}
+
+	return -1;
+}
+
 static struct client *client_add(xcb_window_t win, int tray, int winlist)
 {
 	struct tag *tag;
 	struct screen *scr;
 	struct client *cli;
 	uint32_t val[1];
+	uint32_t crc;
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
 
 	if (win == rootscr->root)
 		return NULL;
+
+	if ((crc = window_special(win, "exclusive", sizeof("exclusive")))) {
+		struct list_head *cur;
+		list_walk(cur, &clients) {
+			struct client *cli = glob2client(cur);
+			if (cli->crc == crc && window_dedup(cli, win) == 0)
+				return NULL;
+		}
+	}
 
 	cli = NULL;
 	a = NULL;
@@ -1700,20 +1785,21 @@ static struct client *client_add(xcb_window_t win, int tray, int winlist)
 
 	cli->scr = scr;
 	cli->win = win;
+	cli->crc = crc;
 	window_raise(win);
 	window_border_color(cli->win, border_normal);
 
-	if (window_position(win, "dock", sizeof("dock")))
+	if (window_special(win, "dock", sizeof("dock")))
 		cli->flags |= CLI_FLG_DOCK;
-	else if (window_position(win, "center", sizeof("center")))
+	else if (window_special(win, "center", sizeof("center")))
 		cli->flags |= CLI_FLG_CENTER;
-	else if (window_position(win, "top-left", sizeof("top-left")))
+	else if (window_special(win, "top-left", sizeof("top-left")))
 		cli->flags |= CLI_FLG_TOPLEFT;
-	else if (window_position(win, "top-right", sizeof("top-right")))
+	else if (window_special(win, "top-right", sizeof("top-right")))
 		cli->flags |= CLI_FLG_TOPRIGHT;
-	else if (window_position(win, "bottom-left", sizeof("bottom-left")))
+	else if (window_special(win, "bottom-left", sizeof("bottom-left")))
 		cli->flags |= CLI_FLG_BOTLEFT;
-	else if (window_position(win, "bottom-right", sizeof("bottom-right")))
+	else if (window_special(win, "bottom-right", sizeof("bottom-right")))
 		cli->flags |= CLI_FLG_BOTRIGHT;
 
 	if (cli->flags & CLI_FLG_CENTER) {
@@ -2775,28 +2861,6 @@ static void mark_tag(struct screen *scr, int16_t x)
 	}
 }
 
-static void window_retag(struct screen *scr, xcb_window_t win)
-{
-	struct client *cli;
-
-	if (!scr || !scr->tagmod)
-		return;
-
-	cli = scr2client(scr, win, WIN_TYPE_NORMAL);
-	if (!cli)
-		return;
-
-	/* re-tag window */
-	switch_window(scr, DIR_NEXT);
-	list_del(&cli->head);
-	list_add(&scr->tagmod->clients, &cli->head);
-	cli->tag = scr->tagmod;
-	window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
-	xcb_unmap_window_checked(dpy, cli->win);
-	xcb_flush(dpy);
-	client_store(cli, 0);
-}
-
 static void handle_panel_press(xcb_button_press_event_t *e)
 {
 	curscr = coord2screen(e->root_x, e->root_y);
@@ -3516,6 +3580,7 @@ static void init_rootwin(void)
 	a_has_vt = atom_by_name("XFree86_has_VT");
 	a_supported = atom_by_name("_NET_SUPPORTED");
 	a_net_wm_name = atom_by_name("_NET_WM_NAME");
+	a_net_wm_pid = atom_by_name("_NET_WM_PID");
 
 	xcb_delete_property(dpy, win, a_supported);
 	support_atom(&a_active_window);
