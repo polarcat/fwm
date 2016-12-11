@@ -55,6 +55,10 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_TRAY (1 << 1)
 #define CLI_FLG_BORDER (1 << 2)
 #define CLI_FLG_CENTER (1 << 3)
+#define CLI_FLG_TOPLEFT (1 << 4)
+#define CLI_FLG_TOPRIGHT (1 << 5)
+#define CLI_FLG_BOTLEFT (1 << 6)
+#define CLI_FLG_BOTRIGHT (1 << 7)
 
 #define SCR_FLG_PANEL_TOP (1 << 0)
 
@@ -745,7 +749,8 @@ static uint8_t tray_window(xcb_window_t win)
 /*
  * Specially positioned window
  *
- * /<basedir>/{dock,center}/{<winclass1>,<winclassN>}
+ * /<basedir>/<sub-dirs>/{<winclass1>,<winclassN>}
+ * sub-dirs: {dock,center,top-left,top-right,bottom-left,bottom-right}
  */
 
 static int window_position(xcb_window_t win, const char *dir, uint8_t dirlen)
@@ -1702,10 +1707,30 @@ static struct client *client_add(xcb_window_t win, int tray, int winlist)
 		cli->flags |= CLI_FLG_DOCK;
 	else if (window_position(win, "center", sizeof("center")))
 		cli->flags |= CLI_FLG_CENTER;
+	else if (window_position(win, "top-left", sizeof("top-left")))
+		cli->flags |= CLI_FLG_TOPLEFT;
+	else if (window_position(win, "top-right", sizeof("top-right")))
+		cli->flags |= CLI_FLG_TOPRIGHT;
+	else if (window_position(win, "bottom-left", sizeof("bottom-left")))
+		cli->flags |= CLI_FLG_BOTLEFT;
+	else if (window_position(win, "bottom-right", sizeof("bottom-right")))
+		cli->flags |= CLI_FLG_BOTRIGHT;
 
 	if (cli->flags & CLI_FLG_CENTER) {
 		g->x = curscr->x + curscr->w / 2 - g->width / 2;
 		g->y = curscr->y + curscr->h / 2 - g->height / 2;
+	} else if (cli->flags & CLI_FLG_TOPLEFT) {
+		g->x = 0;
+		g->y = 0;
+	} else if (cli->flags & CLI_FLG_TOPRIGHT) {
+		g->x = curscr->w - g->width - 2 * BORDER_WIDTH;
+		g->y = 0;
+	} else if (cli->flags & CLI_FLG_BOTLEFT) {
+		g->x = 0;
+		g->y = curscr->h - g->height - 2 * BORDER_WIDTH - 1;
+	} else if (cli->flags & CLI_FLG_BOTRIGHT) {
+		g->x = curscr->w - g->width - 2 * BORDER_WIDTH;
+		g->y = curscr->h - g->height - 2 * BORDER_WIDTH - 1;
 	} else if (tray || cli->flags & CLI_FLG_DOCK) {
 		if (tray)
 			cli->flags |= CLI_FLG_TRAY;
