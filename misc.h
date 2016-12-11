@@ -92,7 +92,7 @@ static inline void hexdump(const char *buf, int16_t len)
 
 	printf("%u bytes, %p\n", len, buf);
 	printf(" 0000 | ");
-	for (i = 0, n = 1; i < len; i++) {
+	for (i = 0, n = 1; i < (len | 0x1f); i++) {
 		if (i >= (16 * n)) {
 			printf(" | ");
 			for (ii = i - 16; ii < i; ii++)
@@ -104,6 +104,9 @@ static inline void hexdump(const char *buf, int16_t len)
 		printf("%02x%02x ", buf[i], buf[i + 1]);
 		i++;
 	}
+	printf(" | ");
+	for (ii = i - 16; ii < i; ii++)
+		printf("%c", isprint(buf[ii]) ? buf[ii] : '.');
 	printf("\n");
 }
 
