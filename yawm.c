@@ -1389,7 +1389,11 @@ static void switch_tag(struct screen *scr, enum dir dir)
 	}
 
 	tag_focus(scr, tag, FOCUS_NONE);
-	window_focus(scr, pointer2win(), FOCUS_RAISE);
+
+	if (!list_empty(&scr->tag->clients)) {
+		struct client *cli = list2client(scr->tag->clients.prev);
+		window_focus(scr, cli->win, FOCUS_RAISE);
+	}
 }
 
 static void walk_tags(void *arg)
