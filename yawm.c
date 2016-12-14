@@ -1264,18 +1264,18 @@ static void raise_window(void *arg)
 {
 	xcb_key_press_event_t *e = (xcb_key_press_event_t *) arg;
 	struct screen *scr;
-	struct client *cli;
-
-	tt("\n");
+	xcb_window_t win;
 
 	scr = coord2screen(e->root_x, e->root_y);
 
 	if (list_empty(&scr->tag->clients))
 		return;
 
-	cli = scr2client(scr, scr->tag->win, WIN_TYPE_NORMAL);
-	window_raise(cli->win);
+	win = pointer2win();
+	window_focus(scr, win, FOCUS_RAISE);
 	xcb_flush(dpy);
+
+	client_resort(win2client(win));
 }
 
 static void panel_raise(struct screen *scr)
