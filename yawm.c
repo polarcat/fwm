@@ -910,6 +910,15 @@ enum focus_flags {
 	FOCUS_RAISE,
 };
 
+static void client_resort(struct client *cli)
+{
+	if (cli && cli->head.next != &cli->tag->clients) {
+		/* move window to the end of the list */
+		list_del(&cli->head);
+		list_add(&cli->tag->clients, &cli->head);
+	}
+}
+
 static void window_focus(struct screen *scr, xcb_window_t win, uint8_t flag)
 {
 	tt("win %p, focus flag %d\n", win, flag);
@@ -954,22 +963,22 @@ static xcb_window_t pointer2win(void)
         return XCB_NONE;
 }
 
-static void switch_window(struct screen *scr, enum dir dir)
+static struct client *switch_window(struct screen *scr, enum dir dir)
 {
 	struct list_head *cur;
 	struct client *cli;
 	uint8_t found;
 
 	if (list_empty(&scr->tag->clients))
-		return;
+		return NULL;
 	else if (list_single(&scr->tag->clients))
-		return;
+		return NULL;
 
 	tt("tag %s, win %p\n", scr->tag->name, scr->tag->win);
 
 	cli = scr2client(scr, scr->tag->win, WIN_TYPE_NORMAL);
 	if (!cli)
-		return;
+		return NULL;
 
 	found = 0;
 	if (dir == DIR_NEXT) {
@@ -1013,7 +1022,7 @@ static void switch_window(struct screen *scr, enum dir dir)
 	}
 
 	if (!found)
-		return;
+		return NULL;
 
 out:
 	window_focus(scr, scr->tag->win, FOCUS_NONE);
@@ -1021,6 +1030,7 @@ out:
 	xcb_warp_pointer_checked(dpy, XCB_NONE, cli->win, 0, 0, 0, 0,
 				 cli->w / 2, cli->h / 2);
 	xcb_flush(dpy);
+	return cli;
 }
 
 static int16_t adjust_x(struct screen *scr, int16_t x, uint16_t w)
@@ -1780,8 +1790,10 @@ static struct client *client_add(xcb_window_t win, int tray, int winlist)
 		}
 	}
 
-	if (scr->tag->win)
+	if (scr->tag->win) {
 		window_focus(scr, scr->tag->win, FOCUS_NONE);
+		client_resort(win2client(scr->tag->win));
+	}
 
 	cli->scr = scr;
 	cli->win = win;
@@ -1847,15 +1859,7 @@ static struct client *client_add(xcb_window_t win, int tray, int winlist)
 			tag = scr->tag;
 	}
 
-	if (!tag->win) {
-		list_add(&tag->clients, &cli->head);
-	} else { /* attempt to list windows in order of appearance */
-		struct client *cur = scr2client(scr, tag->win, 0);
-		if (cur)
-			list_add(&cur->head, &cli->head);
-		else
-			list_add(&tag->clients, &cli->head);
-	}
+	list_add(&tag->clients, &cli->head);
 
 	cli->tag = tag;
 	list_add(&clients, &cli->list); /* also add to global list of clients */
@@ -1903,35 +1907,18 @@ static void client_del(xcb_window_t win)
 	client_store(cli, 1);
 	scr = cli->scr;
 
-	list_del(&cli->head);
-	list_del(&cli->list);
-	free(cli);
-
-	if (list_empty(&scr->tag->clients)) {
+	if (!switch_window(scr, DIR_PREV)) {
 		scr->tag->win = 0;
 		print_title(scr);
 		xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
 				    XCB_CURRENT_TIME);
-		xcb_flush(dpy);
-	} else {
-		xcb_window_t tmp = scr->tag->win_prev;
-		if (tmp == XCB_NONE) {
-			switch_window(scr, DIR_NEXT);
-		} else {
-			scr->tag->win = tmp;
-			window_focus(scr, tmp, FOCUS_RAISE);
-			print_title(scr);
-			cli = scr2client(scr, tmp, WIN_TYPE_NORMAL);
-			if (cli) {
-				xcb_warp_pointer_checked(dpy, XCB_NONE, tmp,
-							 0, 0, 0, 0,
-							 cli->w / 2,
-							 cli->h / 2);
-			}
-			xcb_flush(dpy);
-		}
 	}
 
+	list_del(&cli->head);
+	list_del(&cli->list);
+	free(cli);
+
+	xcb_flush(dpy);
 out:
 	tt("pid %d, deleted win %p\n", getpid(), win);
 	update_clients_list();
