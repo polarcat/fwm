@@ -1778,6 +1778,14 @@ static struct client *client_add(xcb_window_t win, int tray, int winlist)
 		goto out;
 	}
 
+	if (!g->depth && !a->colormap) {
+		dd("win %p, root %p, colormap=%p, class=%u, depth=%u\n",
+		   win, g->root, a->colormap, a->_class, g->depth);
+		xcb_destroy_window_checked(dpy, win);
+		ww("zombie window 0x%x destroyed\n", win);
+		goto out;
+	}
+
 	if (!tray && a->override_redirect) {
 		dd("ignore redirected window 0x%x\n", win);
 		goto out;
@@ -1849,14 +1857,6 @@ static struct client *client_add(xcb_window_t win, int tray, int winlist)
 	val[0] = XCB_EVENT_MASK_ENTER_WINDOW |
 		 XCB_EVENT_MASK_PROPERTY_CHANGE;
 	xcb_change_window_attributes_checked(dpy, win, XCB_CW_EVENT_MASK, val);
-
-	if (!g->depth && !a->colormap) {
-		dd("win %p, root %p, colormap=%p, class=%u, depth=%u\n",
-		   win, g->root, a->colormap, a->_class, g->depth);
-		xcb_destroy_window_checked(dpy, win);
-		ww("zombie window 0x%x destroyed\n", win);
-		goto out;
-	}
 
 	if (!tag) {
 		if (!(tag = client_tag(scr, win)))
