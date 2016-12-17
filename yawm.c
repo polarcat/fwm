@@ -662,9 +662,9 @@ static void print_title(struct screen *scr)
 		return;
 	}
 
-	get_sprop(&title, win, XCB_ATOM_WM_NAME, UCHAR_MAX);
+	get_sprop(&title, win, a_net_wm_name, UINT_MAX);
 	if (!title.ptr || !title.len) {
-		get_sprop(&title, win, a_net_wm_name, UINT_MAX);
+		get_sprop(&title, win, XCB_ATOM_WM_NAME, UCHAR_MAX);
 		if (!title.ptr || !title.len)
 			goto out;
 	}
