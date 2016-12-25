@@ -10,8 +10,10 @@
 
 #include <stdint.h>
 
-#define FONT_SIZE 10.5
-#define FONT_NAME "Monospace"
+#define FONT1_SIZE 10.5
+#define FONT1_NAME "Monospace"
+#define FONT2_SIZE 10.5
+#define FONT2_NAME "fontawesome"
 
 #define YAWM_BASE ".yawm"
 #define YAWM_LIST "winlist"
