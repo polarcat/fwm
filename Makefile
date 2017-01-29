@@ -6,12 +6,12 @@ xftcflags = $(shell pkg-config --cflags xft)
 xftldflags = $(shell pkg-config --libs xft)
 
 .PHONY: all clean distclean
-all: $(wmout) $(wmdout) $(deskout) $(clockout)
+all: $(wmout) $(wmdout) $(clockout)
 
 wmout = yawm
 wmsrc = yawm.c
-wmcflags = $(cflags) $(xftcflags) $(CFLAGS)
-wmldflags = -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms
+wmcflags = $(cflags) $(xftcflags) $(CFLAGS) -g
+wmldflags = -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms -g
 wmldflags += -lX11 -lX11-xcb $(xftldflags)
 
 $(wmout):
@@ -39,23 +39,6 @@ $(wmdout):
 clean-$(wmdout):
 	-rm -f $(wmdout)
 
-deskout = deskd
-desksrc = deskd.c misc.c
-deskcflags = $(cflags) $(CFLAGS)
-
-$(deskout):
-	$(cc) -o $(deskout) $(desksrc) $(deskcflags)
-	@echo "(==) $(deskout) done"
-
-clean-$(deskout):
-	-rm -f $(deskout)
-
-install-$(deskout):
-	-mkdir -p $(HOME)/bin
-	-unlink $(HOME)/bin/$(deskout)
-	-cp -v $(deskout) $(HOME)/bin/$(deskout)
-	-chmod 755 $(HOME)/bin/$(deskout)
-
 clockout = clock
 clocksrc = clock.c
 clockcflags = $(xftcflags) $(cflags)
@@ -74,6 +57,6 @@ install-$(clockout):
 	-chmod 755 $(HOME)/bin/$(clockout)
 
 clean:
-	-rm -f $(wmout) $(wmdout) $(deskout) $(clockout)
+	-rm -f $(wmout) $(wmdout) $(clockout)
 
 distclean: clean
