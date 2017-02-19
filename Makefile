@@ -5,9 +5,6 @@ cflags = -Wall -Wunused-function
 xftcflags = $(shell pkg-config --cflags xft)
 xftldflags = $(shell pkg-config --libs xft)
 
-.PHONY: all clean distclean
-all: $(wmout) $(wmdout) $(clockout)
-
 wmout = yawm
 wmsrc = yawm.c
 wmcflags = $(cflags) $(xftcflags) $(CFLAGS) -g
@@ -60,3 +57,6 @@ clean:
 	-rm -f $(wmout) $(wmdout) $(clockout)
 
 distclean: clean
+
+.PHONY: all clean distclean
+all: $(wmout) $(wmdout) $(clockout)
