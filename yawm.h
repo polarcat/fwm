@@ -27,9 +27,9 @@ enum reqtype {
 };
 
 struct clientinfo {
-	uint32_t win;
 	uint8_t scr;
 	uint8_t tag;
+	uint32_t win;
 };
 
 struct clientreq {

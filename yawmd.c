@@ -11,6 +11,7 @@
  */
 
 #include <errno.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,6 +19,7 @@
 #include <string.h>
 #include <signal.h>
 #include <poll.h>
+#include <sys/stat.h>
 
 #include <xcb/xcb.h>
 
@@ -27,6 +29,7 @@
 
 static const char *home;
 static xcb_connection_t *dpy;
+static const char *disp;
 
 struct client {
 	struct list_head head;
@@ -171,10 +174,12 @@ static void yawmd(void)
 	struct pollfd fds;
 	struct sigaction sa;
 
-	list_init(&clients);
+	if (!(disp = getenv("DISPLAY"))) {
+		ee("DISPLAY is not set\n");
+		return;
+	}
 
-	home = getenv("HOME");
-	if (!home) {
+	if (!(home = getenv("HOME"))) {
 		ee("HOME directory is not set\n");
 		return;
 	}
@@ -189,6 +194,8 @@ static void yawmd(void)
 		return;
 	}
 
+	list_init(&clients);
+
 	fds.fd = open_fifo(YAWM_FIFO, -1);
 	if (fds.fd < 0)
 		return;
@@ -198,14 +205,13 @@ static void yawmd(void)
 	sa.sa_flags = SA_RESTART;
 	sigaction(SIGUSR1, &sa, NULL); /* interrupt poll */
 
-	ii("%s/"YAWM_BASE"/"YAWM_FIFO": waiting for data\n", home);
+	ii("%s, %s/"YAWM_BASE"/"YAWM_FIFO": waiting for data\n", disp, home);
 
 	while (1) {
 		memset(&req, 0, sizeof(req));
 		fds.revents = 0;
 		errno = 0;
 		poll(&fds, 1, -1);
-		dd("revents 0x%d, error %s\n", fds.revents, strerror(errno));
 		if (fds.revents & POLLERR || errno == EINTR) {
 			fds.fd = open_fifo(YAWM_FIFO, fds.fd);
 			continue;

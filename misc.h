@@ -18,6 +18,8 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
 
+#define unused(arg) __attribute__((unused)) arg
+
 #ifndef MEMDEBUG
 #define mallinfo_start(name) do {} while(0)
 #define mallinfo_stop(name) do {} while(0)
@@ -56,8 +58,10 @@
 	fprintf(stderr, "(ee) %s: %s at %d\n", __func__, __FILE__, __LINE__);\
 }
 
+#define DEBUG
 #ifdef DEBUG
-#define dd(fmt, ...) printf("(dd) %s: " fmt, __func__, ##__VA_ARGS__)
+#define dd(fmt, ...) \
+	printf("(dd) " fmt " | %s:%d\n", ##__VA_ARGS__, __func__, __LINE__)
 #else
 #define dd(fmt, ...) do {} while(0)
 #endif
@@ -78,7 +82,7 @@
 #endif
 
 #ifdef TRACE_EVENTS
-#define te(fmt, ...) printf("(tt) %s: " fmt, __func__, ##__VA_ARGS__)
+#define te(fmt, ...) printf("(te) " fmt, ##__VA_ARGS__)
 #else
 #define te(fmt, ...) do {} while(0)
 #endif

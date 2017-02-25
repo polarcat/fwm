@@ -43,6 +43,32 @@ static inline void list_del(struct list_head *item)
 	item->next->prev = item->prev;
 }
 
+static inline struct list_head *list_next(struct list_head *item,
+					  struct list_head *head)
+{
+	if (item->next != head)
+		return item->next;
+	else if (item->next == head && item->next->next == head)
+		return item;
+	else if (item->next == head && item->next->next != head)
+		return item->next->next;
+	else
+		return item;
+}
+
+static inline struct list_head *list_prev(struct list_head *item,
+					  struct list_head *head)
+{
+	if (item->prev != head)
+		return item->prev;
+	else if (item->prev == head && item->prev->prev == head)
+		return item;
+	else if (item->prev == head && item->prev->prev != head)
+		return item->prev->prev;
+	else
+		return item;
+}
+
 #define container_of(ptr, type, member) __extension__ ({ \
 	const __typeof__(((type *) 0)->member) * __mptr = (ptr); \
 	(type *) ((char *) __mptr - offsetof(type, member)); })

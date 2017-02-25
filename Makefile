@@ -36,6 +36,12 @@ $(wmdout):
 clean-$(wmdout):
 	-rm -f $(wmdout)
 
+install-$(wmdout):
+	-mkdir -p $(HOME)/bin
+	-unlink $(HOME)/bin/$(wmdout)
+	-cp -v $(wmdout) $(HOME)/bin/$(wmdout)
+	-chmod 755 $(HOME)/bin/$(wmdout)
+
 clockout = clock
 clocksrc = clock.c
 clockcflags = $(xftcflags) $(cflags)
