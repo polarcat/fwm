@@ -457,6 +457,7 @@ enum winstatus {
 	WIN_STATUS_UNKNOWN,
 	WIN_STATUS_HIDDEN,
 	WIN_STATUS_VISIBLE,
+	WIN_STATUS_MAX,
 };
 
 static XftFont *font1;
@@ -1294,7 +1295,7 @@ static struct screen *coord2scr(int16_t x, int16_t y)
 			return scr;
 		}
 	}
-	return NULL;
+	return list2screen(screens.next);
 }
 
 static struct client *scr2cli(struct screen *scr, xcb_window_t win,
@@ -1388,11 +1389,12 @@ static struct client *next_client(struct client *cli)
 	struct list_head *cur;
 
 	list_walk(cur, &cli->head) {
-		cli = list2client(cur);
-		if (window_status(cli->win) == WIN_STATUS_VISIBLE)
-			return cli;
+		struct client *ret = list2client(cur);
+		if (window_status(ret->win) == WIN_STATUS_VISIBLE)
+			return ret;
 	}
 
+	dd("no next valid window after 0x%x", cli->win);
 	return NULL;
 }
 
@@ -1401,13 +1403,17 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 	struct client *cli;
 
 	if ((cli = pointer2cli())) {
-		ii("prev cli %p, win 0x%x (pointer)\n", cli, cli->win);
+		ii("scr %u tag '%s' prev cli %p, win 0x%x (pointer)\n",
+		   scr->id, scr->tag->name, cli, cli->win);
 	} else if ((cli = front_client(scr->tag))) {
-		ii("prev cli %p, win 0x%x (front)\n", cli, cli->win);
+		ii("scr %u tag '%s' prev cli %p, win 0x%x\n",
+		   scr->id, scr->tag->name, cli, cli->win);
 	} else {
 		ee("no front windows found\n");
 		return NULL;
 	}
+
+	trace_tag_windows(scr->tag);
 
 	scr->flags |= SCR_FLG_SWITCH_WINDOW;
 
@@ -1419,7 +1425,8 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 	if (!cli)
 		return NULL;
 
-	ii("next cli %p, win 0x%x\n", cli, cli->win);
+	ii("scr %u tag '%s' next cli %p, win 0x%x\n",
+	   scr->id, scr->tag->name, cli, cli->win);
 
 	raise_window(cli->win);
 	focus_window(cli->win);
@@ -1662,9 +1669,6 @@ static void hide_toolbar(void)
 	uint32_t val[4];
 	uint32_t mask;
 	xcb_window_t tmp;
-
-	dd("hide toolbar win 0x%x, child 0x%x", toolbar.panel.win,
-	   toolbar.child);
 
 	if (toolbar.panel.win == XCB_WINDOW_NONE)
 		return;
@@ -3552,6 +3556,112 @@ static void init_colors(void)
 	}
 }
 
+static void focus_screen(uint8_t id)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if (scr->id == id) {
+			dd("### focus screen %u tag %s", id, scr->tag->name);
+			focus_tag(scr, scr->tag);
+			curscr = scr;
+			return;
+		}
+	}
+}
+
+static void focus_window_req(xcb_window_t win)
+{
+	struct list_head *cur;
+
+	if (win == XCB_WINDOW_NONE)
+		return;
+
+	list_walk(cur, &clients) {
+		struct client *cli = glob2client(cur);
+		if (cli->win == win) {
+			struct screen *scr;
+
+			if (!(scr = cli2scr(cli))) {
+				ww("cannot focus offscreen win 0x%x\n", win);
+				return;
+			}
+
+			if (!cli->tag) {
+				ww("cannot focus tagless win 0x%x\n", win);
+				return;
+			}
+
+			curscr = scr;
+			focus_tag(curscr, cli->tag);
+			raise_window(cli->win);
+			focus_window(cli->win);
+			warp_pointer(cli);
+
+			dd("### focus screen %u tag %s win 0x%x",
+			   curscr->id, cli->tag ? cli->tag->name : "<nil>",
+			   win);
+			return;
+		}
+	}
+}
+
+static void dump_clients(void)
+{
+	char path[baselen + sizeof("/clients")];
+	struct list_head *cur;
+	FILE *f;
+
+	sprintf(path, "%s/clients", basedir);
+
+	if (!(f = fopen(path, "w+"))) {
+		ee("fopen(%s) failed, %s\n", path, strerror(errno));
+		return;
+	}
+
+	list_walk(cur, &clients) {
+		struct sprop title;
+		char temp[sizeof("255 ") + TAG_NAME_MAX +
+			  2 * sizeof("0xffffffff ") + sizeof("65535 ")];
+		struct client *cli = glob2client(cur);
+		xcb_window_t win = pointer2win();
+		enum winstatus status;
+		const char *tag;
+
+		if (cli->win == win)
+			status = WIN_STATUS_MAX; /* indicate current window */
+		else
+			status = window_status(cli->win);
+
+		if (cli->tag)
+			tag = cli->tag->name;
+		else if (cli->flags & CLI_FLG_DOCK)
+			tag = "<dock>";
+		else if (cli->flags & CLI_FLG_TRAY)
+			tag = "<tray>";
+		else
+			tag = "<nil>";
+
+		snprintf(temp, sizeof(temp), "%u\t%s\t0x%x\t%d\t%d\t",
+			cli->scr->id, tag, cli->win, status,
+			win2pid(cli->win));
+		fwrite(temp, strlen(temp), 1, f);
+		get_sprop(&title, cli->win, a_net_wm_name, UINT_MAX);
+
+		if (!title.ptr || !title.len) {
+			fputs("<nil>\n", f);
+			continue;
+		}
+
+		fputs(title.str, f);
+		fputc('\n', f);
+		free(title.ptr);
+	}
+
+	fclose(f);
+}
+
 #define match_cstr(str, cstr) strncmp(str, cstr, sizeof(cstr) - 1) == 0
 
 static void handle_user_request(void)
@@ -3567,6 +3677,22 @@ static void handle_user_request(void)
 
 	if (match_cstr(name.str, "reload-keys")) {
 		init_keys();
+	} else if (match_cstr(name.str, "refresh-outputs")) {
+		init_outputs();
+	} else if (match_cstr(name.str, "list-clients")) {
+		dump_clients();
+	} else if (match_cstr(name.str, "refresh-panel")) {
+		const char *arg = &name.str[sizeof("refresh-panel")];
+		if (arg)
+			refresh_panel(atoi(arg));
+	} else if (match_cstr(name.str, "focus-screen")) {
+		const char *arg = &name.str[sizeof("focus-screen")];
+		if (arg)
+			focus_screen(atoi(arg));
+	} else if (match_cstr(name.str, "focus-window")) {
+		const char *arg = &name.str[sizeof("focus-window")];
+		if (arg)
+			focus_window_req(atoi(arg));
 	} else if (match_cstr(name.str, "reload-colors")) {
 		struct list_head *cur;
 		init_colors();
@@ -3575,12 +3701,6 @@ static void handle_user_request(void)
 			panel_raise(scr);
 			redraw_panel_items(scr);
 		}
-	} else if (match_cstr(name.str, "refresh-outputs")) {
-		init_outputs();
-	} else if (match_cstr(name.str, "refresh-panel")) {
-		const char *arg = &name.str[sizeof("refresh-panel")];
-		if (arg)
-			refresh_panel(atoi(arg));
 	}
 
 	tt("root %s\n", name.str);
@@ -3744,21 +3864,6 @@ static void panel_button_press(xcb_button_press_event_t *e)
 	}
 }
 
-static void panel_button_release(xcb_button_release_event_t *e)
-{
-	curscr = coord2scr(e->root_x, e->root_y);
-
-	if pointer_inside(curscr, PANEL_AREA_TAGS, e->event_x) {
-		dd("panel release time %u", e->time - tag_time);
-		if (e->time - tag_time > TAG_LONG_PRESS) {
-			mark_tag(e->root_x, e->root_y, e->event_x);
-		} else {
-			select_tag(curscr, e->event_x);
-			xcb_flush(dpy);
-		}
-	}
-}
-
 static void handle_button_release(xcb_button_release_event_t *e)
 {
 	struct client *cli;
@@ -3772,8 +3877,17 @@ static void handle_button_release(xcb_button_release_event_t *e)
 		}
 	}
 
-	if (curscr->panel.win == e->event)
-		panel_button_release(e);
+	curscr = coord2scr(e->root_x, e->root_y);
+
+	if (curscr->panel.win == e->event) {
+		if pointer_inside(curscr, PANEL_AREA_TAGS, e->event_x) {
+			dd("panel release time %u", e->time - tag_time);
+			if (e->time - tag_time > TAG_LONG_PRESS)
+				mark_tag(e->root_x, e->root_y, e->event_x);
+			else
+				select_tag(curscr, e->event_x);
+		}
+	}
 
 	xcb_ungrab_pointer(dpy, XCB_CURRENT_TIME);
 	xcb_flush(dpy);
