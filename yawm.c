@@ -228,8 +228,6 @@ struct screen { /* per output abstraction */
 
 	struct panel panel; /* screen panel */
 	struct panel_item items[PANEL_AREA_MAX];
-	struct rect space;
-	struct client *anchor;
 };
 
 #define list2screen(item) list_entry(item, struct screen, head)
@@ -252,6 +250,8 @@ struct tag {
 	uint16_t w;
 	char *name; /* visible name */
 	strlen_t nlen; /* name length */
+	struct rect space;
+	struct client *anchor;
 };
 
 #define list2tag(item) list_entry(item, struct tag, head)
@@ -984,7 +984,7 @@ static void draw_toolbar(void)
 	struct toolbar_item *end = toolbar_items + ARRAY_SIZE(toolbar_items);
 	uint16_t x;
 	uint16_t h;
-	uint8_t locked = !!(toolbar.cli == curscr->anchor);
+	uint8_t locked = !!(toolbar.cli == curscr->tag->anchor);
 
 	x = toolbar.panel.pad * 2;
 	focused_item = NULL;
@@ -1530,31 +1530,31 @@ static void make_grid(void *ptr)
 
 	curscr = coord2scr(arg->x, arg->y);
 
-	if (!curscr->anchor) {
-		curscr->space.x = curscr->x;
-		curscr->space.y = curscr->y;
-		curscr->space.w = curscr->w;
-		curscr->space.h = curscr->h;
+	if (!curscr->tag->anchor) {
+		curscr->tag->space.x = curscr->x;
+		curscr->tag->space.y = curscr->y;
+		curscr->tag->space.w = curscr->w;
+		curscr->tag->space.h = curscr->h;
 	}
 
 	n = 0;
 	list_walk(cur, &curscr->tag->clients) {
 		struct client *cli = list2client(cur);
-		if (curscr->anchor == cli)
+		if (curscr->tag->anchor == cli)
 			continue;
 		else if (window_status(cli->win) == WIN_STATUS_VISIBLE)
 			n++;
 	}
 
 	cw = ch = GRIDCELL_MIN_WIDTH;
-	for (i = 1; i < curscr->space.w / GRIDCELL_MIN_WIDTH; i++) {
+	for (i = 1; i < curscr->tag->space.w / GRIDCELL_MIN_WIDTH; i++) {
 		if (i * i >= n) {
-			cw = curscr->space.w / i;
-			ch = curscr->space.h / i;
+			cw = curscr->tag->space.w / i;
+			ch = curscr->tag->space.h / i;
 			goto done;
 		} else if (i * (i + 1) >= n) {
-			cw = curscr->space.w / (i + 1);
-			ch = curscr->space.h / i - BORDER_WIDTH;
+			cw = curscr->tag->space.w / (i + 1);
+			ch = curscr->tag->space.h / i - BORDER_WIDTH;
 			goto done;
 		}
 	}
@@ -1565,15 +1565,16 @@ done:
 	x = y = 0;
 	list_walk(cur, &curscr->tag->clients) {
 		struct client *cli = list2client(cur);
-		if (curscr->anchor == cli)
+		if (curscr->tag->anchor == cli)
 			continue;
 		if (window_status(cli->win) != WIN_STATUS_VISIBLE)
 			continue;
-		client_moveresize(cli, curscr->space.x + x, curscr->space.y + y,
+		client_moveresize(cli, curscr->tag->space.x + x,
+				  curscr->tag->space.y + y,
 				  cw - BORDER_WIDTH - WINDOW_PAD,
 				  ch - BORDER_WIDTH - WINDOW_PAD);
 		x += cw;
-		if (x > curscr->space.w - cw) {
+		if (x > curscr->tag->space.w - cw) {
 			x = 0;
 			y += ch;
 		}
@@ -1802,15 +1803,15 @@ static void flag_window(void *ptr)
 	struct client *cli;
 
 	curscr = coord2scr(arg->x, arg->y);
-	cli = curscr->anchor;
+	cli = curscr->tag->anchor;
 
-	if (curscr->anchor)
-		curscr->anchor = NULL;
+	if (curscr->tag->anchor)
+		curscr->tag->anchor = NULL;
 	else
-		curscr->anchor = pointer2cli();
+		curscr->tag->anchor = pointer2cli();
 
-	if (curscr->anchor)
-		window_border_color(curscr->anchor->win, alertbg);
+	if (curscr->tag->anchor)
+		window_border_color(curscr->tag->anchor->win, alertbg);
 	else if (cli)
 		window_border_color(cli->win, border_active);
 
@@ -1821,7 +1822,7 @@ static void flag_window(void *ptr)
 
 	while (cur < end) {
 		if (cur->str == (const char *) BTN_FLAG) {
-			if (curscr->anchor) {
+			if (curscr->tag->anchor) {
 				cur->flags |= TOOL_FLG_LOCK;
 				fg = color2ptr(FOCUSFG);
 			} else {
@@ -1880,7 +1881,7 @@ static void place_window(void *ptr)
 		y = curscr->y;
 		w = curscr->w - 2 * BORDER_WIDTH - WINDOW_PAD;
 		h = curscr->h - 2 * BORDER_WIDTH - WINDOW_PAD;
-		curscr->anchor = NULL;
+		curscr->tag->anchor = NULL;
 		break;
 	case WIN_POS_CENTER:
 		if (cli->flags & CLI_FLG_CENTER) {
@@ -1981,14 +1982,14 @@ halfw:
 	w = curscr->w / cli->div - 2 * BORDER_WIDTH;
 	h = curscr->h - 2 * BORDER_WIDTH - WINDOW_PAD;
 
-	if (curscr->anchor == cli) {
+	if (curscr->tag->anchor == cli) {
 		if (pos == WIN_POS_LEFT_FILL)
-			curscr->space.x = curscr->x + w + 2 * BORDER_WIDTH;
+			curscr->tag->space.x = curscr->x + w + 2 * BORDER_WIDTH;
 		else
-			curscr->space.x = curscr->x;
-		curscr->space.y = curscr->y;
-		curscr->space.w = curscr->w - curscr->w / cli->div;
-		curscr->space.h = curscr->h;
+			curscr->tag->space.x = curscr->x;
+		curscr->tag->space.y = curscr->y;
+		curscr->tag->space.w = curscr->w - curscr->w / cli->div;
+		curscr->tag->space.h = curscr->h;
 		struct arg arg = { .x = curscr->x, .y = curscr->y, };
 		make_grid(&arg);
 	}
@@ -1998,16 +1999,16 @@ halfh:
 	w = curscr->w - 2 * BORDER_WIDTH - WINDOW_PAD;
 	h = curscr->h / cli->div - 2 * BORDER_WIDTH - WINDOW_PAD;
 
-	if (curscr->anchor == cli) {
-		curscr->space.x = curscr->x;
+	if (curscr->tag->anchor == cli) {
+		curscr->tag->space.x = curscr->x;
 
 		if (pos == WIN_POS_TOP_FILL)
-			curscr->space.y = curscr->y + h + 2 * BORDER_WIDTH;
+			curscr->tag->space.y = curscr->y + h + 2 * BORDER_WIDTH;
 		else
-			curscr->space.y = curscr->y;
+			curscr->tag->space.y = curscr->y;
 
-		curscr->space.w = curscr->w;
-		curscr->space.h = curscr->h - curscr->h / cli->div;
+		curscr->tag->space.w = curscr->w;
+		curscr->tag->space.h = curscr->h - curscr->h / cli->div;
 		struct arg arg = { .x = curscr->x, .y = curscr->y, };
 		make_grid(&arg);
 	}
@@ -3810,14 +3811,14 @@ static void toolbar_button_press(struct arg *arg)
 		}
 	} else if (focused_item->str == (const char *) BTN_FLAG) {
 		curscr = coord2scr(arg->x, arg->y);
-		if (!curscr->anchor) {
-			curscr->anchor = toolbar.cli;
+		if (!curscr->tag->anchor) {
+			curscr->tag->anchor = toolbar.cli;
 			focused_item->flags |= TOOL_FLG_LOCK;
-		} else if (curscr->anchor != toolbar.cli) {
-			curscr->anchor = toolbar.cli;
+		} else if (curscr->tag->anchor != toolbar.cli) {
+			curscr->tag->anchor = toolbar.cli;
 			focused_item->flags |= TOOL_FLG_LOCK;
 		} else {
-			curscr->anchor = NULL;
+			curscr->tag->anchor = NULL;
 			focused_item->flags &= ~TOOL_FLG_LOCK;
 		}
 		hide_toolbar();
