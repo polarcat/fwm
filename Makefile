@@ -59,6 +59,14 @@ install-$(clockout):
 	-cp -v $(clockout) $(HOME)/bin/$(clockout)
 	-chmod 755 $(HOME)/bin/$(clockout)
 
+install-tools:
+	-mkdir -p $(HOME)/bin
+	-cp -v tools/scrlist $(HOME)/bin/
+	-chmod 755 $(HOME)/bin/scrlist
+	-mkdir -p $(HOME)/.yawm/center
+	-cp -v tools/dialogrc $(HOME)/.yawm/
+	-touch $(HOME)/.yawm/center/scrlist
+
 clean:
 	-rm -f $(wmout) $(wmdout) $(clockout)
 
