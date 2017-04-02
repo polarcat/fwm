@@ -2911,14 +2911,14 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
 /*
  * Tags dir structure:
  *
- * /<basedir>/<screennumber>/tags/<tagnumber>/{.name,<winclass1>,<winclassN>}
+ * /<basedir>/screens/<screennumber>/tags/<tagnumber>/{.name,<winclass1>,<winclassN>}
  */
 
 static int init_tags(struct screen *scr)
 {
 	uint16_t pos;
 	uint8_t i;
-	strlen_t len = baselen + sizeof("/255/tags/255/.name");
+	strlen_t len = baselen + sizeof("screens/255/tags/255/.name");
 	char path[len];
 	char name[TAG_NAME_MAX + 1] = "0";
 	int fd;
@@ -2932,13 +2932,13 @@ static int init_tags(struct screen *scr)
 
 	for (i = 0; i < UCHAR_MAX; i++ ) {
 		st.st_mode = 0;
-		sprintf(path, "%s/%d/tags/%d", basedir, scr->id, i);
+		sprintf(path, "%s/screens/%d/tags/%d", basedir, scr->id, i);
 		if (stat(path, &st) < 0)
 			continue;
 		if ((st.st_mode & S_IFMT) != S_IFDIR)
 			continue;
 
-		sprintf(path, "%s/%d/tags/%d/.name", basedir, scr->id, i);
+		sprintf(path, "%s/screens/%d/tags/%d/.name", basedir, scr->id, i);
 		fd = open(path, O_RDONLY);
 		if (fd > 0) {
 			read(fd, name, sizeof(name) - 1);
@@ -4758,6 +4758,11 @@ static int init_homedir(void)
 
 	if (chdir(basedir) < 0) { /* change to working directory */
 		ee("chdir(%s) failed\n", basedir);
+		goto err;
+	}
+
+	if (mkdir("screens", mode) < 0 && errno != EEXIST) {
+		ee("mkdir(%s/.yawm/screens) failed\n", homedir);
 		goto err;
 	}
 
