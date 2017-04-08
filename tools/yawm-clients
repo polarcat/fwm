@@ -1,0 +1,55 @@
+#!/bin/sh
+
+width=50
+height=7
+items=0
+list=''
+
+cli=$HOME/.yawm/clients
+tmp=$HOME/.yawm/tmp
+run=$tmp/clients
+res=$tmp/clients.fifo
+
+xsetroot -name "list-clients"
+mkdir -p $tmp
+mkfifo $res 2>/dev/null
+
+present()
+{
+	for item in $list; do
+		if [ "$item" = "$1" ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+echo "DIALOGRC=\$HOME/.yawm/dialogrc" > $run
+echo "export DIALOGRC" >> $run
+
+while read scr tag win status pid name; do
+	case "$tag" in
+	"<dock>"|"<tray>"|"<nil>") continue;;
+	esac
+
+	if present $tag; then
+		continue
+	fi
+
+	eval "list=\"\$list \$win '\$name | \$pid | \$tag'\""
+	items=$((items + 1))
+done < $cli
+
+height=$((height + items))
+printf "dialog --no-tags --nook --no-cancel --menu ' ' " >> $run
+printf "$height $width $items" >> $run
+printf "$list 2>$res\n" >> $run
+chmod +x $run
+cat $run
+
+export ST_CURSOR_TYPE=8 # hide cursor
+exec $HOME/bin/st -t scrlist -g ${width}x$height -e sh -c $run &
+read res < $res
+if [ -n "$res" ]; then
+	xsetroot -name "focus-window $res"
+fi

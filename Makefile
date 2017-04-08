@@ -61,11 +61,14 @@ install-$(clockout):
 
 install-tools:
 	-mkdir -p $(HOME)/bin
-	-cp -v tools/scrlist $(HOME)/bin/
-	-chmod 755 $(HOME)/bin/scrlist
+	-cp -v tools/yawm-screens $(HOME)/bin/
+	-chmod 755 $(HOME)/bin/yawm-screens
+	-touch $(HOME)/.yawm/center/yawm-screens
+	-cp -v tools/yawm-clients $(HOME)/bin/
+	-chmod 755 $(HOME)/bin/yawm-clients
+	-touch $(HOME)/.yawm/center/yawm-clients
 	-mkdir -p $(HOME)/.yawm/center
 	-cp -v tools/dialogrc $(HOME)/.yawm/
-	-touch $(HOME)/.yawm/center/scrlist
 
 clean:
 	-rm -f $(wmout) $(wmdout) $(clockout)
