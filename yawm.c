@@ -3245,13 +3245,13 @@ static void init_panel(struct screen *scr)
 	xcb_flush(dpy); /* flush this operation otherwise panel will be
 			   misplaced in multiscreen setup */
 
-        xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, scr->panel.win,
+	xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, scr->panel.win,
 			    XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
-                            sizeof("yawmpanel") - 1, "yawmpanel");
+			    sizeof("yawmpanel") - 1, "yawmpanel");
 
-        xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, scr->panel.win,
+	xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, scr->panel.win,
 			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
-                            sizeof("yawmpanel") - 1, "yawmpanel");
+			    sizeof("yawmpanel") - 1, "yawmpanel");
 
 	scr->panel.gc = xcb_generate_id(dpy);
 	mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND;
@@ -3564,7 +3564,7 @@ static void focus_screen(uint8_t id)
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
 		if (scr->id == id) {
-			dd("### focus screen %u tag %s", id, scr->tag->name);
+			ii("focus screen %u tag %s", id, scr->tag->name);
 			focus_tag(scr, scr->tag);
 			curscr = scr;
 			return;
@@ -3575,6 +3575,11 @@ static void focus_screen(uint8_t id)
 static void focus_window_req(xcb_window_t win)
 {
 	struct list_head *cur;
+
+	if (errno != 0) {
+		ee("failed to focus win 0x%x\n", win);
+		return;
+	}
 
 	if (win == XCB_WINDOW_NONE)
 		return;
@@ -3600,7 +3605,7 @@ static void focus_window_req(xcb_window_t win)
 			focus_window(cli->win);
 			warp_pointer(cli);
 
-			dd("### focus screen %u tag %s win 0x%x",
+			ii("focus screen %u tag %s win 0x%x",
 			   curscr->id, cli->tag ? cli->tag->name : "<nil>",
 			   win);
 			return;
@@ -3660,41 +3665,57 @@ static void dump_clients(void)
 		free(title.ptr);
 	}
 
+	static uint32_t clients_list_seq;
+	fprintf(f, "seq %u\n", clients_list_seq++);
 	fclose(f);
 }
 
-#define match_cstr(str, cstr) strncmp(str, cstr, sizeof(cstr) - 1) == 0
+#define match(str0, str1) strncmp(str0, str1, sizeof(str1) - 1) == 0
 
-static void handle_user_request(void)
+static void handle_user_request(int fd)
 {
+	char req[32];
 	struct sprop name;
 
-	get_sprop(&name, rootscr->root, XCB_ATOM_WM_NAME, UCHAR_MAX);
-	if (!name.ptr) {
-		get_sprop(&name, rootscr->root, a_net_wm_name, UINT_MAX);
-		if (!name.ptr)
+	if (fd < 0) {
+		get_sprop(&name, rootscr->root, XCB_ATOM_WM_NAME, UCHAR_MAX);
+		if (!name.ptr) {
+			get_sprop(&name, rootscr->root, a_net_wm_name, UINT_MAX);
+			if (!name.ptr)
+				return;
+		}
+	} else {
+		if (read(fd, req, sizeof(req)) < 1) {
+			ee("read(%d) failed, %s\n", fd, strerror(errno));
 			return;
+		}
+		name.str = req;
+		name.len = sizeof(req);
+		name.ptr = NULL;
 	}
 
-	if (match_cstr(name.str, "reload-keys")) {
+	ii("handle request '%s'\n", name.str);
+
+	if (match(name.str, "reload-keys")) {
 		init_keys();
-	} else if (match_cstr(name.str, "refresh-outputs")) {
+	} else if (match(name.str, "refresh-outputs")) {
 		init_outputs();
-	} else if (match_cstr(name.str, "list-clients")) {
+	} else if (match(name.str, "list-clients")) {
 		dump_clients();
-	} else if (match_cstr(name.str, "refresh-panel")) {
+	} else if (match(name.str, "refresh-panel")) {
 		const char *arg = &name.str[sizeof("refresh-panel")];
 		if (arg)
 			refresh_panel(atoi(arg));
-	} else if (match_cstr(name.str, "focus-screen")) {
+	} else if (match(name.str, "focus-screen")) {
 		const char *arg = &name.str[sizeof("focus-screen")];
 		if (arg)
 			focus_screen(atoi(arg));
-	} else if (match_cstr(name.str, "focus-window")) {
+	} else if (match(name.str, "focus-window")) {
 		const char *arg = &name.str[sizeof("focus-window")];
+		errno = 0;
 		if (arg)
-			focus_window_req(atoi(arg));
-	} else if (match_cstr(name.str, "reload-colors")) {
+			focus_window_req(strtol(arg, NULL, 16));
+	} else if (match(name.str, "reload-colors")) {
 		struct list_head *cur;
 		init_colors();
 		list_walk(cur, &screens) {
@@ -3704,12 +3725,11 @@ static void handle_user_request(void)
 		}
 	}
 
-	tt("root %s\n", name.str);
 	free(name.ptr);
 	xcb_flush(dpy);
 }
 
-#undef match_cstr
+#undef match
 
 #define pointer_inside(scr, area, ex)\
 	(ex >= scr->items[area].x &&\
@@ -4189,13 +4209,14 @@ static void handle_property_notify(xcb_property_notify_event_t *e)
 
 	if (e->atom == XCB_ATOM_WM_NAME) {
 		if (e->window == rootscr->root) {
-			handle_user_request();
+			handle_user_request(-1);
 		} else if (curscr) {
 			handle_wmname(e);
 		}
 	} else if (e->atom == a_usertime) {
-		dd("_NET_WM_USER_TIME from win 0x%x time %u state %u",
-		   e->window, e->time, e->state);
+		if (!e->time)
+			dd("_NET_WM_USER_TIME from win 0x%x time %u state %u",
+			   e->window, e->time, e->state);
 	} else if (e->atom == a_has_vt) {
 		struct list_head *cur;
 		list_walk(cur, &screens) {
@@ -4790,9 +4811,33 @@ homeless:
 	return -1;
 }
 
+enum fdtypes {
+	FD_SRV,
+	FD_CTL,
+	FD_MAX,
+};
+
+static inline void handle_server_event(struct pollfd *pfd)
+{
+	if (pfd->revents & POLLIN)
+		while (handle_events()) {} /* read all events */
+
+	pfd->revents = 0;
+}
+
+static inline void handle_control_event(struct pollfd *pfd)
+{
+	if (pfd->revents & POLLIN)
+		handle_user_request(pfd->fd);
+
+	/* reset pipe */
+	pfd->fd = open_fifo(YAWM_FIFO, pfd->fd);
+	pfd->revents = 0;
+}
+
 int main()
 {
-	struct pollfd pfd;
+	struct pollfd pfds[FD_MAX];
 	const char *logfile;
 
 	logfile = getenv("YAWM_LOG");
@@ -4849,15 +4894,20 @@ int main()
 
 	autostart();
 
-	pfd.fd = xcb_get_file_descriptor(dpy);
-	pfd.events = POLLIN;
-	pfd.revents = 0;
+	pfds[FD_SRV].fd = xcb_get_file_descriptor(dpy);
+	pfds[FD_SRV].events = POLLIN;
+	pfds[FD_SRV].revents = 0;
+
+	pfds[FD_CTL].fd = open_fifo(YAWM_FIFO, -1);
+	pfds[FD_CTL].events = POLLIN;
+	pfds[FD_CTL].revents = 0;
 
 	ii("defscr %d, curscr %d\n", defscr->id, curscr->id);
 	ii("enter events loop\n");
 
 	while (1) {
-		int rc = poll(&pfd, 1, -1);
+		errno = 0;
+		int rc = poll(pfds, ARRAY_SIZE(pfds), -1);
 		if (rc == 0) { /* timeout */
 			/* TODO: some user-defined periodic task */
 		} else if (rc < 0) {
@@ -4868,8 +4918,9 @@ int main()
 			continue;
 		}
 
-		if (pfd.revents & POLLIN)
-			while (handle_events()) {} /* read all events */
+		handle_control_event(&pfds[FD_CTL]);
+		handle_server_event(&pfds[FD_SRV]);
+
 		if (logfile) {
 			fflush(stdout);
 			fflush(stderr);

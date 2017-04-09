@@ -16,8 +16,8 @@
 #define FONT2_NAME "fontawesome"
 
 #define YAWM_BASE ".yawm"
-#define YAWM_LIST "winlist"
-#define YAWM_FIFO ".yawm"
+#define YAWM_LIST ".tree"
+#define YAWM_FIFO ".control"
 #define YAWMD_FIFO ".yawmd"
 
 enum reqtype {
