@@ -1,18 +1,16 @@
 #!/bin/sh
 
-width=50
+width=70
 height=7
 items=0
 list=''
 
 cli=$HOME/.yawm/clients
+ctl=$HOME/.yawm/.control
 tmp=$HOME/.yawm/tmp
 run=$tmp/clients
 res=$tmp/clients.fifo
-
-xsetroot -name "list-clients"
-mkdir -p $tmp
-mkfifo $res 2>/dev/null
+seq=''
 
 present()
 {
@@ -24,10 +22,43 @@ present()
 	return 1
 }
 
+while read var val; do
+	case "$var" in
+	seq*) seq=$val;;
+	esac
+done < $cli
+
+echo list-clients > $ctl
+
+found=0
+count=0
+while :; do
+	while read var val; do
+		case "$var" in
+		seq*)
+			if [ "$seq" != "$val" ]; then
+				found=1
+				break
+			fi
+			;;
+		esac
+	done < $cli
+	if [ $found -eq 1 -o $count -gt 5000 ]; then
+		break
+	fi
+	count=$((count + 1))
+done
+
+mkdir -p $tmp
+mkfifo $res 2>/dev/null
+
 echo "DIALOGRC=\$HOME/.yawm/dialogrc" > $run
 echo "export DIALOGRC" >> $run
 
 while read scr tag win status pid name; do
+	case "$scr" in
+	seq*) continue;;
+	esac
 	case "$tag" in
 	"<dock>"|"<tray>"|"<nil>") continue;;
 	esac
@@ -36,7 +67,7 @@ while read scr tag win status pid name; do
 		continue
 	fi
 
-	eval "list=\"\$list \$win '\$name | \$pid | \$tag'\""
+	eval "list=\"\$list \$win '\$name \$tag:\$pid:\$win'\""
 	items=$((items + 1))
 done < $cli
 
@@ -51,5 +82,5 @@ export ST_CURSOR_TYPE=8 # hide cursor
 exec $HOME/bin/st -t scrlist -g ${width}x$height -e sh -c $run &
 read res < $res
 if [ -n "$res" ]; then
-	xsetroot -name "focus-window $res"
+	echo "focus-window $res" > $ctl
 fi
