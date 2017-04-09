@@ -500,14 +500,14 @@ static int store_info(struct clientreq *req)
 	int fd;
 	struct stat st;
 
-	if (stat(YAWM_FIFO, &st) < 0) {
-		ee("stat("YAWM_FIFO") failed\n");
+	if (stat(YAWMD_FIFO, &st) < 0) {
+		ee("stat("YAWMD_FIFO") failed\n");
 		return -1;
 	} else if (!(S_ISFIFO(st.st_mode))) {
-		ee(YAWM_FIFO" is not a fifo file\n");
+		ee(YAWMD_FIFO" is not a fifo file\n");
 		return -1;
-	} else if ((fd = open(YAWM_FIFO, O_WRONLY | O_NONBLOCK)) < 0) {
-		ee("open("YAWM_FIFO") failed\n");
+	} else if ((fd = open(YAWMD_FIFO, O_WRONLY | O_NONBLOCK)) < 0) {
+		ee("open("YAWMD_FIFO") failed\n");
 		return -1;
 	}
 

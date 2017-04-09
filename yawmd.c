@@ -12,14 +12,12 @@
 
 #include <errno.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <poll.h>
-#include <sys/stat.h>
 
 #include <xcb/xcb.h>
 
@@ -139,29 +137,6 @@ out:
 	   req->info.tag, req->info.win);
 }
 
-static int open_fifo(const char *path, int fd)
-{
-	mode_t mode = S_IRUSR | S_IWUSR;
-
-	if (fd >= 0) /* re-open fifo */
-		close(fd);
-
-remake:
-	if (mkfifo(path, mode) < 0) {
-		if (errno == EEXIST) {
-			unlink(path);
-			goto remake;
-		}
-
-		mode = errno;
-		ee("open(%s) failed: %s\n", path, strerror(errno));
-		errno = mode;
-		return -1;
-	}
-
-	return open(path, O_RDONLY | O_NONBLOCK, S_IRUSR);
-}
-
 static void handle_signal(int signum)
 {
 	if (signum == SIGUSR1)
@@ -196,44 +171,36 @@ static void yawmd(void)
 
 	list_init(&clients);
 
-	fds.fd = open_fifo(YAWM_FIFO, -1);
-	if (fds.fd < 0)
-		return;
-	fds.events = POLLIN;
-
 	sa.sa_handler = &handle_signal;
 	sa.sa_flags = SA_RESTART;
 	sigaction(SIGUSR1, &sa, NULL); /* interrupt poll */
 
-	ii("%s, %s/"YAWM_BASE"/"YAWM_FIFO": waiting for data\n", disp, home);
+	ii("%s, %s/"YAWM_BASE"/"YAWMD_FIFO ": waiting for data\n", disp, home);
+
+	fds.fd = -1;
 
 	while (1) {
-		memset(&req, 0, sizeof(req));
+		/* start with clean pipe */
+		if ((fds.fd = open_fifo(YAWMD_FIFO, fds.fd)) < 0) {
+			sleep(1);
+			continue;
+		}
+
+		fds.events = POLLIN;
 		fds.revents = 0;
-		errno = 0;
+		memset(&req, 0, sizeof(req));
+
 		poll(&fds, 1, -1);
-		if (fds.revents & POLLERR || errno == EINTR) {
-			fds.fd = open_fifo(YAWM_FIFO, fds.fd);
-			continue;
-		} else if (!(fds.revents & POLLIN)) {
-			if (fds.revents & POLLHUP)
-				fds.fd = open_fifo(YAWM_FIFO, fds.fd);
-			continue;
-		}
 
-		if (read(fds.fd, &req, sizeof(req)) != sizeof(req)) {
-			errno = EMSGSIZE;
-			ee("message size does not match (%lu)\n", sizeof(req));
-			fds.fd = open_fifo(YAWM_FIFO, fds.fd);
-			continue;
+		if (fds.revents & POLLIN &&
+		    read(fds.fd, &req, sizeof(req)) == sizeof(req)) {
+			if (req.type == REQTYPE_RESET)
+				save_list(1); /* save and clean */
+			else if (req.type == REQTYPE_FLUSH)
+				save_list(0); /* save don't clean */
+			else
+				update_list(&req);
 		}
-
-		if (req.type == REQTYPE_RESET)
-			save_list(1); /* save and clean */
-		else if (req.type == REQTYPE_FLUSH)
-			save_list(0); /* save don't clean */
-		else
-			update_list(&req);
 	}
 
 	close(fds.fd);

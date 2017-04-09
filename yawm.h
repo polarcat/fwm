@@ -17,7 +17,8 @@
 
 #define YAWM_BASE ".yawm"
 #define YAWM_LIST "winlist"
-#define YAWM_FIFO ".yawmd"
+#define YAWM_FIFO ".yawm"
+#define YAWMD_FIFO ".yawmd"
 
 enum reqtype {
 	REQTYPE_CLEAN,

@@ -188,4 +188,31 @@ static inline uint32_t crc32(char *buf, size_t len)
 }
 #endif /* USE_CRC32 */
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+static inline int open_fifo(const char *path, int fd)
+{
+	mode_t mode = S_IRUSR | S_IWUSR;
+
+	if (fd >= 0) /* re-open fifo */
+		close(fd);
+
+remake:
+	if (mkfifo(path, mode) < 0) {
+		if (errno == EEXIST) {
+			unlink(path);
+			goto remake;
+		}
+
+		mode = errno;
+		ee("open(%s) failed: %s\n", path, strerror(errno));
+		errno = mode;
+		return -1;
+	}
+
+	return open(path, O_RDONLY | O_NONBLOCK, S_IRUSR);
+}
+
 #endif /* MISC_H */
