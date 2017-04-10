@@ -2661,13 +2661,7 @@ static void del_window(xcb_window_t win)
 		print_title(scr, XCB_WINDOW_NONE);
 
 out:
-	cli = front_client(curscr->tag); /* current screen */
-
-	if (!cli) {
-		print_title(curscr, XCB_WINDOW_NONE);
-		xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
-				    XCB_CURRENT_TIME);
-	} else {
+	if ((cli = front_client(curscr->tag))) {
 		if (window_status(cli->win) != WIN_STATUS_VISIBLE) {
 			ww("invisible front win 0x%x\n", cli->win);
 			cli = NULL;
@@ -2677,6 +2671,12 @@ out:
 			focus_window(cli->win);
 			warp_pointer(cli);
 		}
+	}
+
+	if (!cli) {
+		print_title(curscr, XCB_WINDOW_NONE);
+		xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
+				    XCB_CURRENT_TIME);
 	}
 
 	update_client_list();
