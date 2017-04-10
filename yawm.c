@@ -752,14 +752,74 @@ static void warp_pointer(struct client *cli)
 				 cli->w / 2, cli->h / 2);
 }
 
+static void restore_client(xcb_window_t win, struct screen **scr,
+			   struct tag **tag)
+{
+	struct list_head *cur;
+	FILE *f;
+	char path[sizeof("0xffffffffffffffff")];
+	uint8_t buf[2];
+
+	snprintf(path, sizeof(path), ".session/0x%x", win);
+
+	if (!(f = fopen(path, "r"))) {
+		ww("skip win 0x%x, errno=%d\n", win, errno);
+		return;
+	}
+
+	buf[0] = buf[1] = 0;
+	fread(buf, sizeof(buf), 1, f); /* continue with 0,0 upon failure */
+	fclose(f);
+
+	list_walk(cur, &screens) {
+		struct screen *tmp = list2screen(cur);
+		if (buf[0] == tmp->id) {
+			*scr = tmp;
+			break;
+		}
+	}
+
+	if (!*scr)
+		return;
+
+	list_walk(cur, &(*scr)->tags) {
+		struct tag *tmp = list2tag(cur);
+		if (buf[1] == tmp->id) {
+			*tag = tmp;
+			ii("restore win 0x%x scr %d tag %d '%s'\n", win,
+			   (*scr)->id, (*tag)->id, (*tag)->name);
+			return;
+		}
+	}
+}
+
 static void store_client(struct client *cli, uint8_t clean)
 {
-	struct clientreq req;
-	req.info.win = cli->win;
-	req.info.scr = cli->scr->id;
-	req.info.tag = cli->tag->id;
-	clean ? (req.type = REQTYPE_CLEAN) : (req.type = REQTYPE_STORE);
-	store_info(&req);
+	FILE *f;
+	char path[sizeof("0xffffffffffffffff")];
+	uint8_t buf[2];
+
+	snprintf(path, sizeof(path), ".session/0x%x", cli->win);
+
+	if (clean) {
+		errno = 0;
+		unlink(path);
+		ii("clean %s, errno=%d\n", path, errno);
+		return;
+	}
+
+	if (!(f = fopen(path, "w+"))) {
+		ee("fopen(%s) failed, %s\n", path, strerror(errno));
+		return;
+	}
+
+	buf[0] = cli->scr->id;
+	buf[1] = cli->tag->id;
+	errno = 0;
+	fwrite(buf, sizeof(buf), 1, f);
+	ii("store win 0x%x scr %d tag %d '%s', errno=%d\n", cli->win,
+	   cli->scr->id, cli->tag->id, cli->tag->name, errno);
+	fclose(f);
 }
 
 static void free_client(struct client *cli)
@@ -876,41 +936,6 @@ static struct screen *cli2scr(struct client *cli)
 	}
 	return NULL;
 #endif
-}
-
-static void client_restore(xcb_window_t win, int fd, struct screen **scr,
-			   struct tag **tag)
-{
-	struct clientinfo info = { 0 };
-
-	lseek(fd, 0, SEEK_SET);
-	while (read(fd, &info, sizeof(info)) == sizeof(info)) {
-		struct list_head *cur;
-
-		if (info.win != win)
-			continue;
-
-		list_walk(cur, &screens) {
-			struct screen *tmp = list2screen(cur);
-			if (info.scr == tmp->id) {
-				*scr = tmp;
-				break;
-			}
-		}
-
-		if (!*scr)
-			return;
-
-		list_walk(cur, &(*scr)->tags) {
-			struct tag *tmp = list2tag(cur);
-			if (info.tag == tmp->id) {
-				*tag = tmp;
-				ii("restore 0x%x, screen %d tag %s\n",
-				   win, (*scr)->id, (*tag)->name);
-				return;
-			}
-		}
-	}
 }
 
 static void draw_toolbar_text(struct toolbar_item *item, struct color *fg)
@@ -2475,8 +2500,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
 	scr = NULL;
 	tag = NULL;
 
-	if (winlist >= 0) /* try to restore screen and tag from file */
-		client_restore(win, winlist, &scr, &tag);
+	restore_client(win, &scr, &tag);
 
 	if (!scr && g->x == 0 && g->y == 0) {
 		scr = pointer2scr();
@@ -4780,6 +4804,11 @@ static int init_homedir(void)
 
 	if (chdir(basedir) < 0) { /* change to working directory */
 		ee("chdir(%s) failed\n", basedir);
+		goto err;
+	}
+
+	if (mkdir(".session", mode) < 0 && errno != EEXIST) {
+		ee("mkdir(%s/.yawm/.session) failed\n", homedir);
 		goto err;
 	}
 
