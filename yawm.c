@@ -745,11 +745,15 @@ static void resort_client(struct client *cli)
 	list_add(&cli->tag->clients, &cli->head);
 }
 
-static void warp_pointer(struct client *cli)
+static void warp_pointer(xcb_window_t win, int16_t x, int16_t y)
 {
 	/* generates enter notify event */
-	xcb_warp_pointer_checked(dpy, XCB_NONE, cli->win, 0, 0, 0, 0,
-				 cli->w / 2, cli->h / 2);
+	xcb_warp_pointer_checked(dpy, XCB_NONE, win, 0, 0, 0, 0, x, y);
+}
+
+static void center_pointer(xcb_window_t win, uint16_t w, uint16_t h)
+{
+	warp_pointer(win, w / 2, h / 2);
 }
 
 static void restore_client(xcb_window_t win, struct screen **scr,
@@ -888,8 +892,10 @@ enum focus_flags {
 
 static void focus_root(void)
 {
+	print_title(curscr, XCB_WINDOW_NONE);
 	xcb_set_input_focus_checked(dpy, XCB_NONE, rootscr->root,
 				    XCB_CURRENT_TIME);
+	center_pointer(rootscr->root, curscr->w, curscr->h);
 }
 
 static void unfocus_window(xcb_window_t win)
@@ -1027,8 +1033,7 @@ static void draw_toolbar(void)
 		ptr++;
 	}
 
-	xcb_warp_pointer_checked(dpy, XCB_NONE, toolbar.panel.win, 0, 0, 0, 0,
-				 5 * toolbar.panel.pad, panel_height / 2);
+	warp_pointer(toolbar.panel.win, 5 * toolbar.panel.pad, panel_height / 2);
 }
 
 static void exec(const char *cmd)
@@ -1457,7 +1462,7 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 	focus_window(cli->win);
 
 	if (!(scr->flags & SCR_FLG_SWITCH_WINDOW_NOWARP)) {
-		warp_pointer(cli);
+		center_pointer(cli->win, cli->w, cli->h);
 	} else {
 		struct client *tmp = front_client(scr->tag);
 		if (tmp)
@@ -1996,7 +2001,7 @@ out:
 		window_border_color(cli->win, alertbg);
 
 	client_moveresize(cli, x, y, w, h);
-	warp_pointer(cli);
+	center_pointer(cli->win, cli->w, cli->h);
 	xcb_flush(dpy);
 	return;
 halfwh:
@@ -2123,7 +2128,7 @@ static void show_windows(struct tag *tag, uint8_t focus)
 		} else {
 			raise_window(cli->win);
 			focus_window(cli->win);
-			warp_pointer(cli);
+			center_pointer(cli->win, cli->w, cli->h);
 		}
 	}
 }
@@ -2213,7 +2218,7 @@ static void retag_client(void *ptr)
 	cli->tag = curscr->tag;
 	raise_window(cli->win);
 	focus_window(cli->win);
-	warp_pointer(cli);
+	center_pointer(cli->win, cli->w, cli->h);
 	xcb_flush(dpy);
 	store_client(cli, 0);
 }
@@ -2645,7 +2650,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
 			resort_client(tmp);
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 		xcb_map_window_checked(dpy, cli->win);
-		warp_pointer(cli);
+		center_pointer(cli->win, cli->w, cli->h);
 	}
 
 	ii("screen %d tag '%s' cli %p pid %d win 0x%x geo %ux%u+%d+%d\n",
@@ -2680,12 +2685,18 @@ static void del_window(xcb_window_t win)
 
 	scr = cli2scr(cli); /* do it before client is freed */
 	free_client(cli);
+	ii("deleted win 0x%x\n", win);
 
 	if (scr)
 		print_title(scr, XCB_WINDOW_NONE);
 
 out:
-	if ((cli = front_client(curscr->tag))) {
+	curscr = pointer2scr();
+
+	if (!(cli = front_client(curscr->tag)))
+		cli = pointer2cli();
+
+	if (cli) {
 		if (window_status(cli->win) != WIN_STATUS_VISIBLE) {
 			ww("invisible front win 0x%x\n", cli->win);
 			cli = NULL;
@@ -2693,19 +2704,15 @@ out:
 			ii("front win 0x%x\n", cli ? cli->win : 0);
 			raise_window(cli->win);
 			focus_window(cli->win);
-			warp_pointer(cli);
+			center_pointer(cli->win, cli->w, cli->h);
 		}
 	}
 
-	if (!cli) {
-		print_title(curscr, XCB_WINDOW_NONE);
-		xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
-				    XCB_CURRENT_TIME);
-	}
+	if (!cli)
+		focus_root();
 
 	update_client_list();
 	xcb_flush(dpy);
-	ii("deleted win 0x%x\n", win);
 }
 
 static int screen_panel(xcb_window_t win)
@@ -2771,7 +2778,7 @@ static void scan_clients(void)
 	if ((cli = front_client(curscr->tag))) {
 		raise_window(cli->win);
 		focus_window(cli->win);
-		warp_pointer(cli);
+		center_pointer(cli->win, cli->w, cli->h);
 	}
 
 	free(tree);
@@ -3627,7 +3634,7 @@ static void focus_window_req(xcb_window_t win)
 			focus_tag(curscr, cli->tag);
 			raise_window(cli->win);
 			focus_window(cli->win);
-			warp_pointer(cli);
+			center_pointer(cli->win, cli->w, cli->h);
 
 			ii("focus screen %u tag %s win 0x%x",
 			   curscr->id, cli->tag ? cli->tag->name : "<nil>",
@@ -3870,7 +3877,7 @@ static void toolbar_button_press(struct arg *arg)
 		struct client *cli = toolbar.cli;
 		cli->flags |= CLI_FLG_MOVE;
 		hide_toolbar();
-		warp_pointer(cli);
+		center_pointer(cli->win, cli->w, cli->h);
 
 		/* subscribe to motion events */
 
@@ -3959,7 +3966,7 @@ static void handle_button_press(xcb_button_press_event_t *e)
 		} else {
 			struct client *cli = win2cli(e->child);
 			if (cli)
-				warp_pointer(cli);
+				center_pointer(cli->win, cli->w, cli->h);
 		}
 		break;
 	case MOUSE_BTN_MID:
