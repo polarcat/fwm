@@ -495,32 +495,6 @@ static uint8_t randrbase;
 
 /* ... and the mess begins */
 
-static int store_info(struct clientreq *req)
-{
-	int fd;
-	struct stat st;
-
-	if (stat(YAWMD_FIFO, &st) < 0) {
-		ee("stat("YAWMD_FIFO") failed\n");
-		return -1;
-	} else if (!(S_ISFIFO(st.st_mode))) {
-		ee(YAWMD_FIFO" is not a fifo file\n");
-		return -1;
-	} else if ((fd = open(YAWMD_FIFO, O_WRONLY | O_NONBLOCK)) < 0) {
-		ee("open("YAWMD_FIFO") failed\n");
-		return -1;
-	}
-
-	int ret = write(fd, req, sizeof(*req));
-	if (ret != sizeof(*req)) {
-		ee("failed to store info win 0x%x\n", req->info.win);
-		ret = -1;
-	}
-
-	close(fd);
-	return ret;
-}
-
 static void get_sprop(struct sprop *ret, xcb_window_t win,
 		      enum xcb_atom_enum_t atom, uint32_t len)
 {
@@ -4509,6 +4483,7 @@ static int handle_events(void)
 	mm("got event %d (%d)\n", e->response_type, type);
 
 #define WIN(struct_ptr) ((struct_ptr *) e)->window
+
 	switch (type) {
 	case 0: break; /* NO EVENT */
 	case XCB_VISIBILITY_NOTIFY:
@@ -4773,13 +4748,6 @@ static void init_rootwin(void)
 	xcb_flush(dpy);
 }
 
-static void init_yawmd(void)
-{
-	struct clientreq req = { REQTYPE_RESET, };
-	if (store_info(&req) >= 0)
-		ii("desktop layout will be tracked by yawmd\n");
-}
-
 static int init_homedir(void)
 {
 	int mode = S_IRWXU;
@@ -4836,7 +4804,6 @@ static int init_homedir(void)
 		goto err;
 	}
 
-	init_yawmd(); /* keep track on desktop layout */
 	return 0;
 
 err:
@@ -4869,7 +4836,7 @@ static inline void handle_control_event(struct pollfd *pfd)
 		handle_user_request(pfd->fd);
 
 	/* reset pipe */
-	pfd->fd = open_fifo(YAWM_FIFO, pfd->fd);
+	pfd->fd = open_fifo(YAWM_CTRL, pfd->fd);
 	pfd->revents = 0;
 }
 
@@ -4936,7 +4903,7 @@ int main()
 	pfds[FD_SRV].events = POLLIN;
 	pfds[FD_SRV].revents = 0;
 
-	pfds[FD_CTL].fd = open_fifo(YAWM_FIFO, -1);
+	pfds[FD_CTL].fd = open_fifo(YAWM_CTRL, -1);
 	pfds[FD_CTL].events = POLLIN;
 	pfds[FD_CTL].revents = 0;
 

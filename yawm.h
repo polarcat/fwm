@@ -16,26 +16,6 @@
 #define FONT2_NAME "fontawesome"
 
 #define YAWM_BASE ".yawm"
-#define YAWM_LIST ".tree"
-#define YAWM_FIFO ".control"
-#define YAWMD_FIFO ".yawmd"
-
-enum reqtype {
-	REQTYPE_CLEAN,
-	REQTYPE_STORE,
-	REQTYPE_FLUSH,
-	REQTYPE_RESET,
-};
-
-struct clientinfo {
-	uint8_t scr;
-	uint8_t tag;
-	uint32_t win;
-};
-
-struct clientreq {
-	uint8_t type;
-	struct clientinfo info;
-};
+#define YAWM_CTRL ".control"
 
 #endif /* YAWM_H */

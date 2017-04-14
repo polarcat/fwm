@@ -24,24 +24,6 @@ install-$(wmout):
 	-cp -v $(wmout) $(HOME)/bin/$(wmout)
 	-chmod 755 $(HOME)/bin/$(wmout)
 
-wmdout = yawmd
-wmdsrc = yawmd.c
-wmdcflags = $(cflags)
-wmdldflags = -lxcb
-
-$(wmdout):
-	$(cc) -o $(wmdout) $(wmdsrc) $(wmdcflags) $(wmdldflags)
-	@echo "(==) $(wmdout) done"
-
-clean-$(wmdout):
-	-rm -f $(wmdout)
-
-install-$(wmdout):
-	-mkdir -p $(HOME)/bin
-	-unlink $(HOME)/bin/$(wmdout)
-	-cp -v $(wmdout) $(HOME)/bin/$(wmdout)
-	-chmod 755 $(HOME)/bin/$(wmdout)
-
 clockout = clock
 clocksrc = clock.c
 clockcflags = $(xftcflags) $(cflags)
@@ -71,9 +53,9 @@ install-tools:
 	-cp -v tools/dialogrc $(HOME)/.yawm/
 
 clean:
-	-rm -f $(wmout) $(wmdout) $(clockout)
+	-rm -f $(wmout) $(clockout)
 
 distclean: clean
 
 .PHONY: all clean distclean
-all: $(wmout) $(wmdout) $(clockout)
+all: $(wmout) $(clockout)
