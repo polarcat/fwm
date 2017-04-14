@@ -2422,7 +2422,7 @@ static void window_dedup(xcb_window_t win)
 	if ((pid = win2pid(win)) < 1)
 		ii("failed to get pid of win 0x%x\n", win);
 	else if (kill(pid, SIGTERM) == 0)
-		ii("de-dup win 0x%x, pid %d, crc 0x%x\n", win, pid);
+		ii("de-dup win 0x%x, pid %d\n", win, pid);
 }
 
 static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
