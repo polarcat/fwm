@@ -741,7 +741,7 @@ static void restore_client(xcb_window_t win, struct screen **scr,
 	snprintf(path, sizeof(path), ".session/0x%x", win);
 
 	if (!(f = fopen(path, "r"))) {
-		ww("skip win 0x%x, errno=%d\n", win, errno);
+		ww("skip restore win 0x%x, %s\n", win, strerror(errno));
 		return;
 	}
 
@@ -2416,26 +2416,14 @@ static struct screen *pointer2scr(void)
 }
 
 /* attempt to destroy duplicate window and terminate associated process */
-static int window_dedup(struct client *cli, xcb_window_t win)
+static void window_dedup(xcb_window_t win)
 {
 	pid_t pid;
 
-	list_del(&cli->head);
-	list_add(&curscr->tag->clients, &cli->head);
-	xcb_map_window(dpy, cli->win);
-	raise_window(cli->win);
-	xcb_flush(dpy);
-
-	if ((pid = win2pid(win)) < 1) {
+	if ((pid = win2pid(win)) < 1)
 		ii("failed to get pid of win 0x%x\n", win);
-		return -1;
-	} else if (kill(pid, SIGTERM) == 0) {
-		ii("de-dup win 0x%x, pid %d, crc 0x%x\n", cli->win, pid,
-		   cli->crc);
-		return 0;
-	}
-
-	return -1;
+	else if (kill(pid, SIGTERM) == 0)
+		ii("de-dup win 0x%x, pid %d, crc 0x%x\n", win, pid);
 }
 
 static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
@@ -2472,8 +2460,8 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		struct list_head *cur;
 		list_walk(cur, &clients) {
 			struct client *cli = glob2client(cur);
-			if (cli->crc == crc && window_dedup(cli, win) == 0)
-				return NULL;
+			if (cli->crc == crc && cli->win != win)
+				window_dedup(cli->win);
 		}
 	}
 
