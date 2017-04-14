@@ -2419,7 +2419,6 @@ static void dock_add(struct client *cli, uint8_t bw)
 	}
 
 	dock_arrange(cli->scr);
-
 	raise_window(cli->win);
 	xcb_map_window(dpy, cli->win);
 	xcb_flush(dpy);
@@ -2465,7 +2464,7 @@ static int window_dedup(struct client *cli, xcb_window_t win)
 	return -1;
 }
 
-static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
+static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 {
 	uint32_t flags;
 	struct tag *tag;
@@ -2659,8 +2658,13 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
 	   scr->id, scr->tag->name, cli, cli->pid, cli->win, cli->w, cli->h,
 	   cli->x, cli->y);
 
-	if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
+	if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK))) {
 		store_client(cli, 0);
+		if (!scan) {
+			focus_window(cli->win);
+			raise_window(cli->win);
+		}
+	}
 
 	update_client_list();
 out:
@@ -2748,7 +2752,7 @@ static void hide_leader(xcb_window_t win)
 
 static void scan_clients(void)
 {
-	int i, n, fd;
+	int i, n;
 	xcb_query_tree_cookie_t c;
 	xcb_query_tree_reply_t *tree;
 	xcb_window_t *wins;
@@ -2763,21 +2767,17 @@ static void scan_clients(void)
 	n = xcb_query_tree_children_length(tree);
 	wins = xcb_query_tree_children(tree);
 
-	if ((fd = open(YAWM_LIST, O_RDONLY)) < 0)
-		ww("open("YAWM_LIST") failed, layout won't be recovered\n");
-
 	/* map clients onto the current screen */
 	ii("%d clients found\n", n);
 	for (i = 0; i < n; i++) {
 		if (screen_panel(wins[i]))
 			continue;
-		add_window(wins[i], 0, fd);
+		add_window(wins[i], 0, 1);
 		/* gotta do this otherwise empty windows are being shown
 		 * in certain situations e.g. when adding systray clients
 		 */
 		hide_leader(wins[i]);
 	}
-	close(fd);
 
 	if ((cli = front_client(curscr->tag))) {
 		raise_window(cli->win);
@@ -4315,7 +4315,7 @@ static void tray_add(xcb_window_t win)
 
 	cli = win2cli(win);
 	if (!cli) {
-		cli = add_window(win, 1, -1);
+		cli = add_window(win, 1, 0);
 		if (!cli) {
 			ee("add_window(0x%x) failed\n", win);
 			return;
@@ -4602,9 +4602,7 @@ static int handle_events(void)
 		te("XCB_MAP_REQUEST: parent 0x%x, win 0x%x\n",
 		   ((xcb_map_request_event_t *) e)->parent,
 		   ((xcb_map_request_event_t *) e)->window);
-		add_window(((xcb_map_notify_event_t *) e)->window, 0, -1);
-		focus_window(((xcb_map_notify_event_t *) e)->window);
-		raise_window(((xcb_map_notify_event_t *) e)->window);
+		add_window(((xcb_map_notify_event_t *) e)->window, 0, 0);
 		break;
 	case XCB_PROPERTY_NOTIFY:
 		te("XCB_PROPERTY_NOTIFY: win 0x%x, atom %d\n",
