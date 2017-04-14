@@ -869,7 +869,6 @@ static void focus_root(void)
 	print_title(curscr, XCB_WINDOW_NONE);
 	xcb_set_input_focus_checked(dpy, XCB_NONE, rootscr->root,
 				    XCB_CURRENT_TIME);
-	center_pointer(rootscr->root, curscr->w, curscr->h);
 }
 
 static void unfocus_window(xcb_window_t win)
