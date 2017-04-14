@@ -2467,6 +2467,7 @@ static int window_dedup(struct client *cli, xcb_window_t win)
 
 static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
 {
+	uint32_t flags;
 	struct tag *tag;
 	struct screen *scr;
 	struct client *cli;
@@ -2479,6 +2480,21 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
 	if (win == rootscr->root || win == toolbar.panel.win)
 		return NULL;
 
+	flags = 0;
+
+	if (window_special(win, "dock", sizeof("dock")))
+		flags |= CLI_FLG_DOCK;
+	else if (window_special(win, "center", sizeof("center")))
+		flags |= CLI_FLG_CENTER;
+	else if (window_special(win, "top-left", sizeof("top-left")))
+		flags |= CLI_FLG_TOPLEFT;
+	else if (window_special(win, "top-right", sizeof("top-right")))
+		flags |= CLI_FLG_TOPRIGHT;
+	else if (window_special(win, "bottom-left", sizeof("bottom-left")))
+		flags |= CLI_FLG_BOTLEFT;
+	else if (window_special(win, "bottom-right", sizeof("bottom-right")))
+		flags |= CLI_FLG_BOTRIGHT;
+
 	if ((crc = window_special(win, "exclusive", sizeof("exclusive")))) {
 		struct list_head *cur;
 		list_walk(cur, &clients) {
@@ -2488,24 +2504,25 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
 		}
 	}
 
-	cli = NULL;
-	a = NULL;
-	/* get initial geometry */
-	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
-	if (!g) {
-		ee("xcb_get_geometry() failed\n");
-		goto out;
+	if (tray_window(win) || tray) {
+		ii("win 0x%x provides embed info\n", win);
+		flags |= CLI_FLG_TRAY;
 	}
 
-	if (tray_window(win)) {
-		ii("win 0x%x provides embed info\n", win);
-		tray = 1;
+	cli = NULL;
+	a = NULL;
+	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
+
+	if (!g) { /* could not get initial geometry */
+		ee("xcb_get_geometry() failed\n");
+		goto out;
 	}
 
 	scr = NULL;
 	tag = NULL;
 
-	restore_client(win, &scr, &tag);
+	if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
+		restore_client(win, &scr, &tag);
 
 	if (!scr && g->x == 0 && g->y == 0) {
 		scr = pointer2scr();
@@ -2560,7 +2577,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
 		goto out;
 	}
 
-	if (!tray && a->override_redirect) {
+	if (!(flags & CLI_FLG_TRAY) && a->override_redirect) {
 		ww("ignore redirected window 0x%x\n", win);
 		goto out;
 	}
@@ -2580,19 +2597,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
 	cli->scr = scr;
 	cli->win = win;
 	cli->crc = crc;
-
-	if (window_special(win, "dock", sizeof("dock")))
-		cli->flags |= CLI_FLG_DOCK;
-	else if (window_special(win, "center", sizeof("center")))
-		cli->flags |= CLI_FLG_CENTER;
-	else if (window_special(win, "top-left", sizeof("top-left")))
-		cli->flags |= CLI_FLG_TOPLEFT;
-	else if (window_special(win, "top-right", sizeof("top-right")))
-		cli->flags |= CLI_FLG_TOPRIGHT;
-	else if (window_special(win, "bottom-left", sizeof("bottom-left")))
-		cli->flags |= CLI_FLG_BOTLEFT;
-	else if (window_special(win, "bottom-right", sizeof("bottom-right")))
-		cli->flags |= CLI_FLG_BOTRIGHT;
+	cli->flags = flags;
 
 	if (cli->flags & CLI_FLG_CENTER) {
 		g->x = scr->x + scr->w / 2 - g->width / 2;
@@ -2609,10 +2614,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
 	} else if (cli->flags & CLI_FLG_BOTRIGHT) {
 		g->x = scr->w - g->width - 2 * BORDER_WIDTH;
 		g->y = scr->h - g->height - 2 * BORDER_WIDTH - 1;
-	} else if (tray || cli->flags & CLI_FLG_DOCK) {
-		if (tray)
-			cli->flags |= CLI_FLG_TRAY;
-
+	} else if (cli->flags & CLI_FLG_TRAY || cli->flags & CLI_FLG_DOCK) {
 		cli->w = g->width;
 		cli->h = g->height;
 		dock_add(cli, g->border_width);
@@ -2657,7 +2659,9 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, int winlist)
 	   scr->id, scr->tag->name, cli, cli->pid, cli->win, cli->w, cli->h,
 	   cli->x, cli->y);
 
-	store_client(cli, 0);
+	if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
+		store_client(cli, 0);
+
 	update_client_list();
 out:
 	free(a);
