@@ -2414,15 +2414,54 @@ static struct screen *pointer2scr(void)
         return curscr;
 }
 
-/* attempt to destroy duplicate window and terminate associated process */
-static void window_dedup(xcb_window_t win)
+static void del_window(xcb_window_t win)
 {
-	pid_t pid;
+	struct screen *scr;
+	struct client *cli;
 
-	if ((pid = win2pid(win)) < 1)
-		ii("failed to get pid of win 0x%x\n", win);
-	else if (kill(pid, SIGTERM) == 0)
-		ii("de-dup win 0x%x, pid %d\n", win, pid);
+	scr = curscr;
+	cli = win2cli(win);
+	if (!cli) {
+		ii("unmanaged win 0x%x\n", win);
+		xcb_unmap_subwindows_checked(dpy, win);
+		goto out;
+	}
+
+	if (cli->flags & CLI_FLG_DOCK) {
+		dock_del(cli);
+		goto out;
+	}
+
+	scr = cli2scr(cli); /* do it before client is freed */
+	free_client(cli);
+	ii("deleted win 0x%x\n", win);
+
+	if (scr)
+		print_title(scr, XCB_WINDOW_NONE);
+
+out:
+	curscr = pointer2scr();
+
+	if (!(cli = front_client(curscr->tag)))
+		cli = pointer2cli();
+
+	if (cli) {
+		if (window_status(cli->win) != WIN_STATUS_VISIBLE) {
+			ww("invisible front win 0x%x\n", cli->win);
+			cli = NULL;
+		} else {
+			ii("front win 0x%x\n", cli ? cli->win : 0);
+			raise_window(cli->win);
+			focus_window(cli->win);
+			center_pointer(cli->win, cli->w, cli->h);
+		}
+	}
+
+	if (!cli)
+		focus_root();
+
+	update_client_list();
+	xcb_flush(dpy);
 }
 
 static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
@@ -2458,9 +2497,13 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	if ((crc = window_special(win, "exclusive", sizeof("exclusive")))) {
 		struct list_head *cur;
 		list_walk(cur, &clients) {
-			struct client *cli = glob2client(cur);
-			if (cli->crc == crc && cli->win != win)
-				window_dedup(cli->win);
+			cli = glob2client(cur);
+			if (cli->crc == crc && cli->win != win) {
+				xcb_window_t tmp = cli->win;
+				close_window(cli->win);
+				del_window(tmp);
+				break;
+			}
 		}
 	}
 
@@ -2632,56 +2675,6 @@ out:
 	free(a);
 	free(g);
 	return cli;
-}
-
-static void del_window(xcb_window_t win)
-{
-	struct screen *scr;
-	struct client *cli;
-
-	scr = curscr;
-	cli = win2cli(win);
-	if (!cli) {
-		ii("unmanaged win 0x%x\n", win);
-		xcb_unmap_subwindows_checked(dpy, win);
-		goto out;
-	}
-
-	if (cli->flags & CLI_FLG_DOCK) {
-		dock_del(cli);
-		goto out;
-	}
-
-	scr = cli2scr(cli); /* do it before client is freed */
-	free_client(cli);
-	ii("deleted win 0x%x\n", win);
-
-	if (scr)
-		print_title(scr, XCB_WINDOW_NONE);
-
-out:
-	curscr = pointer2scr();
-
-	if (!(cli = front_client(curscr->tag)))
-		cli = pointer2cli();
-
-	if (cli) {
-		if (window_status(cli->win) != WIN_STATUS_VISIBLE) {
-			ww("invisible front win 0x%x\n", cli->win);
-			cli = NULL;
-		} else {
-			ii("front win 0x%x\n", cli ? cli->win : 0);
-			raise_window(cli->win);
-			focus_window(cli->win);
-			center_pointer(cli->win, cli->w, cli->h);
-		}
-	}
-
-	if (!cli)
-		focus_root();
-
-	update_client_list();
-	xcb_flush(dpy);
 }
 
 static int screen_panel(xcb_window_t win)
