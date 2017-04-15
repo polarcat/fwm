@@ -2524,7 +2524,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	scr = NULL;
 	tag = NULL;
 
-	if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
+	if (scan && !(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
 		restore_client(win, &scr, &tag);
 
 	if (!scr && g->x == 0 && g->y == 0) {
