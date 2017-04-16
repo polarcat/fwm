@@ -2464,6 +2464,43 @@ out:
 	xcb_flush(dpy);
 }
 
+static uint8_t window_exists(xcb_window_t win, uint32_t *crc)
+{
+	struct client *cli;
+	struct list_head *cur;
+
+	*crc = window_special(win, "exclusive", sizeof("exclusive"));
+
+	list_walk(cur, &clients) {
+		cli = glob2client(cur);
+
+		if (cli->win == win) {
+			ii("already managed scr %d tag '%s' win 0x%x\n",
+			   cli->scr->id, cli->tag->name, win);
+			/* re-tag window */
+			list_del(&cli->head);
+			list_add(&curscr->tag->clients, &cli->head);
+			cli->scr = curscr;
+			cli->tag = curscr->tag;
+			focus_window(cli->win);
+			raise_window(cli->win);
+			center_pointer(cli->win, cli->w, cli->h);
+			store_client(cli, 0);
+			return 1;
+		}
+
+		if (*crc && cli->crc == *crc && cli->win != win) {
+			xcb_window_t tmp = cli->win;
+			close_window(cli->win);
+			del_window(tmp);
+			ii("exclusive win 0x%x crc 0x%x\n", win, *crc);
+			return 0;
+		}
+	}
+
+	return 0;
+}
+
 static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 {
 	uint32_t flags;
@@ -2494,18 +2531,8 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	else if (window_special(win, "bottom-right", sizeof("bottom-right")))
 		flags |= CLI_FLG_BOTRIGHT;
 
-	if ((crc = window_special(win, "exclusive", sizeof("exclusive")))) {
-		struct list_head *cur;
-		list_walk(cur, &clients) {
-			cli = glob2client(cur);
-			if (cli->crc == crc && cli->win != win) {
-				xcb_window_t tmp = cli->win;
-				close_window(cli->win);
-				del_window(tmp);
-				break;
-			}
-		}
-	}
+	if (window_exists(win, &crc))
+		return NULL;
 
 	if (tray_window(win) || tray) {
 		ii("win 0x%x provides embed info\n", win);
