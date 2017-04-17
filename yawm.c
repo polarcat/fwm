@@ -730,7 +730,7 @@ static void center_pointer(xcb_window_t win, uint16_t w, uint16_t h)
 	warp_pointer(win, w / 2, h / 2);
 }
 
-static void restore_client(xcb_window_t win, struct screen **scr,
+static void restore_window(xcb_window_t win, struct screen **scr,
 			   struct tag **tag)
 {
 	struct list_head *cur;
@@ -2253,7 +2253,7 @@ static void move_window(xcb_window_t win, int16_t x, int16_t y)
 }
 #endif
 
-static struct tag *client_tag(struct screen *scr, xcb_window_t win)
+static struct tag *lookup_tag(struct screen *scr, xcb_window_t win)
 {
 	struct sprop class;
 	char *path;
@@ -2269,28 +2269,44 @@ static struct tag *client_tag(struct screen *scr, xcb_window_t win)
 		ww("unable to detect window class\n");
 		return NULL;
 	}
-	tt("win %p, class %s\n", win, class.str);
+
+	ii("scr %d win 0x%x class '%s'\n", scr->id, win, class.str);
 
 	tag = NULL;
-	class.len += baselen + sizeof("/255/tags/255/");
+	class.len += baselen + sizeof("screens/255/tags/255/");
 	path = calloc(1, class.len);
+
 	if (!path)
 		goto out;
 
 	list_walk(cur, &scr->tags) {
 		tag = list2tag(cur);
-		snprintf(path, class.len, "%s/%d/tags/%d/%s", basedir,
+		snprintf(path, class.len, "%s/screens/%d/tags/%d/%s", basedir,
 			 scr->id, tag->id, class.str);
+
 		if (stat(path, &st) < 0)
 			continue;
 
-		tt("win %p, class %s, tag %d\n", win, class.str, tag->id);
 		return tag;
 	}
 
 out:
 	free(class.ptr);
 	free(path);
+	return NULL;
+}
+
+static struct tag *configured_tag(xcb_window_t win)
+{
+	struct tag *tag;
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if ((tag = lookup_tag(scr, win)))
+			return tag;
+	}
+
 	return NULL;
 }
 
@@ -2552,7 +2568,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	tag = NULL;
 
 	if (scan && !(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
-		restore_client(win, &scr, &tag);
+		restore_window(win, &scr, &tag);
 
 	if (!scr && g->x == 0 && g->y == 0) {
 		scr = pointer2scr();
@@ -2651,6 +2667,13 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		goto out;
 	}
 
+	cli->tag = configured_tag(win); /* read tag from configuration */
+
+	if (!cli->tag && tag) /* not configured, restore from last session */
+		cli->tag = tag;
+	else if (!cli->tag) /* nothing worked, map to current tag */
+		cli->tag = scr->tag;
+
 	window_border_width(cli->win, BORDER_WIDTH);
 
 	/* subscribe events */
@@ -2659,17 +2682,10 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	val[0] |= XCB_EVENT_MASK_STRUCTURE_NOTIFY;
 	xcb_change_window_attributes_checked(dpy, win, XCB_CW_EVENT_MASK, val);
 
-	if (!tag) {
-		if (!(tag = client_tag(scr, win)))
-			tag = scr->tag;
-	}
-
 	unfocus_clients(curscr->tag);
-
-	list_add(&tag->clients, &cli->head);
+	list_add(&cli->tag->clients, &cli->head);
 
 	cli->pid = win2pid(win);
-	cli->tag = tag;
 	list_add(&clients, &cli->list); /* also add to global list of clients */
 	client_moveresize(cli, g->x, g->y, g->width, g->height);
 
@@ -2685,9 +2701,9 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		center_pointer(cli->win, cli->w, cli->h);
 	}
 
-	ii("screen %d tag '%s' cli %p pid %d win 0x%x geo %ux%u+%d+%d\n",
-	   scr->id, scr->tag->name, cli, cli->pid, cli->win, cli->w, cli->h,
-	   cli->x, cli->y);
+	ii("screen %d tag '%s' win 0x%x pid %d geo %ux%u+%d+%d cli %p\n",
+	   scr->id, cli->tag->name, cli->win, cli->pid, cli->w, cli->h,
+	   cli->x, cli->y, cli);
 
 	if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK))) {
 		store_client(cli, 0);
