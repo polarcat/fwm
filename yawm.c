@@ -2501,6 +2501,7 @@ static uint8_t window_exists(xcb_window_t win, uint32_t *crc)
 			focus_window(cli->win);
 			raise_window(cli->win);
 			center_pointer(cli->win, cli->w, cli->h);
+			xcb_map_window_checked(dpy, cli->win);
 			store_client(cli, 0);
 			return 1;
 		}
