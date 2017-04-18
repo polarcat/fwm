@@ -1239,7 +1239,7 @@ static uint32_t window_special(xcb_window_t win, const char *dir, uint8_t len)
 	struct sprop class;
 	char *path;
 	struct stat st;
-	int rc;
+	uint32_t rc;
 	xcb_atom_t atom;
 	int count;
 	int pathlen;
@@ -2351,7 +2351,7 @@ static void dock_arrange(struct screen *scr)
 		if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
 			list_del(&cli->head);
 			list_del(&cli->list);
-			free(cur);
+			free(cli);
 			continue;
 		}
 		x -= (cli->w + scr->panel.pad + 2 * BORDER_WIDTH);
@@ -2480,42 +2480,31 @@ out:
 	xcb_flush(dpy);
 }
 
-static uint8_t window_exists(xcb_window_t win, uint32_t *crc)
+static uint32_t window_exclusive(xcb_window_t win)
 {
+	uint32_t crc;
 	struct client *cli;
-	struct list_head *cur;
+	struct list_head *cur, *tmp;
 
-	*crc = window_special(win, "exclusive", sizeof("exclusive"));
+	crc = window_special(win, "exclusive", sizeof("exclusive"));
 
-	list_walk(cur, &clients) {
+	list_walk_safe(cur, tmp, &clients) {
 		cli = glob2client(cur);
 
 		if (cli->win == win) {
-			ii("already managed scr %d tag '%s' win 0x%x\n",
-			   cli->scr->id, cli->tag->name, win);
-			/* re-tag window */
+			ii("cleanup cli %p win 0x%x\n", cli, win);
 			list_del(&cli->head);
-			list_add(&curscr->tag->clients, &cli->head);
-			cli->scr = curscr;
-			cli->tag = curscr->tag;
-			focus_window(cli->win);
-			raise_window(cli->win);
-			center_pointer(cli->win, cli->w, cli->h);
-			xcb_map_window_checked(dpy, cli->win);
-			store_client(cli, 0);
-			return 1;
-		}
-
-		if (*crc && cli->crc == *crc && cli->win != win) {
-			xcb_window_t tmp = cli->win;
+			list_del(&cli->list);
+			free(cli);
+		} else if (crc && cli->crc == crc && cli->win != win) {
+			xcb_window_t old = cli->win;
 			close_window(cli->win);
-			del_window(tmp);
-			ii("exclusive win 0x%x crc 0x%x\n", win, *crc);
-			return 0;
+			del_window(old);
+			ii("exclusive win 0x%x crc 0x%x\n", win, crc);
 		}
 	}
 
-	return 0;
+	return crc;
 }
 
 static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
@@ -2548,13 +2537,13 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	else if (window_special(win, "bottom-right", sizeof("bottom-right")))
 		flags |= CLI_FLG_BOTRIGHT;
 
-	if (window_exists(win, &crc))
-		return NULL;
-
 	if (tray_window(win) || tray) {
 		ii("win 0x%x provides embed info\n", win);
 		flags |= CLI_FLG_TRAY;
 	}
+
+	if (!(flags & (CLI_FLG_DOCK | CLI_FLG_TRAY)))
+		crc = window_exclusive(win);
 
 	cli = NULL;
 	a = NULL;
