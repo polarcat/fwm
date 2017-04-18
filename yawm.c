@@ -847,7 +847,7 @@ static void close_window(xcb_window_t win)
 	e.data.data32[1] = XCB_CURRENT_TIME;
 
 	ii("send WM_DELETE to win 0x%x\n", win);
-	xcb_send_event(dpy, 0, win, XCB_EVENT_MASK_NO_EVENT, (const char *) &e);
+	xcb_send_event_checked(dpy, 0, win, XCB_EVENT_MASK_NO_EVENT, (const char *) &e);
 	xcb_flush(dpy);
 }
 
@@ -2473,8 +2473,11 @@ out:
 		}
 	}
 
-	if (!cli)
+	if (!cli) {
 		focus_root();
+		warp_pointer(rootscr->root, curscr->x + curscr->w / 2,
+			     curscr->y + curscr->h / 2);
+	}
 
 	update_client_list();
 	xcb_flush(dpy);
@@ -3589,6 +3592,8 @@ static void focus_screen(uint8_t id)
 			ii("focus screen %u tag %s", id, scr->tag->name);
 			focus_tag(scr, scr->tag);
 			curscr = scr;
+			warp_pointer(rootscr->root, curscr->x + curscr->w / 2,
+				     curscr->y + curscr->h / 2);
 			return;
 		}
 	}
