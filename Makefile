@@ -7,8 +7,8 @@ xftldflags = $(shell pkg-config --libs xft)
 
 wmout = yawm
 wmsrc = yawm.c
-wmcflags = $(cflags) $(xftcflags) $(CFLAGS) -g
-wmldflags = -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms -g
+wmcflags = $(cflags) $(xftcflags) $(CFLAGS)
+wmldflags = -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms
 wmldflags += -lX11 -lX11-xcb $(xftldflags)
 
 $(wmout):
@@ -40,6 +40,23 @@ install-$(clockout):
 	-unlink $(HOME)/bin/$(clockout)
 	-cp -v $(clockout) $(HOME)/bin/$(clockout)
 	-chmod 755 $(HOME)/bin/$(clockout)
+
+menuout = menu
+menusrc = menu.c
+menucflags = $(xftcflags) $(cflags)
+menuldflags = $(xftldflags) -lxcb -lX11 -lX11-xcb -lxcb-keysyms
+
+$(menuout):
+	$(cc) -o $(menuout) $(menusrc) $(menucflags) $(menuldflags)
+
+clean-$(menuout):
+	-rm -f $(menuout)
+
+install-$(menuout):
+	-mkdir -p $(HOME)/bin
+	-unlink $(HOME)/bin/$(menuout)
+	-cp -v $(menuout) $(HOME)/bin/$(menuout)
+	-chmod 755 $(HOME)/bin/$(menuout)
 
 install-tools:
 	-mkdir -p $(HOME)/bin
