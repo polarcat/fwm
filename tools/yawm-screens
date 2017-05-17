@@ -1,15 +1,9 @@
 #!/bin/sh
 
-width=30
-height=7
-items=0
-list=''
-
 cli=$HOME/.yawm/clients
 ctl=$HOME/.yawm/.control
 tmp=$HOME/.yawm/tmp
-run=$tmp/screens
-res=$tmp/screens.fifo
+out=$tmp/screens
 
 present()
 {
@@ -49,32 +43,24 @@ while :; do
 done
 
 mkdir -p $tmp
-mkfifo $res 2>/dev/null
-
-echo "DIALOGRC=\$HOME/.yawm/dialogrc" > $run
-echo "export DIALOGRC" >> $run
+printf "" > $out
+list=''
 
 while read scr tag win status pid name; do
 	case "$scr" in
 	seq*) continue;;
 	esac
+
 	if present $scr; then
 		continue
 	fi
+
 	eval "list=\"\$list \$scr screen\$scr\""
-	items=$((items + 1))
+	printf "$scr\tscreen$scr\n" >> $out
 done < $cli
 
-height=$((height + items))
-printf "dialog --nook --no-cancel --menu ' ' " >> $run
-printf "$height $width $items" >> $run
-printf "$list 2>$res\n" >> $run
-chmod +x $run
-cat $run
-
-export ST_CURSOR_TYPE=8 # hide cursor
-exec $HOME/bin/st -t scrlist -g ${width}x$height -e sh -c $run &
-read res < $res
-if [ -n "$res" ]; then
-	echo "focus-screen $res" > $ctl
-fi
+menu -c 9 -r 5 -i -f $out |
+while read scr line; do
+	echo "focus-screen $scr" > $ctl
+	exit 0
+done

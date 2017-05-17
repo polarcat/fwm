@@ -1,26 +1,7 @@
 #!/bin/sh
 
-width=70
-height=7
-items=0
-list=''
-
 cli=$HOME/.yawm/clients
 ctl=$HOME/.yawm/.control
-tmp=$HOME/.yawm/tmp
-run=$tmp/clients
-res=$tmp/clients.fifo
-seq=''
-
-present()
-{
-	for item in $list; do
-		if [ "$item" = "$1" ]; then
-			return 0
-		fi
-	done
-	return 1
-}
 
 while read var val; do
 	case "$var" in
@@ -49,38 +30,8 @@ while :; do
 	count=$((count + 1))
 done
 
-mkdir -p $tmp
-mkfifo $res 2>/dev/null
-
-echo "DIALOGRC=\$HOME/.yawm/dialogrc" > $run
-echo "export DIALOGRC" >> $run
-
-while read scr tag win status pid name; do
-	case "$scr" in
-	seq*) continue;;
-	esac
-	case "$tag" in
-	"<dock>"|"<tray>"|"<nil>") continue;;
-	esac
-
-	if present $tag; then
-		continue
-	fi
-
-	eval "list=\"\$list \$win '\$name \$tag:\$pid:\$win'\""
-	items=$((items + 1))
-done < $cli
-
-height=$((height + items))
-printf "dialog --no-tags --nook --no-cancel --menu ' ' " >> $run
-printf "$height $width $items" >> $run
-printf "$list 2>$res\n" >> $run
-chmod +x $run
-cat $run
-
-export ST_CURSOR_TYPE=8 # hide cursor
-exec $HOME/bin/st -t scrlist -g ${width}x$height -e sh -c $run &
-read res < $res
-if [ -n "$res" ]; then
-	echo "focus-window $res" > $ctl
-fi
+menu -c 80 -r 24 -i -s 5 -f $HOME/.yawm/clients |
+while read scr tag win info; do
+	echo "focus-window $win" > $ctl
+	exit 0
+done
