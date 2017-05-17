@@ -58,7 +58,6 @@
 	fprintf(stderr, "(ee) %s: %s at %d\n", __func__, __FILE__, __LINE__);\
 }
 
-#define DEBUG
 #ifdef DEBUG
 #define dd(fmt, ...) \
 	printf("(dd) " fmt " | %s:%d\n", ##__VA_ARGS__, __func__, __LINE__)
