@@ -632,6 +632,12 @@ static int init_rows(void)
 		ptr++;
 	}
 
+	if (*ptr != '\n') {
+		errno = 0;
+		ee("end of line not found\n");
+		return -1;
+	}
+
 	if (!cols_per_row_) {
 		ee("failed to find number of items in row\n");
 		return -1;
@@ -712,6 +718,12 @@ static int init_rows(void)
 		}
 
 		ptr++;
+	}
+
+	if (!longest_row) {
+		errno = 0;
+		ee("file parse error, longest row not found\n");
+		return -1;
 	}
 
 	pages_[UCHAR_MAX].rowptr = end;
