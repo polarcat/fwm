@@ -1,0 +1,61 @@
+#!/bin/sh
+
+ifs_=$IFS
+max_=10
+dir_=$HOME/.clipboard
+dat_=$dir_/data
+out_=$dir_/list
+tmp_=$dir_/temp
+
+pref_=''
+name_=''
+getstat_() { pref_=$1; name_=$2; }
+
+mkdir -p $dir_/data
+xclip -o > $tmp_
+hash=$(md5sum $tmp_ | cut -f1 -d' ')
+time=$(date +%Y%m%d%H%M%S%s)
+
+for data in $dat_/*; do
+	IFS='-'; getstat_ $data; IFS=$ifs_
+	if [ "$name_" = "$hash" ]; then
+		mv $data $time-$name_
+	fi
+done
+
+i=0
+ls -t $dat_/ | while read name; do
+	i=$((i + 1))
+	if [ $i -ge $max_ ]; then
+		rm -f $dat_/$name
+	fi
+done
+
+mv $tmp_ $dat_/$time-$hash
+printf "" > $out_
+
+i=0
+ls -t $dat_/ | while read name; do
+	printf "$i\t" >> $out_
+	cat $dat_/$name | tr -d '[:cntrl:]' | cut -c 1-78 >> $out_
+	i=$((i + 1))
+done
+
+res=$(menu -i -f $out_)
+getstat_ $res
+
+if [ -z "$pref_" ]; then
+	exit 0
+fi
+
+i=0
+ls -t $dat_/ | while read name; do
+	if [ $i -eq $pref_ ]; then
+		cat $dat_/$name | xclip -i -selection primary
+		cat $dat_/$name | xclip -i -selection secondary
+		cat $dat_/$name | xclip -i -selection clipboard
+		cat $dat_/$name | xclip -i -selection buffer-cut
+		break
+	fi
+	i=$((i + 1))
+done
