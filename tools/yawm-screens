@@ -59,7 +59,7 @@ while read scr tag win status pid name; do
 	printf "$scr\tscreen$scr\n" >> $out
 done < $cli
 
-menu -c 9 -r 5 -i -f $out |
+menu -n yawm-screens -c 9 -r 5 -i -f $out |
 while read scr line; do
 	echo "focus-screen $scr" > $ctl
 	exit 0
