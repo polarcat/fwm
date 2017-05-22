@@ -70,6 +70,9 @@ install-tools:
 	-cp -v tools/yawm-clipboard $(HOME)/bin/
 	-chmod 755 $(HOME)/bin/yawm-clipboard
 	-touch $(HOME)/.yawm/center/yawm-clipboard
+	-cp -v tools/yawm-apps $(HOME)/bin/
+	-chmod 755 $(HOME)/bin/yawm-apps
+	-touch $(HOME)/.yawm/center/yawm-apps
 
 clean:
 	-rm -f $(wmout) $(clockout)

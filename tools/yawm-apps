@@ -1,0 +1,40 @@
+#!/bin/sh
+
+ifs_=$IFS
+dir_=/usr/share
+out_=$HOME/.yawm/menu
+val_=''
+
+setval_() { val_=$2; }
+getval_() { IFS=$1; shift 1; setval_ $@; }
+norm_() { val_=$1; }
+
+printf "" > $out_
+find $dir_ -type f -name "*.desktop" | while read file; do
+	name=''
+	cmd=''
+
+	while read entry; do
+		case "$entry" in
+		Name=*) getval_ '=' $entry; name=$val_;;
+		Comment=*) getval_ '=' $entry; comment=$val_;;
+		Exec=*) getval_ '=' $entry; cmd=$val_;;
+		Terminal=*) getval_ '=' $entry; term=$val_;;
+		Type=*) getval_ '=' $entry; type=$val_;;
+		Icon=*) getval_ '=' $entry; icon=$val_;;
+		Categories=*) getval_ '=' $entry; categ=$val_;;
+		esac
+	done < $file
+
+	if [ -n "$name" -a -n "$cmd" ]; then
+		IFS='%'; norm_ $cmd; cmd=$val_; IFS=$ifs_
+		printf "$cmd\t$name\tterm:$term\n" >> $out_
+	fi
+done
+
+runcmd_() { exec $1; }
+
+res=$(menu -n yawm-apps -i -f $out_)
+#IFS='	'
+runcmd_ $res &
+#IFS=$ifs_
