@@ -121,6 +121,7 @@ static uint8_t page_idx_;
 static uint8_t follow_;
 
 static const char *path_;
+static const char *name_ = "menu";
 
 static void text_size(const char *text, int len, uint16_t *w, uint16_t *h)
 {
@@ -836,11 +837,12 @@ static void help(const char *name)
 	   "  -f, --file <path>              tab-separated values file\n"
 	   "  -s, --swap-column <index>      swap column (shown first)\n"
 	   "  -i, --interlace                interlace colors\n"
+	   "  -n, --name <name>              window name and class (def '%s')\n"
 	   "  -0, --normal-foreground <hex>  rgb color, default 0x%x\n"
 	   "  -1, --normal-background <hex>  rgb color, default 0x%x\n"
 	   "  -2, --active-foreground <hex>  rgb color, default 0x%x\n"
 	   "  -3, --active-background <hex>  rgb color, default 0x%x\n",
-	   name, fg_, bg_, selfg_, selbg_);
+	   name, fg_, bg_, selfg_, selbg_, name_);
 }
 
 static int opt(const char *arg, const char *args, const char *argl)
@@ -872,6 +874,9 @@ static void opts(int argc, char *argv[])
 			swap_col_idx_ = atoi(argv[i]);
 		} else if (opt(arg, "-i", "--interlace")) {
 			interlace_ = 1;
+		} else if (opt(arg, "-n", "--name")) {
+			i++;
+			name_ = argv[i];
 		} else if (opt(arg, "-0", "--normal-foreground")) {
 			i++;
 			if (argv[i])
@@ -998,11 +1003,11 @@ int main(int argc, char *argv[])
 
         xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
 			    XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
-                            sizeof("yawm-clients") - 1, "yawm-clients");
+                            strlen(name_), name_);
 
         xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
 			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
-                            sizeof("yawm-clients") - 1, "yawm-clients");
+                            strlen(name_), name_);
 
 	xcb_map_window(dpy_, win_);
 	xcb_flush(dpy_);
