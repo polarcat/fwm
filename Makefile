@@ -60,14 +60,16 @@ install-$(menuout):
 
 install-tools:
 	-mkdir -p $(HOME)/bin
+	-mkdir -p $(HOME)/.yawm/center
 	-cp -v tools/yawm-screens $(HOME)/bin/
 	-chmod 755 $(HOME)/bin/yawm-screens
 	-touch $(HOME)/.yawm/center/yawm-screens
 	-cp -v tools/yawm-clients $(HOME)/bin/
 	-chmod 755 $(HOME)/bin/yawm-clients
 	-touch $(HOME)/.yawm/center/yawm-clients
-	-mkdir -p $(HOME)/.yawm/center
-	-cp -v tools/dialogrc $(HOME)/.yawm/
+	-cp -v tools/yawm-clipboard $(HOME)/bin/
+	-chmod 755 $(HOME)/bin/yawm-clipboard
+	-touch $(HOME)/.yawm/center/yawm-clipboard
 
 clean:
 	-rm -f $(wmout) $(clockout)
