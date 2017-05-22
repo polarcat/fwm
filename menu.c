@@ -357,12 +357,18 @@ static uint8_t find_col(const char *rowstr, uint8_t idx)
 		ptr++;
 	}
 
+	if (*ptr == '\n' && idx == cols_per_row_ - 1) {
+		if (match_col(col_start, ptr - col_start))
+			return 1;
+	}
+
 	return 0;
 }
 
 static void find_row(xcb_key_press_event_t *e)
 {
 	const char *ptr = data_;
+	const char *row = ptr;
 	const char *end = data_ + data_size_;
 	uint8_t selidx = 0;
 	uint8_t rowidx = 0;
@@ -381,7 +387,7 @@ static void find_row(xcb_key_press_event_t *e)
 	draw_search_bar();
 
 	while (ptr < end) {
-		if (find_col(ptr, swap_col_idx_)) {
+		if (find_col(row, swap_col_idx_)) {
 			selidx_ = selidx;
 			selrow_ = NULL;
 			page_idx_ = pageidx;
@@ -391,6 +397,7 @@ static void find_row(xcb_key_press_event_t *e)
 
 		if (*ptr == '\n') {
 			rowidx++;
+			row = ptr + 1;
 
 			if (selidx++ >= rows_per_page_ - 1) {
 				selidx = 0;
