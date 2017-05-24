@@ -1,6 +1,7 @@
 cc = $(CROSS_COMPILE)gcc
 
 cflags = -Wall -Wunused-function
+cflags += $(CFLAGS)
 
 xftcflags = $(shell pkg-config --cflags xft)
 xftldflags = $(shell pkg-config --libs xft)
@@ -45,6 +46,7 @@ menuout = menu
 menusrc = menu.c
 menucflags = $(xftcflags) $(cflags)
 menuldflags = $(xftldflags) -lxcb -lX11 -lX11-xcb -lxcb-keysyms
+menuldflags += -lxkbcommon -lxkbcommon-x11
 
 $(menuout):
 	$(cc) -o $(menuout) $(menusrc) $(menucflags) $(menuldflags)

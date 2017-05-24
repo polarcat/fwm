@@ -19,6 +19,9 @@
 #include <xcb/xcb.h>
 #include <xcb/xcb_keysyms.h>
 
+#include <xkbcommon/xkbcommon.h>
+#include <xkbcommon/xkbcommon-x11.h>
+
 #include <X11/Xlib-xcb.h>
 #include <X11/Xft/Xft.h>
 
@@ -39,12 +42,6 @@
 #define FONT_H_MARGIN 2
 #define COLOR_DISTANCE 5
 
-#define ESCAPE 9
-#define BACKSPACE 22
-#define ENTER 36
-#define ARROW_UP 98
-#define ARROW_DOWN 104
-
 #define PROMPT_LEN 2
 
 static int xscr_;
@@ -57,6 +54,7 @@ static uint8_t done_;
 
 static char search_buf_[CHAR_MAX];
 static uint8_t search_idx_ = PROMPT_LEN; /* '> ' */
+static int16_t found_idx_;
 
 static uint16_t page_w_;
 static uint16_t page_h_;
@@ -82,6 +80,12 @@ static XftFont *font_;
 static XftDraw *draw_;
 static XftColor selfg_xft_;
 static XftColor fg_xft_;
+
+static struct xkb_context *xkb_;
+static struct xkb_keymap *keymap_;
+static struct xkb_state *state_;
+static uint8_t level_;
+static uint8_t control_;
 
 static uint16_t x_pad_;
 static uint16_t y_pad_;
@@ -365,7 +369,7 @@ static uint8_t find_col(const char *rowstr, uint8_t idx)
 	return 0;
 }
 
-static void find_row(xcb_key_press_event_t *e)
+static void find_row(xcb_keysym_t sym)
 {
 	const char *ptr = data_;
 	const char *row = ptr;
@@ -373,13 +377,20 @@ static void find_row(xcb_key_press_event_t *e)
 	uint8_t selidx = 0;
 	uint8_t rowidx = 0;
 	uint8_t pageidx = 0;
-	xcb_keysym_t sym;
+	uint8_t tab = 0;
 
-	sym = xcb_key_press_lookup_keysym(syms_, e, 0);
-
-	if (e->detail == BACKSPACE) {
+	if (sym == 0x75 && control_) { /* control + u */
+		search_idx_ = PROMPT_LEN;
+		draw_search_bar();
+		return;
+	} else if (sym == XK_BackSpace) {
 		if (search_idx_ > PROMPT_LEN)
 			search_idx_--;
+	} else if (sym == XK_Tab) {
+		tab = 1;
+	} else if ((sym & 0xff00) == 0xff00) { /* not alpha */
+		dd("ignore sym 0x%x\n", sym);
+		return;
 	} else if (search_idx_ < sizeof(search_buf_)) {
 		search_buf_[search_idx_++] = sym;
 	}
@@ -388,11 +399,22 @@ static void find_row(xcb_key_press_event_t *e)
 
 	while (ptr < end) {
 		if (find_col(row, swap_col_idx_)) {
-			selidx_ = selidx;
-			selrow_ = NULL;
-			page_idx_ = pageidx;
-			draw_menu();
-			return;
+			if (!tab || found_idx_ < rowidx) {
+				if (page_idx_ != pageidx) {
+					page_idx_ = pageidx;
+					selrow_ = NULL;
+					selidx_ = selidx;
+					draw_menu();
+				} else {
+					draw_row(selrow_, selidx_, 0);
+					selrow_ = view_[selidx];
+					draw_row(selrow_, selidx, 1);
+					selidx_ = selidx;
+				}
+
+				found_idx_ = rowidx;
+				return;
+			}
 		}
 
 		if (*ptr == '\n') {
@@ -401,12 +423,15 @@ static void find_row(xcb_key_press_event_t *e)
 
 			if (selidx++ >= rows_per_page_ - 1) {
 				selidx = 0;
-				pageidx++;
+				if (pages_num_ > 1)
+					pageidx++;
 			}
 		}
 
 		ptr++;
 	}
+
+	found_idx_ = -1;
 }
 
 static void page_up(void)
@@ -425,11 +450,114 @@ static void page_down(void)
 	draw_menu();
 }
 
-static void follow_cursor(xcb_key_press_event_t *e)
+#if 0
+static void get_keysym(xcb_keycode_t code)
 {
-	if (e->detail == ESCAPE) {
+	xkb_keycode_t keycode;
+	xkb_keysym_t keysym;
+
+	keycode = code;
+	keysym = xkb_state_key_get_one_sym(state_, keycode);
+
+	char name[64];
+
+	xkb_keysym_get_name(keysym, name, sizeof(name) - 1);
+
+	size_t len;
+
+	// First find the needed size; return value is the same as snprintf(3).
+	len = xkb_state_key_get_utf8(state_, keycode, NULL, 0) + 1;
+
+	if (len <= 1)
+		return;
+
+	char *buf = calloc(1, len);
+	xkb_state_key_get_utf8(state_, keycode, buf, len);
+
+	dd("keysym name '%s', utf len %u str '%s'\n", name, len, buf);
+	free(buf);
+}
+#endif
+
+static xcb_keysym_t get_keysyms(xcb_keycode_t code)
+{
+	const xkb_keysym_t *syms;
+	int len;
+	int i;
+
+	if (!keymap_)
+		return (xcb_keysym_t) 0;
+
+	len = xkb_keymap_key_get_syms_by_level(keymap_, code, 0, level_, &syms);
+
+#ifdef DEBUG
+	for (i = 0; i < len; i++) {
+		char name[64];
+		const xkb_keysym_t sym = syms[i];
+		xkb_keysym_get_name(sym, name, sizeof(name) - 1);
+		dd("[%d] sym 0x%x name '%s'\n", i, sym, name);
+	}
+#endif
+
+	if (len)
+		return (xcb_keysym_t) syms[0];
+
+	return (xcb_keysym_t) 0;
+}
+
+static void key_release(xcb_key_press_event_t *e)
+{
+	xcb_keysym_t sym;
+
+	if (!syms_) {
+		ww("key symbols not available\n");
+		return;
+	}
+
+	sym = xcb_key_press_lookup_keysym(syms_, e, 0);
+
+	if (sym == XK_Shift_L || sym == XK_Shift_R) {
+		level_ = 0; /* expect lower-case symbols */
+	} else if (sym == XKB_KEY_ISO_Level3_Shift) {
+		level_ = 0;
+	} else if (sym == XK_Control_L || sym == XK_Control_R) {
+		control_ = 0; /* cancel command */
+	}
+}
+
+static void key_press(xcb_key_press_event_t *e)
+{
+	xcb_keysym_t sym;
+
+#ifdef DEBUG
+	get_keysyms(e->detail);
+#endif
+
+	if (!syms_) {
+		ww("key symbols not available\n");
+		return;
+	}
+
+	sym = xcb_key_press_lookup_keysym(syms_, e, 0);
+
+	if (sym == XK_Shift_L || sym == XK_Shift_R) {
+		level_ = 1; /* expect upper-case symbols */
+		return;
+	} else if (sym == XKB_KEY_ISO_Level3_Shift) {
+		/* FIXME: AltGr does not correspond level 3 on some systems */
+		level_ = 2; /* expect AltGr symbols */
+		return;
+	} else if (sym == XK_Control_L || sym == XK_Control_R) {
+		control_ = 1; /* expect command */
+		return;
+	} else if (sym == XK_Escape) {
 		done_ = 1;
-	} else if (e->detail == ARROW_UP) {
+	} else if (sym == XK_Next && pages_num_ > 1 &&
+		   page_idx_ < pages_num_ - 1) {
+		page_down();
+	} else if (sym == XK_Prior && pages_num_ > 1 && page_idx_ > 1) {
+		page_up();
+	} else if (sym == XK_Up) {
 		if (selidx_ == 0 && page_idx_ == 0) {
 			return;
 		} else if (selidx_ == 0 && page_idx_ > 0) {
@@ -441,7 +569,7 @@ static void follow_cursor(xcb_key_press_event_t *e)
 		selidx_--;
 		selrow_ = view_[selidx_];
 		draw_row(selrow_, selidx_, 1);
-	} else if (e->detail == ARROW_DOWN) {
+	} else if (sym == XK_Down) {
 		uint8_t rem = (selidx_ + rows_rem_) == rows_per_page_ - 1;
 
 		if (page_idx_ == pages_num_ - 1 && rem) {
@@ -459,13 +587,14 @@ static void follow_cursor(xcb_key_press_event_t *e)
 		selidx_++;
 		selrow_ = view_[selidx_];
 		draw_row(selrow_, selidx_, 1);
-	} else if (e->detail == ENTER) {
+	} else if (sym == XK_Return) {
 		char *str = selrow_->str;
 		*(str + selrow_->len) = '\0';
 		printf("%s\n", str);
 		exit(0);
-	} else if (syms_) {
-		find_row(e);
+	} else {
+		if ((sym = get_keysyms(e->detail)))
+			find_row(sym);
 	}
 
 	follow_ = 0;
@@ -523,7 +652,7 @@ static void follow_pointer(xcb_motion_notify_event_t *e)
 				 0, 0, x, y_pad_);
 		page_down();
 	} else if (e->event_y < y_pad_) { /* follow up */
-		if (page_idx_ == 0)
+		if (!page_idx_)
 			return;
 
 		xcb_warp_pointer(dpy_, XCB_NONE, win_, 0, 0,
@@ -575,7 +704,10 @@ static void events(void)
 		draw_menu();
 		break;
 	case XCB_KEY_PRESS:
-		follow_cursor((xcb_key_press_event_t *) e);
+		key_press((xcb_key_press_event_t *) e);
+		break;
+	case XCB_KEY_RELEASE:
+		key_release((xcb_key_press_event_t *) e);
 		break;
 	case XCB_BUTTON_PRESS:
 		dd("XCB_BUTTON_PRESS\n");
@@ -586,7 +718,6 @@ static void events(void)
 		break;
 	case XCB_MOTION_NOTIFY:
 		follow_pointer((xcb_motion_notify_event_t *) e);
-		dd("XCB_MOTION_NOTIFY\n");
 		break;
 	default:
 		dd("event %d (%d)\n", e->response_type & ~0x80, e->response_type);
@@ -791,6 +922,35 @@ static int init_rows(void)
 
 	dd("text y: %u row width %u pages num %u\n", text_y_, page_w_,
 		pages_num_);
+
+	return 0;
+}
+
+static int init_xkb(void)
+{
+	int32_t dev;
+
+	if (!(xkb_ = xkb_context_new(XKB_CONTEXT_NO_FLAGS))) {
+		ee("xkb_context_new() failed\n");
+		return -1;
+	}
+
+	if ((dev = xkb_x11_get_core_keyboard_device_id(dpy_)) < 0) {
+		ee("xkb_x11_get_core_keyboard_device_id() failed\n");
+		return -1;
+	}
+
+	keymap_ = xkb_x11_keymap_new_from_device(xkb_, dpy_, dev,
+						 XKB_KEYMAP_COMPILE_NO_FLAGS);
+	if (!keymap_) {
+		ee("xkb_x11_keymap_new_from_device() failed\n");
+		return -1;
+	}
+
+	if (!(state_ = xkb_x11_state_new_from_device(keymap_, dpy_, dev))) {
+		ee("xkb_x11_state_new_from_device() failed\n");
+		return -1;
+	}
 
 	return 0;
 }
@@ -1001,7 +1161,8 @@ int main(int argc, char *argv[])
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
 	val[0] = bg_;
 	val[1] = XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_VISIBILITY_CHANGE |
-		 XCB_EVENT_MASK_KEY_PRESS  | XCB_EVENT_MASK_BUTTON_PRESS |
+		 XCB_EVENT_MASK_KEY_PRESS  | XCB_EVENT_MASK_KEY_RELEASE |
+		 XCB_EVENT_MASK_BUTTON_PRESS |
 		 XCB_EVENT_MASK_POINTER_MOTION;
 	xcb_create_window(dpy_, XCB_COPY_FROM_PARENT, win_, scr->root, 0, 0,
 			  page_w_ + 2 * x_pad_, page_h_ + 2 * y_pad_ + row_h_,
@@ -1022,11 +1183,22 @@ int main(int argc, char *argv[])
 	if (!(syms_ = xcb_key_symbols_alloc(dpy_)))
 		ww("xcb_key_symbols_alloc() failed\n");
 
+	init_xkb();
+
 	while (!done_) {
 		events();
 	}
 
 out:
+	if (state_)
+		xkb_state_unref(state_);
+
+	if (keymap_)
+		xkb_keymap_unref(keymap_);
+
+	if (xkb_)
+		xkb_context_unref(xkb_);
+
 	if (draw_)
 		XftDrawDestroy(draw_);
 
