@@ -66,7 +66,7 @@ static uint8_t rows_rem_;
 
 struct page {
 	char *rowptr;
-	char rowidx;
+	uint16_t rowidx;
 };
 
 static struct page pages_[UCHAR_MAX + 1];
@@ -117,7 +117,7 @@ static uint16_t *cols_px_;
 static uint8_t *cols_len_;
 
 static uint8_t cols_per_row_;
-static uint8_t rows_num_; /* lines in file */
+static uint16_t rows_num_; /* lines in file */
 static uint8_t swap_col_idx_;
 
 static uint8_t selidx_;
@@ -279,7 +279,7 @@ static void draw_menu(void)
 	char *end = data_ + data_size_;
 	char *ptr = start;
 	uint8_t focus = 0;
-	uint8_t rowidx = pages_[page_idx_].rowidx;
+	uint16_t rowidx = pages_[page_idx_].rowidx;
 	uint8_t i = 0;
 
 	while (ptr < end) {
@@ -745,7 +745,7 @@ static void adjust_width(char *row, uint8_t len)
 
 static int init_rows(void)
 {
-	uint8_t i;
+	uint16_t i;
 	char *ptr;
 	char *col_start;
 	char *row_start;
