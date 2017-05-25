@@ -1,0 +1,19 @@
+#!/bin/sh
+
+ifs_=$IFS
+out_=$HOME/.yawm/bin
+
+printf "" > $out_
+IFS=':'
+for dir in $PATH; do
+	ls -1 $dir | while read line; do
+		printf "$line\t$dir\n" >> $out_
+	done
+done
+
+runcmd_() { exec $1; }
+
+res=$(menu -n yawm-apps -i -f $out_)
+IFS='	'
+runcmd_ $res &
+IFS=$ifs_

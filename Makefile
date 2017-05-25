@@ -75,6 +75,9 @@ install-tools:
 	-cp -v tools/yawm-apps $(HOME)/bin/
 	-chmod 755 $(HOME)/bin/yawm-apps
 	-touch $(HOME)/.yawm/center/yawm-apps
+	-cp -v tools/yawm-run $(HOME)/bin/
+	-chmod 755 $(HOME)/bin/yawm-run
+	-touch $(HOME)/.yawm/center/yawm-run
 
 clean:
 	-rm -f $(wmout) $(clockout)
