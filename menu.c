@@ -71,6 +71,7 @@ struct page {
 
 static struct page pages_[UCHAR_MAX + 1];
 
+static uint8_t append_;
 static uint8_t interlace_;
 static uint32_t fg_ = 0xa0a0a0;
 static uint32_t bg_ = 0x050505;
@@ -590,7 +591,15 @@ static void key_press(xcb_key_press_event_t *e)
 	} else if (sym == XK_Return) {
 		char *str = selrow_->str;
 		*(str + selrow_->len) = '\0';
-		printf("%s\n", str);
+		printf("%s", str);
+
+		if (append_ && search_idx_) {
+			search_buf_[search_idx_] = '\0';
+			printf("\t%s\n", &search_buf_[PROMPT_LEN]);
+		} else {
+			printf("\n");
+		}
+
 		exit(0);
 	} else {
 		if ((sym = get_keysyms(e->detail)))
@@ -1003,13 +1012,14 @@ static void help(const char *name)
 	   "  -r, --rows <rows>              menu height in rows\n"
 	   "  -f, --file <path>              tab-separated values file\n"
 	   "  -s, --swap-column <index>      swap column (shown first)\n"
-	   "  -i, --interlace                interlace colors\n"
 	   "  -n, --name <name>              window name and class (def '%s')\n"
+	   "  -i, --interlace                interlace colors\n"
+	   "  -a, --append                   append entered text to results\n"
 	   "  -0, --normal-foreground <hex>  rgb color, default 0x%x\n"
 	   "  -1, --normal-background <hex>  rgb color, default 0x%x\n"
 	   "  -2, --active-foreground <hex>  rgb color, default 0x%x\n"
 	   "  -3, --active-background <hex>  rgb color, default 0x%x\n",
-	   name, fg_, bg_, selfg_, selbg_, name_);
+	   name, name_, fg_, bg_, selfg_, selbg_);
 }
 
 static int opt(const char *arg, const char *args, const char *argl)
@@ -1039,11 +1049,13 @@ static void opts(int argc, char *argv[])
 		} else if (opt(arg, "-s", "--search-column")) {
 			i++;
 			swap_col_idx_ = atoi(argv[i]);
-		} else if (opt(arg, "-i", "--interlace")) {
-			interlace_ = 1;
 		} else if (opt(arg, "-n", "--name")) {
 			i++;
 			name_ = argv[i];
+		} else if (opt(arg, "-i", "--interlace")) {
+			interlace_ = 1;
+		} else if (opt(arg, "-a", "--append")) {
+			append_ = 1;
 		} else if (opt(arg, "-0", "--normal-foreground")) {
 			i++;
 			if (argv[i])
