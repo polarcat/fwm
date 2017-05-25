@@ -11,9 +11,14 @@ for dir in $PATH; do
 	done
 done
 
-runcmd_() { exec $1; }
-
-res=$(menu -n yawm-apps -i -f $out_)
 IFS='	'
-runcmd_ $res &
-IFS=$ifs_
+menu -n yawm-apps -i -a -f $out_ | while read cmd path extra; do
+	if [ -z "$extra" ]; then
+		exec $cmd &
+	else
+		IFS=' '
+		exec $extra &
+	fi
+
+	break
+done
