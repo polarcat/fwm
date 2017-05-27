@@ -52,7 +52,7 @@
 
 typedef uint8_t strlen_t;
 
-#define ITEM_V_MARGIN 4
+#define ITEM_V_MARGIN 2
 #define ITEM_H_MARGIN 6
 #define TAG_V_GAP 2
 
@@ -443,7 +443,7 @@ static struct color defcolors[] = {
 #define color2xft(idx) *((XftColor *) defcolors[idx].val)
 #define color2ptr(idx) &defcolors[idx]
 
-static uint32_t panel_height = 24; /* need to adjust with font height */
+static uint32_t panel_height;
 
 /* globals */
 
@@ -3267,8 +3267,8 @@ static void init_panel(struct screen *scr)
 	int16_t y;
 	uint32_t val[2], mask;
 
-	if (panel_height % 2)
-		panel_height += 1;
+	panel_height = font1->height + 2 * ITEM_V_MARGIN;
+	ii("pcat font %u panel %u\n", font1->height, panel_height);
 
 	scr->panel.pad = ITEM_H_MARGIN;
 	scr->panel.win = xcb_generate_id(dpy);
@@ -3308,7 +3308,7 @@ static void init_panel(struct screen *scr)
 	xcb_map_window(dpy, scr->panel.win);
 
 	/* now correct screen height */
-	scr->h -= panel_height;
+	scr->h -= panel_height + 1;
 
 	scr->panel.draw = XftDrawCreate(xdpy, scr->panel.win,
 					DefaultVisual(xdpy, xscr),
@@ -4675,7 +4675,7 @@ static void init_font(void)
 	if (!font1)
 		panic("XftFontOpen(%s)\n", FONT1_NAME);
 
-	text_yoffs = panel_height - (panel_height - FONT1_SIZE) / 2;
+	text_yoffs = font1->ascent + ITEM_V_MARGIN;
 
 	font2 = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
 			    FONT2_NAME, XFT_SIZE, XftTypeDouble,
