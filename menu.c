@@ -1104,6 +1104,24 @@ static void opts(int argc, char *argv[])
 	}
 }
 
+static xcb_atom_t get_atom(const char *str, uint8_t len)
+{
+	xcb_intern_atom_cookie_t c;
+	xcb_intern_atom_reply_t *r;
+	xcb_atom_t a;
+
+	c = xcb_intern_atom(dpy_, 0, len, str);
+	r = xcb_intern_atom_reply(dpy_, c, NULL);
+	if (!r) {
+		ee("xcb_intern_atom(%s) failed\n", str);
+		return (XCB_ATOM_NONE);
+	}
+
+	a = r->atom;
+	free(r);
+	return a;
+}
+
 int main(int argc, char *argv[])
 {
 	int fd;
@@ -1206,6 +1224,11 @@ int main(int argc, char *argv[])
         xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
 			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
                             strlen(name_), name_);
+
+	xcb_atom_t atom = get_atom("_NET_WM_PID", sizeof("_NET_WM_PID") - 1);
+	uint32_t data = getpid();
+	xcb_change_property_checked(dpy_, XCB_PROP_MODE_REPLACE, win_,
+				    atom, XCB_ATOM_CARDINAL, 32, 1, &data);
 
 	xcb_map_window(dpy_, win_);
 	xcb_flush(dpy_);
