@@ -844,8 +844,16 @@ static void close_window(xcb_window_t win)
 	xcb_client_message_event_t e = { 0 };
 	struct client *cli = win2cli(win);
 
+	if (cli->flags & CLI_FLG_EXCLUSIVE) {
+		ii("shutdown special win 0x%x pid %d\n", win, cli->pid);
+		if (cli->pid)
+			kill(cli->pid, SIGTERM);
+		free_client(cli);
+		return;
+	}
+
 	if (cli->closed++ > 0) { /* did not response first time */
-		ww("shutdown win 0x%x", win);
+		ii("shutdown win 0x%x\n", win);
 		xcb_kill_client(dpy, win);
 		free_client(cli);
 		return;
@@ -858,8 +866,9 @@ static void close_window(xcb_window_t win)
 	e.data.data32[0] = a_delete_win;
 	e.data.data32[1] = XCB_CURRENT_TIME;
 
-	ii("send WM_DELETE to win 0x%x\n", win);
-	xcb_send_event_checked(dpy, 0, win, XCB_EVENT_MASK_NO_EVENT, (const char *) &e);
+	ii("delete win 0x%x\n", win);
+	xcb_send_event_checked(dpy, 0, win, XCB_EVENT_MASK_NO_EVENT,
+			       (const char *) &e);
 	xcb_flush(dpy);
 }
 
@@ -1251,7 +1260,7 @@ static uint32_t window_special(xcb_window_t win, const char *dir, uint8_t len)
 	struct sprop class;
 	char *path;
 	struct stat st;
-	uint32_t rc;
+	uint32_t crc;
 	xcb_atom_t atom;
 	int count;
 	int pathlen;
@@ -1268,7 +1277,7 @@ more:
 		return 0;
 	}
 
-	rc = 0;
+	crc = 0;
 	pathlen = baselen + len + class.len + 1;
 	path = calloc(1, pathlen);
 	if (!path)
@@ -1276,8 +1285,8 @@ more:
 
 	snprintf(path, pathlen, "%s/%s/%s", basedir, dir, class.str);
 	if (class.str[0] && stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
-		rc = crc32(class.str, class.len);
-		tt("special win 0x%x, path %s, crc 0x%x\n", win, path, rc);
+		crc = crc32(class.str, class.len);
+		tt("special win 0x%x, path %s, crc 0x%x\n", win, path, crc);
 	} else if (++count < 2) {
 		free(class.ptr);
 		free(path);
@@ -1288,7 +1297,7 @@ more:
 out:
 	free(class.ptr);
 	free(path);
-	return rc;
+	return crc;
 }
 
 #ifndef VERBOSE
@@ -2513,6 +2522,7 @@ static uint32_t window_exclusive(xcb_window_t win)
 			free(cli);
 		} else if (crc && cli->crc == crc && cli->win != win) {
 			xcb_window_t old = cli->win;
+			cli->flags |= CLI_FLG_EXCLUSIVE;
 			close_window(cli->win);
 			del_window(old);
 			ii("exclusive win 0x%x crc 0x%x\n", win, crc);
