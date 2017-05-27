@@ -690,6 +690,18 @@ static enum winstatus window_status(xcb_window_t win)
 		status = WIN_STATUS_VISIBLE;
 
 	free(a);
+
+	if (status != WIN_STATUS_UNKNOWN) { /* do some sanity check */
+		struct sprop class;
+
+		get_sprop(&class, win, XCB_ATOM_WM_CLASS, UCHAR_MAX);
+		if (!class.len)
+			status = WIN_STATUS_UNKNOWN;
+
+		if (class.ptr)
+			free(class.ptr);
+	}
+
 	return status;
 }
 
@@ -3640,7 +3652,7 @@ static void focus_window_req(xcb_window_t win)
 	}
 }
 
-static void dump_clients(void)
+static void dump_clients(uint8_t all)
 {
 	char path[baselen + sizeof("/clients")];
 	struct list_head *cur;
@@ -3666,6 +3678,13 @@ static void dump_clients(void)
 			status = WIN_STATUS_MAX; /* indicate current window */
 		else
 			status = window_status(cli->win);
+
+		if (!all && status == WIN_STATUS_UNKNOWN)
+			continue;
+		else if (!all && cli->flags & CLI_FLG_DOCK)
+			continue;
+		else if (!all && cli->flags & CLI_FLG_TRAY)
+			continue;
 
 		if (cli->tag)
 			tag = cli->tag->name;
@@ -3728,7 +3747,9 @@ static void handle_user_request(int fd)
 	} else if (match(name.str, "refresh-outputs")) {
 		init_outputs();
 	} else if (match(name.str, "list-clients")) {
-		dump_clients();
+		dump_clients(0);
+	} else if (match(name.str, "list-clients-all")) {
+		dump_clients(1);
 	} else if (match(name.str, "refresh-panel")) {
 		const char *arg = &name.str[sizeof("refresh-panel")];
 		if (arg)
