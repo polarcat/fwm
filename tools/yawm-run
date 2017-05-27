@@ -15,7 +15,7 @@ for dir in $PATH; do
 done
 
 IFS='	'
-menu -n yawm-apps -i -a -f $out_ | while read cmd path extra; do
+menu -n yawm-run -i -a -f $out_ | while read cmd path extra; do
 	if [ -z "$extra" ]; then
 		exec $cmd &
 	else
