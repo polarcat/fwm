@@ -52,7 +52,7 @@ static xcb_gcontext_t gc_;
 static xcb_key_symbols_t *syms_;
 static uint8_t done_;
 
-static char search_buf_[CHAR_MAX];
+static char search_buf_[UCHAR_MAX];
 static uint8_t search_idx_ = PROMPT_LEN; /* '> ' */
 static int16_t found_idx_;
 
@@ -588,6 +588,15 @@ static void key_press(xcb_key_press_event_t *e)
 		selidx_++;
 		selrow_ = view_[selidx_];
 		draw_row(selrow_, selidx_, 1);
+	} else if (sym == XK_Right) {
+		struct column *col = &selrow_->cols[0];
+		search_idx_ = sizeof(search_buf_) - PROMPT_LEN - 2;
+
+		if (col->len < search_idx_)
+			search_idx_ = col->len + 2;
+
+		memcpy(&search_buf_[PROMPT_LEN], col->str, search_idx_);
+		draw_search_bar();
 	} else if (sym == XK_Return) {
 		char *str = selrow_->str;
 		*(str + selrow_->len) = '\0';
