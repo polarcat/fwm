@@ -1019,7 +1019,7 @@ static void help(const char *name)
 	   "  -h, --help                     print this message\n"
 	   "  -c, --cols <width>             menu width in characters\n"
 	   "  -r, --rows <rows>              menu height in rows\n"
-	   "  -f, --file <path>              tab-separated values file\n"
+	   "  -f, --file <path>              tab-separated values file (%u/%u)\n"
 	   "  -s, --swap-column <index>      swap column (shown first)\n"
 	   "  -n, --name <name>              window name and class (def '%s')\n"
 	   "  -i, --interlace                interlace colors\n"
@@ -1027,8 +1027,17 @@ static void help(const char *name)
 	   "  -0, --normal-foreground <hex>  rgb color, default 0x%x\n"
 	   "  -1, --normal-background <hex>  rgb color, default 0x%x\n"
 	   "  -2, --active-foreground <hex>  rgb color, default 0x%x\n"
-	   "  -3, --active-background <hex>  rgb color, default 0x%x\n",
-	   name, name_, fg_, bg_, selfg_, selbg_);
+	   "  -3, --active-background <hex>  rgb color, default 0x%x\n"
+	   "Bindings:\n"
+	   "  Down/Up    navigate rows\n"
+	   "  PgDn/PgUp  navigate pages\n"
+	   "  Tab        goto next row matching search pattern\n"
+	   "  Right      copy 1st column of selected row to search bar\n"
+	   "  Backspace  delete character before cursor in search bar\n"
+	   "  Ctrl-u     clear search bar\n"
+	   "  Return     print selected row to standard output\n"
+	   "  Esc        exit without results\n",
+	   name, UCHAR_MAX, INT16_MAX, name_, fg_, bg_, selfg_, selbg_);
 }
 
 static int opt(const char *arg, const char *args, const char *argl)
