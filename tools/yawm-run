@@ -1,7 +1,10 @@
 #!/bin/sh
 
 ifs_=$IFS
-out_=$HOME/.yawm/bin
+tmp_=$HOME/.yawm/tmp
+out_=$tmp_/bin
+
+mkdir -p $tmp_
 
 printf "" > $out_
 IFS=':'

@@ -1,15 +1,15 @@
 #!/bin/sh
 
-cli=$HOME/.yawm/clients
-ctl=$HOME/.yawm/.control
+ctl_=$HOME/.yawm/.control
+cli_=$HOME/.yawm/clients
 
 while read var val; do
 	case "$var" in
 	seq*) seq=$val;;
 	esac
-done < $cli
+done < $cli_
 
-echo list-clients > $ctl
+echo list-clients > $ctl_
 
 found=0
 count=0
@@ -23,15 +23,15 @@ while :; do
 			fi
 			;;
 		esac
-	done < $cli
+	done < $cli_
 	if [ $found -eq 1 -o $count -gt 5000 ]; then
 		break
 	fi
 	count=$((count + 1))
 done
 
-menu -n yawm-clients -c 80 -r 24 -i -s 5 -f $HOME/.yawm/clients |
+menu -n yawm-clients -c 80 -r 24 -i -s 5 -f $cli_ |
 while read scr tag win info; do
-	echo "focus-window $win" > $ctl
+	echo "focus-window $win" > $ctl_
 	exit 0
 done

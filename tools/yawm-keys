@@ -2,7 +2,10 @@
 
 ifs_=$IFS
 dir_=$HOME/.yawm/keys
-out_=$HOME/.yawm/tmp/keys
+tmp_=$HOME/.yawm/tmp
+out_=$tmp_/keys
+
+mkdir -p $tmp_
 
 ls -1 $dir_ | while read key; do
 	printf "$key\t"

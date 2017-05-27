@@ -1,9 +1,11 @@
 #!/bin/sh
 
-cli=$HOME/.yawm/clients
-ctl=$HOME/.yawm/.control
-tmp=$HOME/.yawm/tmp
-out=$tmp/screens
+ctl_=$HOME/.yawm/.control
+cli_=$HOME/.yawm/clients
+tmp_=$HOME/.yawm/tmp
+out_=$tmp_/screens
+
+mkdir -p $tmp_
 
 present()
 {
@@ -19,9 +21,9 @@ while read var val; do
 	case "$var" in
 	seq*) seq=$val;;
 	esac
-done < $cli
+done < $cli_
 
-echo list-clients > $ctl
+echo list-clients > $ctl_
 
 found=0
 count=0
@@ -35,15 +37,14 @@ while :; do
 			fi
 			;;
 		esac
-	done < $cli
+	done < $cli_
 	if [ $found -eq 1 -o $count -gt 5000 ]; then
 		break
 	fi
 	count=$((count + 1))
 done
 
-mkdir -p $tmp
-printf "" > $out
+printf "" > $out_
 list=''
 
 while read scr tag win status pid name; do
@@ -56,11 +57,11 @@ while read scr tag win status pid name; do
 	fi
 
 	eval "list=\"\$list \$scr screen\$scr\""
-	printf "$scr\tscreen$scr\n" >> $out
-done < $cli
+	printf "$scr\tscreen$scr\n" >> $out_
+done < $cli_
 
-menu -n yawm-screens -c 9 -r 5 -i -f $out |
+menu -n yawm-screens -c 9 -r 5 -i -f $out_ |
 while read scr line; do
-	echo "focus-screen $scr" > $ctl
+	echo "focus-screen $scr" > $ctl_
 	exit 0
 done

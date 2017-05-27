@@ -2,8 +2,11 @@
 
 ifs_=$IFS
 dir_=/usr/share
-out_=$HOME/.yawm/menu
+tmp_=$HOME/.yawm/tmp
+out_=$tmp_/menu
 val_=''
+
+mkdir -p $tmp_
 
 setval_() { val_=$2; }
 getval_() { IFS=$1; shift 1; setval_ $@; }
@@ -32,9 +35,10 @@ find $dir_ -type f -name "*.desktop" | while read file; do
 	fi
 done
 
+res=$(menu -n yawm-apps -i -f $out_)
+
 runcmd_() { exec $1; }
 
-res=$(menu -n yawm-apps -i -f $out_)
-#IFS='	'
-runcmd_ $res &
-#IFS=$ifs_
+if [ -n "$res" ]; then
+	runcmd_ $res &
+fi
