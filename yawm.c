@@ -2364,7 +2364,7 @@ static void dock_arrange(struct screen *scr)
 	else
 		y = scr->y + scr->h;
 
-	y += ITEM_V_MARGIN;
+	y += 2 * ITEM_V_MARGIN;
 
 	x = scr->items[PANEL_AREA_DOCK].x;
 	list_walk_safe(cur, tmp, &scr->dock) {
@@ -2407,7 +2407,7 @@ static void dock_add(struct client *cli, uint8_t bw)
 
 	cli->flags |= CLI_FLG_DOCK;
 
-	h = panel_height - ITEM_V_MARGIN * 2 - bw * 2;
+	h = panel_height - ITEM_V_MARGIN * 2 - bw * 4;
 
 	if (cli->flags & CLI_FLG_TRAY)
 		cli->w = h;
@@ -3268,7 +3268,6 @@ static void init_panel(struct screen *scr)
 	uint32_t val[2], mask;
 
 	panel_height = font1->height + 2 * ITEM_V_MARGIN;
-	ii("pcat font %u panel %u\n", font1->height, panel_height);
 
 	scr->panel.pad = ITEM_H_MARGIN;
 	scr->panel.win = xcb_generate_id(dpy);
