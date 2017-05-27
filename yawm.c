@@ -3706,7 +3706,7 @@ static void dump_clients(uint8_t all)
 			continue;
 		}
 
-		fputs(title.str, f);
+		fwrite(title.str, title.len, 1, f);
 		fputc('\n', f);
 		free(title.ptr);
 	}
