@@ -1,0 +1,71 @@
+#!/bin/sh
+
+ifs_=$IFS
+dir_=$HOME/.yawm/keys
+out_=$HOME/.yawm/tmp/keys
+
+ls -1 $dir_ | while read key; do
+	printf "$key\t"
+
+	found=0
+	while read line; do
+		echo "KEY: $key LINE $i: $line" 1>&2
+		printf "$line "
+		found=1
+	done < $dir_/$key
+
+	if [ $found -eq 0 ]; then
+		cat $dir_/$key
+	fi
+
+	printf "\n"
+done > $out_
+
+getval_() { echo $2 | tr '[:lower:]' '[:upper:]'; }
+
+menu -n yawm-keys -i -f $out_ | while read key info; do
+	case $key in
+	mod_f*)
+		IFS='_'; val=$(getval_ $key); IFS=$ifs_
+
+		if [ -n "$val" ]; then
+			xdotool key Alt+$val
+		fi
+		;;
+	mod_[a-z])
+		IFS='_'; val=$(getval_ $key); IFS=$ifs_
+
+		if [ -n "$val" ]; then
+			xdotool key Alt+$val
+		fi
+		;;
+	shift_f*)
+		IFS='_'; val=$(getval_ $key); IFS=$ifs_
+
+		if [ -n "$val" ]; then
+			xdotool key Shift+$val
+		fi
+		;;
+	mod_backspace)
+		xdotool key Alt+BackSpace
+		;;
+	mod_home)
+		xdotool key Alt+Home
+		;;
+	mod_end)
+		xdotool key Alt+End
+		;;
+	mod_tab)
+		xdotool key Alt+Tab
+		;;
+	mod_pagedn)
+		xdotool key Alt+Next
+		;;
+	mod_pageup)
+		xdotool key Alt+Prior
+		;;
+	mod_return)
+		xdotool key Alt+Return
+		;;
+	esac
+done
