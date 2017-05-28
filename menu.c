@@ -781,10 +781,12 @@ static int init_rows(void)
 	ptr = data_;
 
 	while (ptr < end) { /* calc number of items in row */
-		if (*ptr == '\n')
-			break;
-		else if (*ptr == '\t')
+		if (*ptr == '\t') {
 			cols_per_row_++;
+		} else if (*ptr == '\n') {
+			cols_per_row_++;
+			break;
+		}
 
 		ptr++;
 	}
@@ -800,7 +802,6 @@ static int init_rows(void)
 		return -1;
 	}
 
-	cols_per_row_++;
 	cols_len_ = calloc(sizeof(*cols_len_), cols_per_row_);
 
 	if (!cols_len_) {
@@ -823,7 +824,7 @@ static int init_rows(void)
 	ptr = data_;
 	col_start = ptr;
 	row_start = ptr;
-	longest_row = NULL;
+	longest_row = data_;
 	i = 0;
 	row_max_len = 0;
 	pages_[0].rowptr = data_;
@@ -846,28 +847,30 @@ static int init_rows(void)
 
 			if (*ptr == '\t') {
 				i++;
-			} else if (*ptr == '\n' && i == cols_per_row_ - 1) {
-				len = ptr - col_start;
-
-				if (w > cols_px_[i])
-					cols_px_[i] = w;
-
-				len = ptr - row_start;
-
-				if (len > row_max_len) {
-					row_max_len = len;
-					longest_row = row_start;
-				}
-
-				row_start = ptr + 1;
+			} else if (*ptr == '\n') {
 				rows_num_++;
-				i = 0; /* reset lengths counter */
+				if (i == cols_per_row_ - 1) {
+					len = ptr - col_start;
 
-				uint8_t page = rows_num_ / rows_per_page_;
+					if (w > cols_px_[i])
+						cols_px_[i] = w;
 
-				if (!pages_[page].rowptr) {
-					pages_[page].rowptr = row_start;
-					pages_[page].rowidx = rows_num_;
+					len = ptr - row_start;
+
+					if (len > row_max_len) {
+						row_max_len = len;
+						longest_row = row_start;
+					}
+
+					row_start = ptr + 1;
+					i = 0; /* reset lengths counter */
+
+					uint8_t page = rows_num_ / rows_per_page_;
+
+					if (!pages_[page].rowptr) {
+						pages_[page].rowptr = row_start;
+						pages_[page].rowidx = rows_num_;
+					}
 				}
 			}
 
@@ -888,9 +891,13 @@ static int init_rows(void)
 	adjust_width(longest_row, row_max_len);
 
 	if (!rows_num_) {
-		errno = 0;
-		ee("failed to detect number of rows\n");
-		return -1;
+		if (cols_per_row_) {
+			rows_num_ = 1;
+		} else {
+			errno = 0;
+			ee("failed to detect number of rows\n");
+			return -1;
+		}
 	}
 
 	if (rows_per_page_ > rows_num_)
