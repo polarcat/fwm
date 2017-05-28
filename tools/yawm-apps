@@ -9,19 +9,32 @@ val_=''
 mkdir -p $tmp_
 
 setval_() { val_=$2; }
-getval_() { IFS=$1; shift 1; setval_ $@; }
+getval_() { IFS=$1; shift 1; setval_ $@; IFS=$ifs_; }
 norm_() { val_=$1; }
+setstr_() { IFS=$ifs_; shift 1; val_=$@; }
+getstr_() { IFS=$1; shift 1; setstr_ $@; IFS=$ifs_; }
+
+exists_()
+{
+	if ! which $1; then
+		found=0
+	fi
+}
 
 printf "" > $out_
 find $dir_ -type f -name "*.desktop" | while read file; do
 	name=''
 	cmd=''
+	found=1
 
 	while read entry; do
 		case "$entry" in
 		Name=*) getval_ '=' $entry; name=$val_;;
-		Comment=*) getval_ '=' $entry; comment=$val_;;
-		Exec=*) getval_ '=' $entry; cmd=$val_;;
+		Comment=*) getstr_ '=' $entry; comment=$val_;;
+		Exec=*)
+			getval_ '=' $entry; cmd=$val_
+			exists_ $cmd
+			;;
 		Terminal=*) getval_ '=' $entry; term=$val_;;
 		Type=*) getval_ '=' $entry; type=$val_;;
 		Icon=*) getval_ '=' $entry; icon=$val_;;
@@ -29,9 +42,13 @@ find $dir_ -type f -name "*.desktop" | while read file; do
 		esac
 	done < $file
 
+	if [ $found -eq 0 ]; then
+		continue
+	fi
+
 	if [ -n "$name" -a -n "$cmd" ]; then
 		IFS='%'; norm_ $cmd; cmd=$val_; IFS=$ifs_
-		printf "$cmd\t$name\tterm:$term\n" >> $out_
+		printf "$cmd\t$name\tterm:$term\t$comment\n" >> $out_
 	fi
 done
 
