@@ -832,15 +832,8 @@ static int init_rows(void)
 
 	while (ptr < end) { /* get everything done in one pass */
 		if (*ptr == '\t' || *ptr == '\n') {
-			uint8_t len = ptr - col_start;
-
-			if (len > col_max_len)
-				len = col_max_len;
-
-			if (len > cols_len_[i])
-				cols_len_[i] = len;
-
-			text_size(col_start, len, &w, &h);
+			cols_len_[i] = ptr - col_start;
+			text_size(col_start, cols_len_[i], &w, &h);
 
 			if (w > cols_px_[i])
 				cols_px_[i] = w;
@@ -850,7 +843,7 @@ static int init_rows(void)
 			} else if (*ptr == '\n') {
 				rows_num_++;
 				if (i == cols_per_row_ - 1) {
-					len = ptr - col_start;
+					uint8_t len = ptr - col_start;
 
 					if (w > cols_px_[i])
 						cols_px_[i] = w;
