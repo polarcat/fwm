@@ -1905,8 +1905,8 @@ static void place_window(void *ptr)
 
 		x = curscr->x;
 		y = curscr->y;
-		w = curscr->w - 2 * BORDER_WIDTH - WINDOW_PAD;
-		h = curscr->h - 2 * BORDER_WIDTH - WINDOW_PAD;
+		w = curscr->w - 2 * BORDER_WIDTH;
+		h = curscr->h - 2 * BORDER_WIDTH;
 		curscr->tag->anchor = NULL;
 		break;
 	case WIN_POS_CENTER:
@@ -1931,10 +1931,8 @@ static void place_window(void *ptr)
 	case WIN_POS_LEFT_FILL:
 		tt("WIN_POS_LEFT_FILL\n");
 
-		if (last_winpos != pos || ++cli->div > POS_DIV_MAX) {
+		if (last_winpos != pos || ++cli->div > POS_DIV_MAX)
 			cli->div = 2;
-			last_winpos = pos;
-		}
 
 		x = curscr->x;
 		y = curscr->y;
@@ -1942,10 +1940,8 @@ static void place_window(void *ptr)
 	case WIN_POS_RIGHT_FILL:
 		tt("WIN_POS_RIGHT_FILL\n");
 
-		if (last_winpos != pos || ++cli->div > POS_DIV_MAX) {
+		if (last_winpos != pos || ++cli->div > POS_DIV_MAX)
 			cli->div = 2;
-			last_winpos = pos;
-		}
 
 		x = curscr->x + curscr->w - curscr->w / cli->div;
 		y = curscr->x;
@@ -1953,10 +1949,8 @@ static void place_window(void *ptr)
 	case WIN_POS_TOP_FILL:
 		tt("WIN_POS_TOP_FILL\n");
 
-		if (last_winpos != pos || ++cli->div > POS_DIV_MAX) {
+		if (last_winpos != pos || ++cli->div > POS_DIV_MAX)
 			cli->div = 2;
-			last_winpos = pos;
-		}
 
 		x = curscr->x;
 		y = curscr->y;
@@ -1964,10 +1958,8 @@ static void place_window(void *ptr)
 	case WIN_POS_BOTTOM_FILL:
 		tt("WIN_POS_BOTTOM_FILL\n");
 
-		if (last_winpos != pos || ++cli->div > POS_DIV_MAX) {
+		if (last_winpos != pos || ++cli->div > POS_DIV_MAX)
 			cli->div = 2;
-			last_winpos = pos;
-		}
 
 		x = curscr->x;
 		y = curscr->y + curscr->h - curscr->h / cli->div;
@@ -1997,6 +1989,7 @@ static void place_window(void *ptr)
 	}
 
 out:
+	last_winpos = pos;
 	resort_client(cli);
 	raise_window(cli->win);
 	focus_window(cli->win);
@@ -2014,7 +2007,7 @@ halfwh:
 	goto out;
 halfw:
 	w = curscr->w / cli->div - 2 * BORDER_WIDTH;
-	h = curscr->h - 2 * BORDER_WIDTH - WINDOW_PAD;
+	h = curscr->h - 2 * BORDER_WIDTH;
 
 	if (curscr->tag->anchor == cli) {
 		if (pos == WIN_POS_LEFT_FILL)
@@ -2030,7 +2023,7 @@ halfw:
 
 	goto out;
 halfh:
-	w = curscr->w - 2 * BORDER_WIDTH - WINDOW_PAD;
+	w = curscr->w - 2 * BORDER_WIDTH;
 	h = curscr->h / cli->div - 2 * BORDER_WIDTH - WINDOW_PAD;
 
 	if (curscr->tag->anchor == cli) {
