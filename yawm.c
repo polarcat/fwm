@@ -297,6 +297,8 @@ enum winpos {
 	WIN_POS_BOTTOM_FILL,
 };
 
+static uint8_t last_winpos;
+
 enum dir {
 	DIR_NEXT = 1,
 	DIR_PREV,
@@ -1929,8 +1931,10 @@ static void place_window(void *ptr)
 	case WIN_POS_LEFT_FILL:
 		tt("WIN_POS_LEFT_FILL\n");
 
-		if (++cli->div > POS_DIV_MAX)
+		if (last_winpos != pos || ++cli->div > POS_DIV_MAX) {
 			cli->div = 2;
+			last_winpos = pos;
+		}
 
 		x = curscr->x;
 		y = curscr->y;
@@ -1938,8 +1942,10 @@ static void place_window(void *ptr)
 	case WIN_POS_RIGHT_FILL:
 		tt("WIN_POS_RIGHT_FILL\n");
 
-		if (++cli->div > POS_DIV_MAX)
+		if (last_winpos != pos || ++cli->div > POS_DIV_MAX) {
 			cli->div = 2;
+			last_winpos = pos;
+		}
 
 		x = curscr->x + curscr->w - curscr->w / cli->div;
 		y = curscr->x;
@@ -1947,8 +1953,10 @@ static void place_window(void *ptr)
 	case WIN_POS_TOP_FILL:
 		tt("WIN_POS_TOP_FILL\n");
 
-		if (++cli->div > POS_DIV_MAX)
+		if (last_winpos != pos || ++cli->div > POS_DIV_MAX) {
 			cli->div = 2;
+			last_winpos = pos;
+		}
 
 		x = curscr->x;
 		y = curscr->y;
@@ -1956,8 +1964,10 @@ static void place_window(void *ptr)
 	case WIN_POS_BOTTOM_FILL:
 		tt("WIN_POS_BOTTOM_FILL\n");
 
-		if (++cli->div > POS_DIV_MAX)
+		if (last_winpos != pos || ++cli->div > POS_DIV_MAX) {
 			cli->div = 2;
+			last_winpos = pos;
+		}
 
 		x = curscr->x;
 		y = curscr->y + curscr->h - curscr->h / cli->div;
