@@ -74,7 +74,6 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_MOVE (1 << 9)
 #define CLI_FLG_FULLSCREEN (1 << 10)
 
-#define SCR_FLG_PANEL_TOP (1 << 0)
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
 
@@ -446,6 +445,7 @@ static struct color defcolors[] = {
 #define color2ptr(idx) &defcolors[idx]
 
 static uint32_t panel_height;
+static uint8_t panel_top;
 
 /* globals */
 
@@ -1494,8 +1494,8 @@ static int16_t adjust_y(struct screen *scr, int16_t y, uint16_t h)
 	else
 		ret = y;
 
-	if (scr->flags & SCR_FLG_PANEL_TOP)
-		ret += panel_height;
+	if (panel_top)
+		ret += panel_height + 1; /* make tiny gap */
 
 	return ret;
 }
@@ -2004,6 +2004,10 @@ out:
 halfwh:
 	w = curscr->w / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
 	h = curscr->h / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
+
+	if (curscr->h % 2)
+		h++;
+
 	goto out;
 halfw:
 	w = curscr->w / cli->div - 2 * BORDER_WIDTH;
@@ -2025,6 +2029,9 @@ halfw:
 halfh:
 	w = curscr->w - 2 * BORDER_WIDTH;
 	h = curscr->h / cli->div - 2 * BORDER_WIDTH - WINDOW_PAD;
+
+	if (cli->div == 2 && curscr->h % cli->div)
+		h++;
 
 	if (curscr->tag->anchor == cli) {
 		curscr->tag->space.x = curscr->x;
@@ -2362,7 +2369,7 @@ static void dock_arrange(struct screen *scr)
 	scr->items[PANEL_AREA_DOCK].x = scr->x + scr->w;
 	scr->items[PANEL_AREA_DOCK].w = 0;
 
-	if (scr->flags & SCR_FLG_PANEL_TOP)
+	if (panel_top)
 		y = scr->y;
 	else
 		y = scr->y + scr->h;
@@ -2684,6 +2691,9 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		dock_add(cli, g->border_width);
 		goto out;
 	}
+
+	if (panel_top)
+		g->y -= panel_height;
 
 	cli->tag = configured_tag(win); /* read tag from configuration */
 
@@ -3281,7 +3291,7 @@ static void init_panel(struct screen *scr)
 	val[1] |= XCB_EVENT_MASK_BUTTON_RELEASE;
 	val[1] |= XCB_EVENT_MASK_VISIBILITY_CHANGE;
 
-	if (scr->flags & SCR_FLG_PANEL_TOP)
+	if (panel_top)
 		y = scr->y;
 	else
 		y = (scr->h + scr->y) - panel_height;
@@ -3327,7 +3337,7 @@ static void move_panel(struct screen *scr)
 
 	val[0] = scr->x;
 
-	if (scr->flags & SCR_FLG_PANEL_TOP)
+	if (panel_top)
 		val[1] = scr->y;
 	else
 		val[1] = scr->h + scr->y;
@@ -3511,6 +3521,7 @@ static void init_output(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 
 static void init_outputs(void)
 {
+	struct stat st;
 	struct screen *scr;
 	struct list_head *cur, *tmp;
 	xcb_randr_get_screen_resources_current_cookie_t c;
@@ -3529,6 +3540,11 @@ static void init_outputs(void)
 	len = xcb_randr_get_screen_resources_current_outputs_length(r);
 	out = xcb_randr_get_screen_resources_current_outputs(r);
 	ii("found %d screens\n", len);
+
+	if (stat("panel/top", &st) == 0)
+		panel_top = 1;
+	else
+		panel_top = 0;
 
 	/* reset geometry of previously found screens */
 	list_walk_safe(cur, tmp, &screens) {
@@ -3756,7 +3772,7 @@ static void handle_user_request(int fd)
 
 	if (match(name.str, "reload-keys")) {
 		init_keys();
-	} else if (match(name.str, "refresh-outputs")) {
+	} else if (match(name.str, "reinit-outputs")) {
 		init_outputs();
 	} else if (match(name.str, "list-clients")) {
 		dump_clients(0);
@@ -4842,6 +4858,11 @@ static int init_homedir(void)
 
 	if (mkdir("screens", mode) < 0 && errno != EEXIST) {
 		ee("mkdir(%s/.yawm/screens) failed\n", homedir);
+		goto err;
+	}
+
+	if (mkdir("panel", mode) < 0 && errno != EEXIST) {
+		ee("mkdir(%s/.yawm/panel) failed\n", homedir);
 		goto err;
 	}
 
