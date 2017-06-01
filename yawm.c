@@ -3280,7 +3280,7 @@ static void init_panel(struct screen *scr)
 	int16_t y;
 	uint32_t val[2], mask;
 
-	panel_height = font1->height + 2 * ITEM_V_MARGIN;
+	panel_height = font1->ascent + font1->descent + 2 * ITEM_V_MARGIN;
 
 	scr->panel.pad = ITEM_H_MARGIN;
 	scr->panel.win = xcb_generate_id(dpy);

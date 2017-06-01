@@ -776,7 +776,7 @@ static int init_rows(void)
 
 	x_pad_ = font_->max_advance_width;
 	y_pad_ = font_->height / 2;
-	row_h_ = font_->height + 2 * FONT_H_MARGIN;
+	row_h_ = font_->ascent + font_->descent + 2 * FONT_H_MARGIN;
 	text_y_ = font_->ascent + FONT_H_MARGIN;
 	ptr = data_;
 
