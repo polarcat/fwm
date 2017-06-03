@@ -24,10 +24,11 @@ while :; do
 			;;
 		esac
 	done < $cli_
-	if [ $found -eq 1 -o $count -gt 5000 ]; then
+	if [ $found -eq 1 -o $count -gt 500 ]; then
 		break
 	fi
 	count=$((count + 1))
+	sleep 0.1
 done
 
 menu -n yawm-clients -c 80 -r 24 -i -s 5 -f $cli_ |
