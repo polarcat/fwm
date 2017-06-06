@@ -26,7 +26,7 @@ done > $out_
 
 getval_() { echo $2 | tr '[:lower:]' '[:upper:]'; }
 
-menu -n yawm-keys -i -f $out_ | while read key info; do
+menu -n yawm-keys -d $out_ | while read key info; do
 	case $key in
 	mod_f*)
 		IFS='_'; val=$(getval_ $key); IFS=$ifs_

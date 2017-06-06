@@ -31,7 +31,7 @@ while :; do
 	sleep 0.1
 done
 
-menu -n yawm-clients -c 80 -r 24 -i -s 5 -f $cli_ |
+menu -n yawm-clients -c 80 -r 24 -d -s 5 $cli_ |
 while read scr tag win info; do
 	echo "focus-window $win" > $ctl_
 	exit 0

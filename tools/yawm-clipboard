@@ -19,7 +19,7 @@ time=$(date +%Y%m%d%H%M%S%s)
 for data in $dat_/*; do
 	IFS='-'; getstat_ $data; IFS=$ifs_
 	if [ "$name_" = "$hash" ]; then
-		mv $data $time-$name_
+		mv $data $dat_/$time-$name_
 	fi
 done
 
@@ -41,7 +41,7 @@ ls -t $dat_/ | while read name; do
 	i=$((i + 1))
 done
 
-res=$(menu -n yawm-clipboard -i -f $out_)
+res=$(menu -n yawm-clipboard -d $out_)
 getstat_ $res
 
 if [ -z "$pref_" ]; then
