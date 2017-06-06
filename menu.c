@@ -36,9 +36,6 @@
 #define dd(...) ;
 #endif /* DEBUG */
 
-#define MENU_FONT_NAME FONT1_NAME
-#define MENU_FONT_SIZE FONT1_SIZE
-
 #define FONT_H_MARGIN 2
 #define COLOR_DISTANCE 5
 
@@ -77,10 +74,17 @@ static uint32_t fg_ = 0xa0a0a0;
 static uint32_t bg_ = 0x050505;
 static uint32_t selfg_ = 0xe0e0e0;
 static uint32_t selbg_ = 0x303030;
-static XftFont *font_;
+static XftFont *font1_;
+static XftFont *font2_;
+static XftFont *font_; /* current font */
 static XftDraw *draw_;
 static XftColor selfg_xft_;
 static XftColor fg_xft_;
+
+static char *font1_name_ = FONT1_NAME;
+static float font1_size_ = FONT1_SIZE;
+static char *font2_name_ = FONT2_NAME;
+static float font2_size_ = FONT1_SIZE;
 
 static struct xkb_context *xkb_;
 static struct xkb_keymap *keymap_;
@@ -172,12 +176,19 @@ static int16_t draw_col(int16_t x, int16_t y, const char *str, uint8_t len,
 	if (!str || !len)
 		return 0;
 
+	if (*str == '\a' && font2_) {
+		font_ = font2_;
+		str++;
+		len--;
+	}
+
 	focus ? (fg = &selfg_xft_) : (fg = &fg_xft_);
 
 	XftDrawStringUtf8(draw_, fg, font_, x, y, (XftChar8 *) str, len);
 	XSync(xdpy_, 0);
 
 	text_size(str, len, &w, &h);
+	font_ = font1_; /* restore default */
 
 	return x + w + x_pad_;
 }
@@ -761,6 +772,42 @@ static void adjust_width(char *row, uint8_t len)
 	cols_px_[i] = w;
 }
 
+static XftFont *load_font(char *info, float defsize)
+{
+	XftFont *font;
+	float size = 0.f;
+	char *ptr = info;
+	char *end = info + strlen(info);
+	char *size_ptr = NULL;
+
+	while (ptr < end) {
+		if (*ptr == ':') {
+			size_ptr = ptr + 1;
+			*ptr = '\0';
+			break;
+		}
+
+		ptr++;
+	}
+
+	if (size_ptr && strlen(size_ptr))
+		size = strtof(size_ptr, NULL);
+
+	if (!size)
+		size = defsize;
+
+	font = XftFontOpen(xdpy_, xscr_, XFT_FAMILY, XftTypeString, info,
+			    XFT_SIZE, XftTypeDouble, size, NULL);
+
+	if (!font) {
+		ee("XftFontOpen(%s) failed\n", info);
+		return NULL;
+	}
+
+	dd("loaded font %s size %f\n", info, size);
+	return font;
+}
+
 static int init_rows(void)
 {
 	uint16_t i;
@@ -1014,21 +1061,25 @@ err:
 
 static void help(const char *name)
 {
-	dd("Usage: %s [options]\n"
-	   "Options:\n"
-	   "  -h, --help                     print this message\n"
-	   "  -c, --cols <width>             menu width in characters\n"
-	   "  -r, --rows <rows>              menu height in rows\n"
-	   "  -f, --file <path>              tab-separated values file (%u/%u)\n"
-	   "  -s, --swap-column <index>      swap column (shown first)\n"
-	   "  -n, --name <name>              window name and class (def '%s')\n"
-	   "  -i, --interlace                interlace colors\n"
-	   "  -a, --append                   append entered text to results\n"
-	   "  -0, --normal-foreground <hex>  rgb color, default 0x%x\n"
-	   "  -1, --normal-background <hex>  rgb color, default 0x%x\n"
-	   "  -2, --active-foreground <hex>  rgb color, default 0x%x\n"
-	   "  -3, --active-background <hex>  rgb color, default 0x%x\n"
-	   "Bindings:\n"
+	dd("Usage: %s [options] <file>\n"
+	   "\nOptions:\n"
+	   "  -h, --help                 print this message\n"
+	   "  -c, --cols <width>         menu width in characters\n"
+	   "  -r, --rows <rows>          menu height in rows\n"
+	   "  -f, --font <font>          menu font (%s:%f)\n"
+	   "  -i, --icon <font>          font for icon columns (%s:%f)\n"
+	   "  -s, --swap-column <index>  swap column (shown first)\n"
+	   "  -n, --name <name>          window name and class (def '%s')\n"
+	   "  -d, --delineate            alternate color from row to row\n"
+	   "  -a, --append               append entered text to result\n"
+	   "  -0, --normalfg <hex>       rgb color, default 0x%x\n"
+	   "  -1, --normalbg <hex>       rgb color, default 0x%x\n"
+	   "  -2, --activefg <hex>       rgb color, default 0x%x\n"
+	   "  -3, --activebg <hex>       rgb color, default 0x%x\n"
+	   "\nFile format:\n"
+	   "  tab-separated values (max cols %u, max rows %u)\n"
+	   "  font icon columns start with '\\a'\n"
+	   "\nKey bindings:\n"
 	   "  Down/Up    navigate rows\n"
 	   "  PgDn/PgUp  navigate pages\n"
 	   "  Tab        goto next row matching search pattern\n"
@@ -1036,8 +1087,9 @@ static void help(const char *name)
 	   "  Backspace  delete character before cursor in search bar\n"
 	   "  Ctrl-u     clear search bar\n"
 	   "  Return     print selected row to standard output\n"
-	   "  Esc        exit without results\n",
-	   name, UCHAR_MAX, INT16_MAX, name_, fg_, bg_, selfg_, selbg_);
+	   "  Esc        exit without result\n\n",
+	   name, font1_name_, font1_size_, font2_name_, font2_size_, name_,
+	   fg_, bg_, selfg_, selbg_, UCHAR_MAX, INT16_MAX);
 }
 
 static int opt(const char *arg, const char *args, const char *argl)
@@ -1048,6 +1100,11 @@ static int opt(const char *arg, const char *args, const char *argl)
 static void opts(int argc, char *argv[])
 {
 	int i;
+
+	if (argc < 2) {
+		help(argv[0]);
+		exit(0);
+	}
 
 	for (i = 1; i < argc; i++) {
 		const char *arg = argv[i];
@@ -1061,16 +1118,19 @@ static void opts(int argc, char *argv[])
 		} else if (opt(arg, "-r", "--rows")) {
 			i++;
 			rows_per_page_ = atoi(argv[i]);
-		} else if (opt(arg, "-f", "--file")) {
+		} else if (opt(arg, "-f", "--font")) {
 			i++;
-			path_ = argv[i];
+			font1_name_ = argv[i];
+		} else if (opt(arg, "-i", "--icon")) {
+			i++;
+			font2_name_ = argv[i];
 		} else if (opt(arg, "-s", "--search-column")) {
 			i++;
 			swap_col_idx_ = atoi(argv[i]);
 		} else if (opt(arg, "-n", "--name")) {
 			i++;
 			name_ = argv[i];
-		} else if (opt(arg, "-i", "--interlace")) {
+		} else if (opt(arg, "-d", "--delineate")) {
 			interlace_ = 1;
 		} else if (opt(arg, "-a", "--append")) {
 			append_ = 1;
@@ -1097,7 +1157,7 @@ static void opts(int argc, char *argv[])
 		}
 	}
 
-	if (!path_) {
+	if (!(path_ = argv[i - 1])) {
 		ee("path is not set\n");
 		help(argv[0]);
 		exit(0);
@@ -1147,13 +1207,17 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	font_ = XftFontOpen(xdpy_, xscr_, XFT_FAMILY, XftTypeString,
-			    MENU_FONT_NAME, XFT_SIZE, XftTypeDouble,
-			    MENU_FONT_SIZE, NULL);
-
-	if (!font_) {
-		ee("XftFontOpen(%s)\n", MENU_FONT_NAME);
+	if (!(font1_ = load_font(font1_name_, font1_size_))) {
+		ee("XftFontOpen(%s) failed\n", font1_name_);
 		goto out;
+	}
+
+	font_ = font1_; /* default */
+
+	if (!(font2_ = load_font(font2_name_, font2_size_))) {
+		ee("XftFontOpen(%s) failed\n", font2_name_);
+		/* ignore error */
+		font2_ = font1_;
 	}
 
 	dd("font: ascent %d descent %d height %d max width %d\n",
@@ -1255,8 +1319,12 @@ out:
 	if (draw_)
 		XftDrawDestroy(draw_);
 
-	if (xdpy_ && font_)
-		XftFontClose(xdpy_, font_);
+	if (xdpy_) {
+		if (font1_)
+			XftFontClose(xdpy_, font1_);
+		if (font2_ && font2_ != font1_)
+			XftFontClose(xdpy_, font2_);
+	}
 
 	if (win_ != XCB_WINDOW_NONE)
 		xcb_destroy_window(dpy_, win_);
