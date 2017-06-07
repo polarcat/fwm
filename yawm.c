@@ -2374,7 +2374,7 @@ static void dock_arrange(struct screen *scr)
 	else
 		y = scr->y + scr->h;
 
-	y += 2 * ITEM_V_MARGIN;
+	y += ITEM_V_MARGIN;
 
 	x = scr->items[PANEL_AREA_DOCK].x;
 	list_walk_safe(cur, tmp, &scr->dock) {
@@ -2417,7 +2417,7 @@ static void dock_add(struct client *cli, uint8_t bw)
 
 	cli->flags |= CLI_FLG_DOCK;
 
-	h = panel_height - ITEM_V_MARGIN * 2 - bw * 4;
+	h = panel_height - ITEM_V_MARGIN * 2 - bw * 2;
 
 	if (cli->flags & CLI_FLG_TRAY)
 		cli->w = h;
