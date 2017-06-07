@@ -81,6 +81,8 @@ install-tools:
 	-cp -v tools/yawm-keys $(HOME)/bin/
 	-chmod 755 $(HOME)/bin/yawm-keys
 	-touch $(HOME)/.yawm/center/yawm-keys
+	-cp -v tools/yawm-restart $(HOME)/bin/
+	-chmod 755 $(HOME)/bin/yawm-restart
 
 clean:
 	-rm -f $(wmout) $(clockout)

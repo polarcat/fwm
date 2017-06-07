@@ -1,0 +1,18 @@
+#!/bin/sh
+
+tmp_=$HOME/.yawm/tmp
+out_=$tmp_/restart
+
+mkdir -p $tmp_
+
+if [ ! -f $out_ ]; then
+	printf "Restart window manager\t\a \n" > $out_
+	printf "Leave desktop session\t\a \n" >> $out_
+fi
+
+menu -n yawm-screens -c 24 -d $out_ | while read info icon; do
+	case $info in
+	Restart*) return 0;;
+	Leave*) return 1;;
+	esac
+done
