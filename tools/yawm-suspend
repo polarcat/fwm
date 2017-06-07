@@ -1,0 +1,17 @@
+#!/bin/sh
+
+tmp_=$HOME/.yawm/tmp
+out_=$tmp_/suspend
+
+mkdir -p $tmp_
+
+if [ ! -f $out_ ]; then
+	printf "Suspend system\t\a \n" > $out_
+	printf "Cancel\t\n" >> $out_
+fi
+
+menu -n yawm-screens -c 9 -d $out_ | while read info icon; do
+	case $info in
+	Suspend*) return 1;;
+	esac
+done
