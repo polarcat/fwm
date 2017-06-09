@@ -52,7 +52,7 @@ find $dir_ -type f -name "*.desktop" | while read file; do
 	fi
 done
 
-res=$(menu -n yawm-apps -d $out_)
+res=$(menu -n yawm-apps -b -d $out_)
 
 runcmd_() { exec $1; }
 

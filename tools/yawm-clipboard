@@ -41,7 +41,7 @@ ls -t $dat_/ | while read name; do
 	i=$((i + 1))
 done
 
-res=$(menu -n yawm-clipboard -d $out_)
+res=$(menu -n yawm-clipboard -b -d $out_)
 getstat_ $res
 
 if [ -z "$pref_" ]; then
