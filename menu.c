@@ -68,6 +68,7 @@ struct page {
 
 static struct page pages_[UCHAR_MAX + 1];
 
+static uint8_t search_bar_;
 static uint8_t append_;
 static uint8_t interlace_;
 static uint32_t fg_ = 0xa0a0a0;
@@ -195,6 +196,9 @@ static int16_t draw_col(int16_t x, int16_t y, const char *str, uint8_t len,
 
 static void draw_search_bar(void)
 {
+	if (!search_bar_)
+		return;
+
 	int16_t x = x_pad_ * 2;
 	int16_t y = draw_rect(rows_per_page_, 0) + text_y_;
 	uint8_t len = search_idx_ + 1;
@@ -1063,19 +1067,20 @@ static void help(const char *name)
 {
 	dd("Usage: %s [options] <file>\n"
 	   "\nOptions:\n"
-	   "  -h, --help                 print this message\n"
-	   "  -c, --cols <width>         menu width in characters\n"
-	   "  -r, --rows <rows>          menu height in rows\n"
-	   "  -f, --font <font>          menu font (%s:%f)\n"
-	   "  -i, --icon <font>          font for icon columns (%s:%f)\n"
-	   "  -s, --swap-column <index>  swap column (shown first)\n"
-	   "  -n, --name <name>          window name and class (def '%s')\n"
-	   "  -d, --delineate            alternate color from row to row\n"
-	   "  -a, --append               append entered text to result\n"
-	   "  -0, --normalfg <hex>       rgb color, default 0x%x\n"
-	   "  -1, --normalbg <hex>       rgb color, default 0x%x\n"
-	   "  -2, --activefg <hex>       rgb color, default 0x%x\n"
-	   "  -3, --activebg <hex>       rgb color, default 0x%x\n"
+	   "  -h, --help                   print this message\n"
+	   "  -c, --cols <width>           menu width in characters\n"
+	   "  -r, --rows <rows>            menu height in rows\n"
+	   "  -f, --font <font>            menu font (%s:%f)\n"
+	   "  -i, --icon <font>            font for icon columns (%s:%f)\n"
+	   "  -s, --search-column <index>  search column (shown first)\n"
+	   "  -n, --name <name>            window name and class (def '%s')\n"
+	   "  -d, --delineate              alternate color from row to row\n"
+	   "  -a, --append                 append entered text to result\n"
+	   "  -b, --search-bar             show search bar\n"
+	   "  -0, --normalfg <hex>         rgb color, default 0x%x\n"
+	   "  -1, --normalbg <hex>         rgb color, default 0x%x\n"
+	   "  -2, --activefg <hex>         rgb color, default 0x%x\n"
+	   "  -3, --activebg <hex>         rgb color, default 0x%x\n"
 	   "\nFile format:\n"
 	   "  tab-separated values (max cols %u, max rows %u)\n"
 	   "  font icon columns start with '\\a'\n"
@@ -1134,6 +1139,8 @@ static void opts(int argc, char *argv[])
 			interlace_ = 1;
 		} else if (opt(arg, "-a", "--append")) {
 			append_ = 1;
+		} else if (opt(arg, "-b", "--search-bar")) {
+			search_bar_ = 1;
 		} else if (opt(arg, "-0", "--normal-foreground")) {
 			i++;
 			if (argv[i])
@@ -1156,6 +1163,9 @@ static void opts(int argc, char *argv[])
 			selbg_ &= 0xffffff;
 		}
 	}
+
+	if (!search_bar_)
+		append_ = 0;
 
 	if (!(path_ = argv[i - 1])) {
 		ee("path is not set\n");
@@ -1276,8 +1286,12 @@ int main(int argc, char *argv[])
 		 XCB_EVENT_MASK_KEY_PRESS  | XCB_EVENT_MASK_KEY_RELEASE |
 		 XCB_EVENT_MASK_BUTTON_PRESS |
 		 XCB_EVENT_MASK_POINTER_MOTION;
+
+	uint16_t tmp;
+	search_bar_ ? (tmp = row_h_) : (tmp = 0);
+
 	xcb_create_window(dpy_, XCB_COPY_FROM_PARENT, win_, scr->root, 0, 0,
-			  page_w_ + 2 * x_pad_, page_h_ + 2 * y_pad_ + row_h_,
+			  page_w_ + 2 * x_pad_, page_h_ + 2 * y_pad_ + tmp,
 			  0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			  scr->root_visual, mask, val);
 
