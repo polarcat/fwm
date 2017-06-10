@@ -54,7 +54,7 @@ typedef uint8_t strlen_t;
 
 #define ITEM_V_MARGIN 2
 #define ITEM_H_MARGIN 6
-#define TAG_V_GAP 2
+#define TAG_GAP 2
 
 #define BORDER_WIDTH 1
 #define WINDOW_PAD BORDER_WIDTH
@@ -84,7 +84,9 @@ typedef uint8_t strlen_t;
 #define MOUSE_BTN_MID 2
 #define MOUSE_BTN_RIGHT 3
 
-#define MENU_ICON "::"
+#define MENU_ICON1 "="
+#define MENU_ICON2 ""
+//#define MENU_ICON2 " "
 
 #define ALT XCB_MOD_MASK_1
 #ifndef MOD
@@ -109,8 +111,8 @@ struct sprop { /* string property */
 };
 
 enum panel_area { /* in order of appearance */
-	PANEL_AREA_TAGS,
 	PANEL_AREA_MENU,
+	PANEL_AREA_TAGS,
 	PANEL_AREA_TITLE,
 	PANEL_AREA_DOCK,
 	PANEL_AREA_MAX,
@@ -240,6 +242,7 @@ struct screen *defscr;
 static xcb_screen_t *rootscr; /* root window details */
 static struct toolbar toolbar; /* window toolbar */
 static xcb_window_t toolbar_child; /* needed for close window action */
+static uint8_t focus_root_;
 
 struct tag {
 	struct list_head head;
@@ -601,13 +604,12 @@ static void draw_panel_text(struct panel *panel, struct color *fg,
 			    struct color *bg, int16_t x, uint16_t w,
 			    const char *text, int len, XftFont *font)
 {
-	uint16_t ww = w + 2 * panel->pad;
-	uint16_t xx = x + panel->pad + 1;
-
-	fill_rect(panel->win, panel->gc, bg, x, ITEM_V_MARGIN, ww,
+	fill_rect(panel->win, panel->gc, bg, x, ITEM_V_MARGIN, w,
 		  panel_height - 2 * ITEM_V_MARGIN);
 
-	XftDrawStringUtf8(panel->draw, fg->val, font, xx, text_yoffs,
+	x += panel->pad;
+
+	XftDrawStringUtf8(panel->draw, fg->val, font, x, text_yoffs,
 			  (XftChar8 *) text, len);
 	XSync(xdpy, 0);
 }
@@ -740,9 +742,12 @@ static void warp_pointer(xcb_window_t win, int16_t x, int16_t y)
 	xcb_warp_pointer_checked(dpy, XCB_NONE, win, 0, 0, 0, 0, x, y);
 }
 
-static void center_pointer(xcb_window_t win, uint16_t w, uint16_t h)
+static void center_pointer(struct client *cli)
 {
-	warp_pointer(win, w / 2, h / 2);
+	if (cli->flags & CLI_FLG_POPUP)
+		return;
+
+	warp_pointer(cli->win, cli->w / 2, cli->h / 2);
 }
 
 static void restore_window(xcb_window_t win, struct screen **scr,
@@ -791,6 +796,12 @@ static void store_client(struct client *cli, uint8_t clean)
 	FILE *f;
 	char path[sizeof("0xffffffffffffffff")];
 	uint8_t buf[2];
+
+	if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
+		clean = 1;
+	} else if (cli->flags & CLI_FLG_POPUP) {
+		return;
+	}
 
 	snprintf(path, sizeof(path), ".session/0x%x", cli->win);
 
@@ -1081,6 +1092,18 @@ static void autostart(void)
 	exec(path);
 }
 
+static void run_menu(void)
+{
+	uint16_t len = baselen + sizeof("/panel/menu");
+	char path[len];
+
+	if (!basedir)
+		return;
+
+	snprintf(path, len, "%s/panel/menu", basedir);
+	exec(path);
+}
+
 static void clean(void)
 {
 	xcb_disconnect(dpy);
@@ -1215,8 +1238,6 @@ static void update_client_list(void)
 				    a_client_list, XCB_ATOM_WINDOW, 32, 1,
 				    &cli->win);
 	}
-
-	xcb_flush(dpy);
 }
 
 static uint8_t tray_window(xcb_window_t win)
@@ -1390,9 +1411,10 @@ static struct client *pointer2cli(void)
 
 	list_walk(head, &curscr->tag->clients) {
 		struct client *cli = list2client(head);
-		if (cli->win == win) {
+		if (cli->flags & CLI_FLG_POPUP)
+			return NULL;
+		else if (cli->win == win)
 			return cli;
-		}
 	}
 
         return NULL;
@@ -1459,7 +1481,7 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 	focus_window(cli->win);
 
 	if (!(scr->flags & SCR_FLG_SWITCH_WINDOW_NOWARP)) {
-		center_pointer(cli->win, cli->w, cli->h);
+		center_pointer(cli);
 	} else {
 		struct client *tmp = front_client(scr->tag);
 		if (tmp)
@@ -1759,6 +1781,8 @@ static void show_toolbar(void)
 
 	if (new && new == cur)
 		return;
+	else if (!new)
+		return;
 
 	if (init_toolbar() < 0)
 		return;
@@ -1999,7 +2023,7 @@ out:
 		window_border_color(cli->win, alertbg);
 
 	client_moveresize(cli, x, y, w, h);
-	center_pointer(cli->win, cli->w, cli->h);
+	center_pointer(cli);
 	xcb_flush(dpy);
 	return;
 halfwh:
@@ -2133,7 +2157,7 @@ static void show_windows(struct tag *tag, uint8_t focus)
 		} else {
 			raise_window(cli->win);
 			focus_window(cli->win);
-			center_pointer(cli->win, cli->w, cli->h);
+			center_pointer(cli);
 		}
 	}
 }
@@ -2223,7 +2247,7 @@ static void retag_client(void *ptr)
 	cli->tag = curscr->tag;
 	raise_window(cli->win);
 	focus_window(cli->win);
-	center_pointer(cli->win, cli->w, cli->h);
+	center_pointer(cli);
 	xcb_flush(dpy);
 	store_client(cli, 0);
 }
@@ -2472,6 +2496,13 @@ static void del_window(xcb_window_t win)
 	if (!cli) {
 		ii("unmanaged win 0x%x\n", win);
 		xcb_unmap_subwindows_checked(dpy, win);
+
+		xcb_window_t curwin = pointer2win();
+
+		if (panel_window(curwin)) {
+			ii("panel win 0x%x nder focus\n", curwin);
+		}
+
 		goto out;
 	}
 
@@ -2490,6 +2521,12 @@ static void del_window(xcb_window_t win)
 out:
 	curscr = pointer2scr();
 
+	if (focus_root_) {
+		focus_root_ = 0;
+		focus_root();
+		goto flush;
+	}
+
 	if (!(cli = front_client(curscr->tag)))
 		cli = pointer2cli();
 
@@ -2501,7 +2538,7 @@ out:
 			ii("front win 0x%x\n", cli ? cli->win : 0);
 			raise_window(cli->win);
 			focus_window(cli->win);
-			center_pointer(cli->win, cli->w, cli->h);
+			center_pointer(cli);
 		}
 	}
 
@@ -2511,6 +2548,7 @@ out:
 			     curscr->y + curscr->h / 2);
 	}
 
+flush:
 	update_client_list();
 	xcb_flush(dpy);
 }
@@ -2553,6 +2591,14 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
+	enum winstatus status = window_status(win);
+
+	if (status == WIN_STATUS_UNKNOWN) {
+		ww("ignore unknown window 0x%x\n", win);
+		xcb_unmap_window_checked(dpy, win);
+		xcb_flush(dpy);
+		return NULL;
+	}
 
 	if (win == rootscr->root || win == toolbar.panel.win)
 		return NULL;
@@ -2735,7 +2781,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 			resort_client(tmp);
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 		xcb_map_window_checked(dpy, cli->win);
-		center_pointer(cli->win, cli->w, cli->h);
+		center_pointer(cli);
 	}
 
 	ii("screen %d tag '%s' win 0x%x pid %d geo %ux%u+%d+%d cli %p\n",
@@ -2751,6 +2797,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	}
 
 	update_client_list();
+	xcb_flush(dpy);
 out:
 	free(a);
 	free(g);
@@ -2816,7 +2863,7 @@ static void scan_clients(void)
 	if ((cli = front_client(curscr->tag))) {
 		raise_window(cli->win);
 		focus_window(cli->win);
-		center_pointer(cli->win, cli->w, cli->h);
+		center_pointer(cli);
 	}
 
 	free(tree);
@@ -2830,9 +2877,15 @@ static void print_menu(struct screen *scr)
 	x = scr->items[PANEL_AREA_MENU].x;
 	w = scr->items[PANEL_AREA_MENU].w;
 
-	draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
-			color2ptr(PANELBG), x, w, MENU_ICON,
-			sizeof(MENU_ICON) - 1, font1);
+	if (font2) {
+		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
+				color2ptr(PANELBG), x, w, MENU_ICON2,
+				sizeof(MENU_ICON2) - 1, font2);
+	} else {
+		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
+				color2ptr(PANELBG), x, w, MENU_ICON1,
+				sizeof(MENU_ICON1) - 1, font1);
+	}
 }
 
 static int tag_clicked(struct tag *tag, int16_t x, uint16_t pad)
@@ -2963,6 +3016,7 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
 		return 0;
 
 	text_exts(name, tag->nlen, &tag->w, &h, font1);
+	tag->w += scr->panel.pad * 2;
 	ii("tag '%s' len %u width %u\n", name, tag->nlen, tag->w);
 
 	if (pos != scr->items[PANEL_AREA_TAGS].x) {
@@ -2972,10 +3026,10 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
 		scr->tag = tag;
 	}
 
-	tag->x = pos;
+	tag->x = pos + scr->panel.pad + 1;
 	print_tag(scr, tag, fg);
 
-	return pos + tag->w + scr->panel.pad * 2 + TAG_V_GAP;
+	return pos + tag->w + TAG_GAP;
 }
 
 /*
@@ -3041,6 +3095,8 @@ static void redraw_panel_items(struct screen *scr)
 	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(PANELBG), scr->x, 0,
 		  scr->w, panel_height);
 
+	print_menu(scr);
+
 	list_walk(cur, &scr->tags) {
 		struct tag *tag = list2tag(cur);
 
@@ -3052,7 +3108,6 @@ static void redraw_panel_items(struct screen *scr)
 		print_tag(scr, tag, fg);
 	}
 
-	print_menu(scr);
 	print_title(scr, XCB_WINDOW_NONE);
 }
 
@@ -3065,15 +3120,20 @@ static void update_panel_items(struct screen *scr)
 	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(PANELBG), scr->x, 0,
 		  scr->w, panel_height);
 
-	scr->items[PANEL_AREA_TAGS].x = scr->panel.pad;
-	scr->items[PANEL_AREA_TAGS].w = init_tags(scr);
-	x += scr->items[PANEL_AREA_TAGS].w + 1;
+	if (font2)
+		text_exts(MENU_ICON2, sizeof(MENU_ICON2) - 1, &w, &h, font2);
+	else
+		text_exts(MENU_ICON1, sizeof(MENU_ICON1) - 1, &w, &h, font1);
 
-	text_exts(MENU_ICON, sizeof(MENU_ICON) - 1, &w, &h, font1);
-	scr->items[PANEL_AREA_MENU].x = x;
+	scr->items[PANEL_AREA_MENU].x = scr->panel.pad;
 	scr->items[PANEL_AREA_MENU].w = w + scr->panel.pad * 2;
 
 	x += scr->items[PANEL_AREA_MENU].w + 1;
+
+	scr->items[PANEL_AREA_TAGS].x = x;
+	scr->items[PANEL_AREA_TAGS].w = init_tags(scr);
+	x += scr->items[PANEL_AREA_TAGS].w + 1;
+
 	scr->items[PANEL_AREA_TITLE].x = x;
 
 	dock_arrange(scr);
@@ -3679,7 +3739,7 @@ static void focus_window_req(xcb_window_t win)
 			focus_tag(curscr, cli->tag);
 			raise_window(cli->win);
 			focus_window(cli->win);
-			center_pointer(cli->win, cli->w, cli->h);
+			center_pointer(cli);
 
 			ii("focus screen %u tag %s win 0x%x",
 			   curscr->id, cli->tag ? cli->tag->name : "<nil>",
@@ -3931,7 +3991,7 @@ static void toolbar_button_press(struct arg *arg)
 		struct client *cli = toolbar.cli;
 		cli->flags |= CLI_FLG_MOVE;
 		hide_toolbar();
-		center_pointer(cli->win, cli->w, cli->h);
+		center_pointer(cli);
 
 		/* subscribe to motion events */
 
@@ -3959,8 +4019,7 @@ static void panel_button_press(xcb_button_press_event_t *e)
 		point_tag(curscr, e->event_x);
 		xcb_flush(dpy);
 	} else if pointer_inside(curscr, PANEL_AREA_MENU, e->event_x) {
-		struct arg arg = { .x = e->root_x, .y = e->root_y, };
-		make_grid(&arg);
+		run_menu();
 	} else if pointer_inside(curscr, PANEL_AREA_TITLE, e->event_x) {
 		ii("title\n");
 		curscr->flags |= SCR_FLG_SWITCH_WINDOW_NOWARP;
@@ -4020,7 +4079,7 @@ static void handle_button_press(xcb_button_press_event_t *e)
 		} else {
 			struct client *cli = win2cli(e->child);
 			if (cli)
-				center_pointer(cli->win, cli->w, cli->h);
+				center_pointer(cli);
 		}
 		break;
 	case MOUSE_BTN_MID:
@@ -4276,6 +4335,7 @@ static void handle_leave_notify(xcb_leave_notify_event_t *e)
 
 	if (cli && cli->flags & CLI_FLG_POPUP) {
 		close_window(e->event, 1);
+		focus_root_ = 1;
 	}
 }
 
