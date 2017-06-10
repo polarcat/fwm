@@ -73,6 +73,7 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_EXCLUSIVE (1 << 8)
 #define CLI_FLG_MOVE (1 << 9)
 #define CLI_FLG_FULLSCREEN (1 << 10)
+#define CLI_FLG_POPUP (1 << 11)
 
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
@@ -841,13 +842,13 @@ static void ping_window(xcb_window_t win, xcb_timestamp_t time)
 }
 #endif
 
-static void close_window(xcb_window_t win)
+static void close_window(xcb_window_t win, uint8_t force)
 {
 	xcb_client_message_event_t e = { 0 };
 	struct client *cli = win2cli(win);
 
-	if (cli->flags & CLI_FLG_EXCLUSIVE) {
-		ii("shutdown special win 0x%x pid %d\n", win, cli->pid);
+	if (force) {
+		ii("terminate pid %d win 0x%x\n", cli->pid, win);
 		if (cli->pid)
 			kill(cli->pid, SIGTERM);
 		free_client(cli);
@@ -2532,8 +2533,7 @@ static uint32_t window_exclusive(xcb_window_t win)
 			free(cli);
 		} else if (crc && cli->crc == crc && cli->win != win) {
 			xcb_window_t old = cli->win;
-			cli->flags |= CLI_FLG_EXCLUSIVE;
-			close_window(cli->win);
+			close_window(cli->win, 1);
 			del_window(old);
 			ii("exclusive win 0x%x crc 0x%x\n", win, crc);
 		}
@@ -2575,6 +2575,11 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	if (tray_window(win) || tray) {
 		ii("win 0x%x provides embed info\n", win);
 		flags |= CLI_FLG_TRAY;
+	}
+
+	if (window_special(win, "popup", sizeof("popup"))) {
+		flags &= ~(CLI_FLG_DOCK | CLI_FLG_TRAY);
+		flags |= CLI_FLG_POPUP;
 	}
 
 	if (!(flags & (CLI_FLG_DOCK | CLI_FLG_TRAY)))
@@ -2708,6 +2713,10 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	val[0] = XCB_EVENT_MASK_ENTER_WINDOW;
 	val[0] |= XCB_EVENT_MASK_PROPERTY_CHANGE;
 	val[0] |= XCB_EVENT_MASK_STRUCTURE_NOTIFY;
+
+	if (cli->flags & CLI_FLG_POPUP)
+		val[0] |= XCB_EVENT_MASK_LEAVE_WINDOW;
+
 	xcb_change_window_attributes_checked(dpy, win, XCB_CW_EVENT_MASK, val);
 
 	unfocus_clients(curscr->tag);
@@ -3880,7 +3889,7 @@ static void toolbar_button_press(struct arg *arg)
 
 	if (focused_item->str == (const char *) BTN_CLOSE) {
 		hide_toolbar();
-		close_window(toolbar_child);
+		close_window(toolbar_child, 0);
 		toolbar_child = XCB_WINDOW_NONE;
 	} else if (focused_item->str == (const char *) BTN_LEFT) {
 		arg->data = WIN_POS_LEFT_FILL;
@@ -4261,6 +4270,15 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	xcb_flush(dpy);
 }
 
+static void handle_leave_notify(xcb_leave_notify_event_t *e)
+{
+	struct client *cli = win2cli(e->event);
+
+	if (cli && cli->flags & CLI_FLG_POPUP) {
+		close_window(e->event, 1);
+	}
+}
+
 static void handle_wmname(xcb_property_notify_event_t *e)
 {
 	struct color *bg, *fg;
@@ -4605,6 +4623,9 @@ static int handle_events(void)
 		   ((xcb_enter_notify_event_t *) e)->state,
 		   ((xcb_enter_notify_event_t *) e)->mode);
 		handle_enter_notify((xcb_enter_notify_event_t *) e);
+		break;
+	case XCB_LEAVE_NOTIFY:
+		handle_leave_notify((xcb_leave_notify_event_t *) e);
 		break;
 	case XCB_KEY_PRESS:
 		te("XCB_KEY_PRESS: root 0x%x, win 0x%x, child 0x%x, key %d\n",
