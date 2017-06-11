@@ -1,0 +1,37 @@
+#!/bin/sh
+
+base_=$HOME/.yawm
+dirs_="
+center
+exclusive
+top-left
+"
+
+for dir in $dirs_; do
+	mkdir -p $base_/$dir
+done
+
+mkdir -p $HOME/bin
+
+tools_="
+yawm-screens
+yawm-clients
+yawm-clipboard
+yawm-apps
+yawm-run
+yawm-keys
+yawm-restart
+yawm-suspend
+"
+
+for tool in $tools_; do
+	cp -v tools/$tool $HOME/bin/
+	chmod 755 $HOME/bin/$tool
+	touch $base_/center/$tool
+	touch $base_/exclusive/$tool
+done
+
+cp -v tools/yawm-menu $HOME/bin/
+chmod 755 $HOME/bin/yawm-menu
+touch $base_/top-left/yawm-menu
+touch $base_/exclusive/yawm-menu

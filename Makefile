@@ -60,33 +60,6 @@ install-$(menuout):
 	-cp -v $(menuout) $(HOME)/bin/$(menuout)
 	-chmod 755 $(HOME)/bin/$(menuout)
 
-install-tools:
-	-mkdir -p $(HOME)/bin
-	-mkdir -p $(HOME)/.yawm/center
-	-cp -v tools/yawm-screens $(HOME)/bin/
-	-chmod 755 $(HOME)/bin/yawm-screens
-	-touch $(HOME)/.yawm/center/yawm-screens
-	-cp -v tools/yawm-clients $(HOME)/bin/
-	-chmod 755 $(HOME)/bin/yawm-clients
-	-touch $(HOME)/.yawm/center/yawm-clients
-	-cp -v tools/yawm-clipboard $(HOME)/bin/
-	-chmod 755 $(HOME)/bin/yawm-clipboard
-	-touch $(HOME)/.yawm/center/yawm-clipboard
-	-cp -v tools/yawm-apps $(HOME)/bin/
-	-chmod 755 $(HOME)/bin/yawm-apps
-	-touch $(HOME)/.yawm/center/yawm-apps
-	-cp -v tools/yawm-run $(HOME)/bin/
-	-chmod 755 $(HOME)/bin/yawm-run
-	-touch $(HOME)/.yawm/center/yawm-run
-	-cp -v tools/yawm-keys $(HOME)/bin/
-	-chmod 755 $(HOME)/bin/yawm-keys
-	-touch $(HOME)/.yawm/center/yawm-keys
-	-cp -v tools/yawm-restart $(HOME)/bin/
-	-chmod 755 $(HOME)/bin/yawm-restart
-	-cp -v tools/yawm-suspend $(HOME)/bin/
-	-chmod 755 $(HOME)/bin/yawm-suspend
-	-touch $(HOME)/.yawm/center/yawm-suspend
-
 clean:
 	-rm -f $(wmout) $(clockout)
 
