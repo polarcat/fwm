@@ -12,7 +12,7 @@ fi
 
 menu -n yawm-screens -c 24 -d $out_ | while read info icon; do
 	case $info in
-	Restart*) return 0;;
-	Leave*) return 1;;
+	Restart*) return 1;;
+	Leave*) return 0;;
 	esac
 done
