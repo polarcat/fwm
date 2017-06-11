@@ -1065,7 +1065,7 @@ err:
 
 static void help(const char *name)
 {
-	dd("Usage: %s [options] <file>\n"
+	ii("Usage: %s [options] <file>\n"
 	   "\nOptions:\n"
 	   "  -h, --help                   print this message\n"
 	   "  -c, --cols <width>           menu width in characters\n"
