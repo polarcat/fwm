@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <poll.h>
 
 #include <math.h>
 
@@ -624,7 +625,7 @@ static void key_press(xcb_key_press_event_t *e)
 			printf("\n");
 		}
 
-		exit(0);
+		done_ = 1;
 	} else {
 		if ((sym = get_keysyms(e->detail)))
 			find_row(sym);
@@ -694,69 +695,18 @@ static void follow_pointer(xcb_motion_notify_event_t *e)
 	}
 }
 
-static void wait(void)
+static void warp_pointer(void)
 {
-	int state;
-	xcb_generic_event_t *e;
-
-	while (1) {
-		e = xcb_wait_for_event(dpy_);
-		if (!e)
-			continue;
-
-		state = ((xcb_visibility_notify_event_t *) e)->state;
-		free(e);
-		if (state == XCB_VISIBILITY_UNOBSCURED)
-			break;
-		else if (state == XCB_VISIBILITY_PARTIALLY_OBSCURED)
-			break;
-	}
-}
-
-static void events(void)
-{
-	xcb_generic_event_t *e = xcb_wait_for_event(dpy_);
-
-	if (!e)
-		return;
-
-	switch (e->response_type & ~0x80) {
-	case XCB_VISIBILITY_NOTIFY:
-		switch (((xcb_visibility_notify_event_t *) e)->state) {
-		case XCB_VISIBILITY_FULLY_OBSCURED:
-			wait();
-			break;
-		case XCB_VISIBILITY_PARTIALLY_OBSCURED: /* fall through */
-		case XCB_VISIBILITY_UNOBSCURED:
-			dd("XCB_VISIBILITY_UNOBSCURED\n");
-			break;
-		}
-		break;
-	case XCB_EXPOSE:
-		dd("XCB_EXPOSE\n");
-		draw_menu();
-		break;
-	case XCB_KEY_PRESS:
-		key_press((xcb_key_press_event_t *) e);
-		break;
-	case XCB_KEY_RELEASE:
-		key_release((xcb_key_press_event_t *) e);
-		break;
-	case XCB_BUTTON_PRESS:
-		dd("XCB_BUTTON_PRESS\n");
-		char *str = selrow_->str;
-		*(str + selrow_->len) = '\0';
-		printf("%s\n", str);
-		exit(0);
-		break;
-	case XCB_MOTION_NOTIFY:
-		follow_pointer((xcb_motion_notify_event_t *) e);
-		break;
-	default:
-		dd("event %d (%d)\n", e->response_type & ~0x80, e->response_type);
-	}
-
-	free(e);
+	xcb_grab_pointer(dpy_, XCB_NONE, win_,
+			 XCB_EVENT_MASK_POINTER_MOTION |
+			 XCB_EVENT_MASK_BUTTON_PRESS |
+			 XCB_EVENT_MASK_BUTTON_RELEASE,
+			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
+			 win_, XCB_NONE, XCB_CURRENT_TIME);
+	xcb_warp_pointer_checked(dpy_, XCB_NONE, win_, 0, 0, 0, 0, 2 * x_pad_,
+				 2 * y_pad_);
+	xcb_flush(dpy_);
+	return;
 }
 
 static void adjust_width(char *row, uint8_t len)
@@ -1192,8 +1142,100 @@ static xcb_atom_t get_atom(const char *str, uint8_t len)
 	return a;
 }
 
+#ifdef STAY_OBSCURED
+static void wait(void)
+{
+	int state;
+	xcb_generic_event_t *e;
+
+	while (1) {
+		e = xcb_wait_for_event(dpy_);
+		if (!e)
+			continue;
+
+		state = ((xcb_visibility_notify_event_t *) e)->state;
+		free(e);
+		if (state == XCB_VISIBILITY_UNOBSCURED)
+			break;
+		else if (state == XCB_VISIBILITY_PARTIALLY_OBSCURED)
+			break;
+	}
+}
+#endif
+
+static uint8_t events(void)
+{
+#if 0
+	xcb_generic_event_t *e = xcb_wait_for_event(dpy_);
+#else
+	xcb_generic_event_t *e = xcb_poll_for_event(dpy_);
+#endif
+
+	if (!e)
+		return 0;
+
+	switch (e->response_type & ~0x80) {
+	case XCB_VISIBILITY_NOTIFY:
+		switch (((xcb_visibility_notify_event_t *) e)->state) {
+		case XCB_VISIBILITY_PARTIALLY_OBSCURED: /* fall through */
+			dd("XCB_VISIBILITY_PARTIALLY_OBSCURED\n");
+		case XCB_VISIBILITY_FULLY_OBSCURED:
+			dd("XCB_VISIBILITY_FULLY_OBSCURED\n");
+#ifdef STAY_OBSCURED
+			wait();
+#else
+			done_ = 1;
+#endif
+			break;
+		case XCB_VISIBILITY_UNOBSCURED:
+			dd("XCB_VISIBILITY_UNOBSCURED\n");
+			break;
+		}
+		break;
+	case XCB_UNMAP_NOTIFY:
+		dd("XCB_UNMAP_NOTIFY\n");
+		done_ = 1;
+		break;
+	case XCB_DESTROY_NOTIFY:
+		dd("XCB_DESTROY_NOTIFY\n");
+		done_ = 1;
+		break;
+	case XCB_LEAVE_NOTIFY:
+		dd("XCB_LEAVE_NOTIFY\n");
+		done_ = 1;
+		break;
+	case XCB_EXPOSE:
+		dd("XCB_EXPOSE\n");
+		draw_menu();
+		warp_pointer();
+		break;
+	case XCB_KEY_PRESS:
+		key_press((xcb_key_press_event_t *) e);
+		break;
+	case XCB_KEY_RELEASE:
+		key_release((xcb_key_press_event_t *) e);
+		break;
+	case XCB_BUTTON_PRESS:
+		dd("XCB_BUTTON_PRESS\n");
+		char *str = selrow_->str;
+		*(str + selrow_->len) = '\0';
+		printf("%s\n", str);
+		done_ = 1;
+		break;
+	case XCB_MOTION_NOTIFY:
+		follow_pointer((xcb_motion_notify_event_t *) e);
+		break;
+	default:
+		dd("event %d (%d)\n", e->response_type & ~0x80, e->response_type);
+	}
+
+	free(e);
+	return 1;
+}
+
 int main(int argc, char *argv[])
 {
+	struct pollfd pfd;
 	int fd;
 	uint32_t mask;
 	xcb_screen_t *scr;
@@ -1282,10 +1324,13 @@ int main(int argc, char *argv[])
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
 	val[0] = bg_;
-	val[1] = XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_VISIBILITY_CHANGE |
-		 XCB_EVENT_MASK_KEY_PRESS  | XCB_EVENT_MASK_KEY_RELEASE |
-		 XCB_EVENT_MASK_BUTTON_PRESS |
-		 XCB_EVENT_MASK_POINTER_MOTION;
+	val[1] = XCB_EVENT_MASK_EXPOSURE;
+	val[1] |= XCB_EVENT_MASK_VISIBILITY_CHANGE;
+	val[1] |= XCB_EVENT_MASK_KEY_PRESS;
+	val[1] |= XCB_EVENT_MASK_KEY_RELEASE;
+	val[1] |= XCB_EVENT_MASK_BUTTON_PRESS;
+	val[1] |= XCB_EVENT_MASK_POINTER_MOTION;
+	val[1] |= XCB_EVENT_MASK_LEAVE_WINDOW;
 
 	uint16_t tmp;
 	search_bar_ ? (tmp = row_h_) : (tmp = 0);
@@ -1316,8 +1361,28 @@ int main(int argc, char *argv[])
 
 	init_xkb();
 
-	while (!done_) {
+	while (!done_)
 		events();
+
+	/* DUNNO: this trick is needed to deliver events in case another
+	 * menu window grabs pointer
+	 */
+
+	pfd.fd = xcb_get_file_descriptor(dpy_);
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+
+	while (!done_) {
+		errno = 0;
+		poll(&pfd, 1, -1);
+
+		if (errno == EINTR)
+			continue;
+
+		if (pfd.revents & POLLIN)
+			while (events()) {};
+
+		pfd.revents = 0;
 	}
 
 out:
@@ -1340,8 +1405,10 @@ out:
 			XftFontClose(xdpy_, font2_);
 	}
 
-	if (win_ != XCB_WINDOW_NONE)
+	if (win_ != XCB_WINDOW_NONE) {
 		xcb_destroy_window(dpy_, win_);
+		xcb_flush(dpy_);
+	}
 
 	if (data_)
 		munmap(data_, data_size_);
