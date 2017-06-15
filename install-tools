@@ -31,7 +31,14 @@ for tool in $tools_; do
 	touch $base_/exclusive/$tool
 done
 
+keys_=$base_/keys
+mkdir -p $keys_
+
 cp -v tools/yawm-menu $HOME/bin/
 chmod 755 $HOME/bin/yawm-menu
 touch $base_/top-left/yawm-menu
 touch $base_/exclusive/yawm-menu
+
+printf "#!/bin/sh\nexec yawm-menu &\n" > $keys_/mod_m
+chmod +x $keys_/mod_m
+echo "reload-keys" > $base_/.control

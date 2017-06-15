@@ -6,7 +6,7 @@ out_=$tmp_/bin
 
 mkdir -p $tmp_
 
-printf "" > $out_
+printf "\a  \t\n" > $out_
 IFS=':'
 for dir in $PATH; do
 	ls -1 $dir | while read line; do

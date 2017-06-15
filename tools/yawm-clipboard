@@ -32,7 +32,7 @@ ls -t $dat_/ | while read name; do
 done
 
 mv $tmp_ $dat_/$time-$hash
-printf "" > $out_
+printf "\a  \t\n" > $out_
 
 i=0
 ls -t $dat_/ | while read name; do

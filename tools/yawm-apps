@@ -21,7 +21,7 @@ exists_()
 	fi
 }
 
-printf "" > $out_
+printf "\a  \t\t\t\n" > $out_
 find $dir_ -type f -name "*.desktop" | while read file; do
 	name=''
 	cmd=''

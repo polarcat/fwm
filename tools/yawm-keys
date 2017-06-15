@@ -7,6 +7,7 @@ out_=$tmp_/keys
 
 mkdir -p $tmp_
 
+printf "\a  \t\n" > $out_
 ls -1 $dir_ | while read key; do
 	printf "$key\t"
 
@@ -22,7 +23,7 @@ ls -1 $dir_ | while read key; do
 	fi
 
 	printf "\n"
-done > $out_
+done >> $out_
 
 getval_() { echo $2 | tr '[:lower:]' '[:upper:]'; }
 
