@@ -1,0 +1,35 @@
+#!/bin/sh
+
+tmp_=$HOME/.yawm/tmp
+out_=$tmp_/menu
+
+mkdir -p $tmp_
+
+#if [ -f $out_ ]; then
+	printf "\a  \tclose menu\n" > $out_
+	printf "\a  \trun...\n" >> $out_
+	printf "\a  \topen terminal\n" >> $out_
+	printf "\a  \topen browser\n" >> $out_
+	printf "\a  \tlist applications\n" >> $out_
+	printf "\a  \tlist windows\n" >> $out_
+	printf "\a  \tlist shortcuts\n" >> $out_
+	printf "\a  \tmake grid\n" >> $out_
+	printf "\a  \tedit tag\n" >> $out_
+	printf "\a  \texit\n" >> $out_
+#fi
+
+menu -n yawm-menu -b -0 0x303030 -1 0xc0c0c0 -2 0x303030 -3 0x808080 -c 30 -d $out_ |
+while read icon item; do
+	echo "'$item'"
+	case $item in
+	"run..."*) exec yawm-run &;;
+	"open terminal"*) exec xterm &;;
+	"open browser"*) exec chromium-browser;;
+	"list applications"*) exec yawm-apps &;;
+	"list windows"*) exec yawm-clients &;;
+	"list shortcuts"*) exec yawm-keys &;;
+	"make grid"*) xdotool key Alt+F3;;
+	"edit tag"*) yawm-tagmenu &;;
+	"exit"*) killall yawm;;
+	esac
+done
