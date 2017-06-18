@@ -216,6 +216,7 @@ struct rect {
 struct screen { /* per output abstraction */
 	uint8_t id;
 	xcb_randr_output_t out;
+	char *name;
 
 	struct list_head head;
 	struct list_head tags;
@@ -3472,7 +3473,8 @@ static void init_tray(void)
 }
 
 static void screen_add(uint8_t id, xcb_randr_output_t out,
-		       int16_t x, int16_t y, uint16_t w, uint16_t h)
+		       int16_t x, int16_t y, uint16_t w, uint16_t h,
+		       char *name)
 {
 	struct screen *scr;
 
@@ -3486,6 +3488,7 @@ static void screen_add(uint8_t id, xcb_randr_output_t out,
 	scr->y = y;
 	scr->w = w;
 	scr->h = h;
+	scr->name = strdup(name);
 
 	list_init(&scr->dock);
 	list_init(&scr->tags);
@@ -3507,7 +3510,7 @@ static void screen_add(uint8_t id, xcb_randr_output_t out,
 
 static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 		      xcb_randr_get_output_info_reply_t *inf,
-		      xcb_timestamp_t ts)
+		      xcb_timestamp_t ts, char *name)
 {
 	struct list_head *cur;
 	xcb_randr_get_crtc_info_cookie_t c;
@@ -3527,6 +3530,8 @@ static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 		if (r->width == scr->w && r->height == scr->h + panel_height &&
 		    r->x == scr->x && r->y == scr->y) {
 			ii("crtc%d is a clone of screen %d\n", i, scr->id);
+			free(scr->name);
+			scr->name = strdup(name);
 			goto out;
 		}
 	}
@@ -3546,6 +3551,8 @@ static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 			scr->w = r->width;
 			scr->h = r->height - panel_height;
 			move_panel(scr);
+			free(scr->name);
+			scr->name = strdup(name);
 			goto out;
 		}
 	}
@@ -3553,7 +3560,7 @@ static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 	/* one screen per output; share same root window via common
 	 * xcb_screen_t structure
 	 */
-	screen_add(*id, out, r->x, r->y, r->width, r->height);
+	screen_add(*id, out, r->x, r->y, r->width, r->height, name);
 
 out:
 	(uint8_t)(*id)++;
@@ -3583,7 +3590,7 @@ static void init_output(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 	if (r->connection != XCB_RANDR_CONNECTION_CONNECTED)
 		ii("output %s%d not connected\n", name, i);
 	else
-		init_crtc(i, id, out, r, ts);
+		init_crtc(i, id, out, r, ts, name);
 
 	free(r);
 }
@@ -3627,9 +3634,9 @@ static void init_outputs(void)
 
 	free(r);
 
-	if (list_empty(&screens)) { /*randr failed or not supported */
+	if (list_empty(&screens)) { /* randr failed or not supported */
 		screen_add(0, 0, 0, 0, rootscr->width_in_pixels,
-			   rootscr->height_in_pixels);
+			   rootscr->height_in_pixels, "-");
 	}
 
 	if (!defscr)
@@ -3749,13 +3756,57 @@ static void focus_window_req(xcb_window_t win)
 	}
 }
 
+static uint32_t clients_list_seq;
+
+static void update_seq()
+{
+	char path[baselen + sizeof("/tmp/.seq")];
+	FILE *f;
+
+	sprintf(path, "%s/tmp/.seq", basedir); /* NOTE: path storage re-used */
+
+	if (!(f = fopen(path, "w+"))) {
+		ee("fopen(%s) failed, %s\n", path, strerror(errno));
+		return;
+	}
+
+	fprintf(f, "%u\n", clients_list_seq++);
+	fclose(f);
+}
+
+static void dump_screens(void)
+{
+	struct list_head *cur;
+	char path[baselen + sizeof("/tmp/screens")];
+	FILE *f;
+
+	sprintf(path, "%s/tmp/screens", basedir);
+
+	if (!(f = fopen(path, "w+"))) {
+		ee("fopen(%s) failed, %s\n", path, strerror(errno));
+		return;
+	}
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		char current;
+
+		curscr == scr ? (current = '*') : (current = ' ');
+		fprintf(f, "%u\t%s\t%ux%u %dx%d\t%c\n", scr->id, scr->name,
+			scr->w, scr->h, scr->x, scr->y, current);
+	}
+
+	fclose(f);
+	update_seq();
+}
+
 static void dump_clients(uint8_t all)
 {
-	char path[baselen + sizeof("/clients")];
+	char path[baselen + sizeof("/tmp/clients")];
 	struct list_head *cur;
 	FILE *f;
 
-	sprintf(path, "%s/clients", basedir);
+	sprintf(path, "%s/tmp/clients", basedir);
 
 	if (!(f = fopen(path, "w+"))) {
 		ee("fopen(%s) failed, %s\n", path, strerror(errno));
@@ -3770,11 +3821,10 @@ static void dump_clients(uint8_t all)
 		xcb_window_t win = pointer2win();
 		enum winstatus status;
 		const char *tag;
+		char current;
 
-		if (cli->win == win)
-			status = WIN_STATUS_MAX; /* indicate current window */
-		else
-			status = window_status(cli->win);
+		cli->win == win ? (current = '*') : (current = ' ');
+		status = window_status(cli->win);
 
 		if (!all && status == WIN_STATUS_UNKNOWN)
 			continue;
@@ -3792,25 +3842,24 @@ static void dump_clients(uint8_t all)
 		else
 			tag = "<nil>";
 
-		snprintf(temp, sizeof(temp), "%u\t%s\t0x%x\t%d\t%d\t",
-			cli->scr->id, tag, cli->win, status,
-			win2pid(cli->win));
+		snprintf(temp, sizeof(temp), "%c\t%u\t%s\t0x%x\t%d\t",
+			 current, cli->scr->id, tag, cli->win,
+			 win2pid(cli->win));
 		fwrite(temp, strlen(temp), 1, f);
+
 		get_sprop(&title, cli->win, a_net_wm_name, UINT_MAX);
 
 		if (!title.ptr || !title.len) {
 			fputs("<nil>\n", f);
-			continue;
+		} else {
+			fwrite(title.str, title.len, 1, f);
+			fputc('\n', f);
+			free(title.ptr);
 		}
-
-		fwrite(title.str, title.len, 1, f);
-		fputc('\n', f);
-		free(title.ptr);
 	}
 
-	static uint32_t clients_list_seq;
-	fprintf(f, "seq %u\n", clients_list_seq++);
 	fclose(f);
+	update_seq();
 }
 
 #define match(str0, str1) strncmp(str0, str1, sizeof(str1) - 1) == 0
@@ -3845,6 +3894,8 @@ static void handle_user_request(int fd)
 		init_outputs();
 	} else if (match(name.str, "list-clients")) {
 		dump_clients(0);
+	} else if (match(name.str, "list-screens")) {
+		dump_screens();
 	} else if (match(name.str, "list-clients-all")) {
 		dump_clients(1);
 	} else if (match(name.str, "refresh-panel")) {
