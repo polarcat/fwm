@@ -1168,13 +1168,14 @@ static void wait(void)
 }
 #endif
 
-static uint8_t events(void)
+static uint8_t events(uint8_t wait)
 {
-#if 0
-	xcb_generic_event_t *e = xcb_wait_for_event(dpy_);
-#else
-	xcb_generic_event_t *e = xcb_poll_for_event(dpy_);
-#endif
+	xcb_generic_event_t *e;
+
+	if (wait)
+		e = xcb_wait_for_event(dpy_);
+	else
+		e = xcb_poll_for_event(dpy_);
 
 	if (!e)
 		return 0;
@@ -1367,7 +1368,7 @@ int main(int argc, char *argv[])
 	init_xkb();
 
 	while (!done_)
-		events();
+		events(1);
 
 	/* DUNNO: this trick is needed to deliver events in case another
 	 * menu window grabs pointer
@@ -1385,7 +1386,7 @@ int main(int argc, char *argv[])
 			continue;
 
 		if (pfd.revents & POLLIN)
-			while (events()) {};
+			while (events(0)) {};
 
 		pfd.revents = 0;
 	}
