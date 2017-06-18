@@ -126,6 +126,7 @@ static uint8_t *cols_len_;
 static uint8_t cols_per_row_;
 static uint16_t rows_num_; /* lines in file */
 static uint8_t swap_col_idx_;
+static uint8_t search_col_idx_;
 
 static uint8_t selidx_;
 static uint8_t page_idx_;
@@ -364,6 +365,9 @@ static uint8_t find_col(const char *rowstr, uint8_t idx)
 	const char *col_start = rowstr;
 	uint8_t col_idx = 0;
 
+	if (*ptr == '\a' && idx < cols_per_row_) /* if icon column */
+		idx++;
+
 	while (*ptr != '\n') {
 		if (*ptr == '\t') {
 			if (col_idx == idx) {
@@ -415,7 +419,7 @@ static void find_row(xcb_keysym_t sym)
 	draw_search_bar();
 
 	while (ptr < end) {
-		if (find_col(row, swap_col_idx_)) {
+		if (find_col(row, search_col_idx_)) {
 			if (!tab || found_idx_ < rowidx) {
 				if (page_idx_ != pageidx) {
 					page_idx_ = pageidx;
@@ -817,8 +821,8 @@ static int init_rows(void)
 		return -1;
 	}
 
-	if (swap_col_idx_ >= cols_per_row_)
-		swap_col_idx_ = 0;
+	if (search_col_idx_ >= cols_per_row_)
+		search_col_idx_ = 0;
 
 	col_max_len = row_len_ / cols_per_row_;
 	dd("max col len %u\n", col_max_len);
@@ -1081,7 +1085,8 @@ static void opts(int argc, char *argv[])
 			font2_name_ = argv[i];
 		} else if (opt(arg, "-s", "--search-column")) {
 			i++;
-			swap_col_idx_ = atoi(argv[i]);
+			search_col_idx_ = atoi(argv[i]);
+			swap_col_idx_ = search_col_idx_;
 		} else if (opt(arg, "-n", "--name")) {
 			i++;
 			name_ = argv[i];
