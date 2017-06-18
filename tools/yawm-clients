@@ -1,5 +1,6 @@
 #!/bin/sh
 
+seq_=$HOME/.yawm/.seq
 ctl_=$HOME/.yawm/.control
 cli_=$HOME/.yawm/clients
 
@@ -23,15 +24,15 @@ while :; do
 			fi
 			;;
 		esac
-	done < $cli_
-	if [ $found -eq 1 -o $count -gt 500 ]; then
+	done < $seq_
+	if [ $found -eq 1 -o $count -gt 5 ]; then
 		break
 	fi
 	count=$((count + 1))
 	sleep 0.1
 done
 
-menu -n yawm-clients -b -c 80 -r 24 -d -s 5 $cli_ |
+menu -n yawm-clients -b -c 80 -r 24 -d $cli_ |
 while read scr tag win info; do
 	echo "focus-window $win" > $ctl_
 	exit 0
