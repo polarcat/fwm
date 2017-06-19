@@ -1,66 +1,23 @@
 #!/bin/sh
 
 ctl_=$HOME/.yawm/.control
-cli_=$HOME/.yawm/clients
-tmp_=$HOME/.yawm/tmp
-out_=$tmp_/screens
+scr_=$HOME/.yawm/tmp/screens
+seq_=$HOME/.yawm/tmp/.seq
 
-mkdir -p $tmp_
+read prevseq < $seq_
+echo list-screens > $ctl_
 
-present()
-{
-	for item in $list; do
-		if [ "$item" = "$1" ]; then
-			return 0
-		fi
-	done
-	return 1
-}
-
-while read var val; do
-	case "$var" in
-	seq*) seq=$val;;
-	esac
-done < $cli_
-
-echo list-clients > $ctl_
-
-found=0
 count=0
 while :; do
-	while read var val; do
-		case "$var" in
-		seq*)
-			if [ "$seq" != "$val" ]; then
-				found=1
-				break
-			fi
-			;;
-		esac
-	done < $cli_
-	if [ $found -eq 1 -o $count -gt 5000 ]; then
+	read curseq < $seq_
+	if [ $prevseq -ne $curseq -o $count -gt 5 ]; then
 		break
 	fi
 	count=$((count + 1))
+	sleep 0.1
 done
 
-printf "" > $out_
-list=''
-
-while read scr tag win status pid name; do
-	case "$scr" in
-	seq*) continue;;
-	esac
-
-	if present $scr; then
-		continue
-	fi
-
-	eval "list=\"\$list \$scr screen\$scr\""
-	printf "$scr\tscreen$scr\n" >> $out_
-done < $cli_
-
-menu -n yawm-screens -c 9 -r 5 -i -f $out_ |
+menu -n yawm-screens -c 25 -d $scr_ |
 while read scr line; do
 	echo "focus-screen $scr" > $ctl_
 	exit 0

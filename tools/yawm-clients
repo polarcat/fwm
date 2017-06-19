@@ -1,8 +1,8 @@
 #!/bin/sh
 
-seq_=$HOME/.yawm/.seq
 ctl_=$HOME/.yawm/.control
-cli_=$HOME/.yawm/clients
+cli_=$HOME/.yawm/tmp/clients
+seq_=$HOME/.yawm/tmp/.seq
 
 while read var val; do
 	case "$var" in
@@ -10,29 +10,20 @@ while read var val; do
 	esac
 done < $cli_
 
+read prevseq < $seq_
 echo list-clients > $ctl_
 
-found=0
 count=0
 while :; do
-	while read var val; do
-		case "$var" in
-		seq*)
-			if [ "$seq" != "$val" ]; then
-				found=1
-				break
-			fi
-			;;
-		esac
-	done < $seq_
-	if [ $found -eq 1 -o $count -gt 5 ]; then
+	read curseq < $seq_
+	if [ $prevseq -ne $curseq -o $count -gt 5 ]; then
 		break
 	fi
 	count=$((count + 1))
 	sleep 0.1
 done
 
-menu -n yawm-clients -b -c 80 -r 24 -d $cli_ |
+menu -n yawm-clients -b -s 5 -d $cli_ |
 while read scr tag win info; do
 	echo "focus-window $win" > $ctl_
 	exit 0
