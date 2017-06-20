@@ -535,7 +535,7 @@ static void key_release(xcb_key_press_event_t *e)
 		return;
 	}
 
-	sym = xcb_key_press_lookup_keysym(syms_, e, 0);
+	sym = xcb_key_release_lookup_keysym(syms_, e, 0);
 
 	if (sym == XK_Shift_L || sym == XK_Shift_R) {
 		level_ = 0; /* expect lower-case symbols */
