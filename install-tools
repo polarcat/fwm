@@ -22,6 +22,7 @@ yawm-run
 yawm-keys
 yawm-restart
 yawm-suspend
+yawm-tagmenu
 "
 
 for tool in $tools_; do
