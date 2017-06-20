@@ -11,51 +11,102 @@ pref_=''
 name_=''
 getstat_() { pref_=$1; name_=$2; }
 
-mkdir -p $dir_/data
-xclip -o > $tmp_
-hash=$(md5sum $tmp_ | cut -f1 -d' ')
-time=$(date +%Y%m%d%H%M%S%s)
+sel_='nil'
+getsel_()
+{
+	case $3 in
+	primary*) sel_="[PRI]  ";;
+	secondary*) sel_="[SEC]  ";;
+	clipboard*) sel_="[CLP]  ";;
+	esac
+}
 
-for data in $dat_/*; do
-	IFS='-'; getstat_ $data; IFS=$ifs_
-	if [ "$name_" = "$hash" ]; then
-		mv $data $dat_/$time-$name_
+emptyline()
+{
+	hexdump $1 | while read offs data; do
+		case $data in
+		*0a) return 1;;
+		esac
+	done
+}
+
+validate()
+{
+	stat $1 | while read var val rest; do
+		case $var in
+		Size:*|size:*) if [ $val -eq 1 ]; then emptyline $1; return $?; fi;;
+		esac
+	done
+}
+
+paste()
+{
+	local i=0
+
+	ls -1t $dat_/ | while read name; do
+		if [ $i -eq $pref_ ]; then
+			cat $dat_/$name | xclip -i -selection primary
+			cat $dat_/$name | xclip -i -selection secondary
+			cat $dat_/$name | xclip -i -selection clipboard
+#			cat $dat_/$name | xclip -i -selection buffer-cut
+			break
+		fi
+		i=$((i + 1))
+	done
+}
+
+# copy
+
+mkdir -p $dir_/data
+for sel in clipboard secondary primary; do
+	xclip -selection $sel -o 2>/dev/null >$tmp_
+
+	if [ $? -ne 0 ]; then
+		continue
+	elif [ ! -s $tmp_ ]; then
+		continue
+	elif [ "$sel" = "secondary" ]; then # workaround for single '\n'
+		if ! validate $tmp_; then
+			continue
+		fi
 	fi
+
+	hash=$(md5sum $tmp_ | cut -f1 -d' ')
+	time=$(date +%Y%m%d%H%M%S%s)
+
+	for data in $dat_/*; do
+		IFS='-'; getstat_ $data; IFS=$ifs_
+		if [ "$name_" = "$hash" ]; then
+			mv $data $dat_/$time-$name_-$sel 2>/dev/null
+		elif [ -f $tmp_ ]; then
+			mv $tmp_ $dat_/$time-$hash-$sel
+		fi
+	done
 done
 
+printf "\a  \t\t\n" > $out_
+
 i=0
-ls -t $dat_/ | while read name; do
-	i=$((i + 1))
+ls -1t $dat_/ | while read name; do
+	if [ ! -s $dat_/$name ]; then
+		rm -f $dat_/$name
+		continue
+	fi
+
 	if [ $i -ge $max_ ]; then
 		rm -f $dat_/$name
+	else
+		IFS='-'; getsel_ $name; IFS=$ifs_
+		printf "$i\t$sel_\t" >> $out_
+		cat $dat_/$name | tr -d '[:cntrl:]' | cut -c 1-78 >> $out_
+#		cat $dat_/$name | tr -d '\t' | tr -d '\a' | cut -c 1-78 >> $out_
 	fi
-done
-
-mv $tmp_ $dat_/$time-$hash
-printf "\a  \t\n" > $out_
-
-i=0
-ls -t $dat_/ | while read name; do
-	printf "$i\t" >> $out_
-	cat $dat_/$name | tr -d '[:cntrl:]' | cut -c 1-78 >> $out_
 	i=$((i + 1))
 done
 
 res=$(menu -n yawm-clipboard -b -d $out_)
 getstat_ $res
 
-if [ -z "$pref_" ]; then
-	exit 0
-fi
-
-i=0
-ls -t $dat_/ | while read name; do
-	if [ $i -eq $pref_ ]; then
-		cat $dat_/$name | xclip -i -selection primary
-		cat $dat_/$name | xclip -i -selection secondary
-		cat $dat_/$name | xclip -i -selection clipboard
-		cat $dat_/$name | xclip -i -selection buffer-cut
-		break
-	fi
-	i=$((i + 1))
-done
+case $pref_ in
+[0-9]*) paste;;
+esac
