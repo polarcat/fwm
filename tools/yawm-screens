@@ -2,22 +2,8 @@
 
 ctl_=$HOME/.yawm/.control
 scr_=$HOME/.yawm/tmp/screens
-seq_=$HOME/.yawm/tmp/.seq
 
-read prevseq < $seq_
-echo list-screens > $ctl_
-
-count=0
-while :; do
-	read curseq < $seq_
-	if [ $prevseq -ne $curseq -o $count -gt 5 ]; then
-		break
-	fi
-	count=$((count + 1))
-	sleep 0.1
-done
-
-menu -n yawm-screens -c 25 -d $scr_ |
+menu -n yawm-screens -b -c 25 -d $scr_ |
 while read scr line; do
 	echo "focus-screen $scr" > $ctl_
 	exit 0
