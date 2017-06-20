@@ -1,0 +1,122 @@
+#!/bin/sh
+
+ctl_=$HOME/.yawm/.control
+tmp_=$HOME/.yawm/tmp
+seq_=$tmp_/.seq
+out_=$tmp_/tagmenu
+width_=35
+maxtags_=255
+scr_=0
+tag_=-1
+name_=''
+wcnt_=0
+
+mkdir -p $tmp_
+
+read prevseq < $seq_
+echo list-tags > $ctl_
+
+count=0
+while :; do
+	read curseq < $seq_
+	if [ $prevseq -ne $curseq -o $count -gt 5 ]; then
+		break
+	fi
+	count=$((count + 1))
+	sleep 0.1
+done
+
+while read scr tag name geo wcnt cur; do
+	if [ "$cur" = '*' ]; then
+		scr_=$scr
+		tag_=$tag
+		name_=$name
+		wcnt_=$wcnt
+		break
+	fi
+done < $tmp_/tags
+
+if [ -f $out_ ]; then
+	printf "\a  \tclose menu\n" > $out_
+#	printf "\a  \tleft\n" >> $out_
+#	printf "\a  \tright\n" >> $out_
+	printf "\a  \tcreate <name>\n" >> $out_
+
+	if [ $wcnt_ -eq 0 ]; then
+		printf "\a  \tdelete [$name_]\n" >> $out_
+	fi
+
+	printf "\a  \trename <newname>\n" >> $out_
+fi
+
+create()
+{
+	if [ -z "$1" ]; then
+		return
+	fi
+
+	local tag=0
+	local path=''
+
+	while :; do
+		path=$HOME/.yawm/screens/$scr_/tags/$tag
+
+		if [ ! -d $path ]; then
+			mkdir -p $path
+			printf "$1" > $path/.name
+			echo "refresh-panel" > $ctl_
+			return
+		fi
+
+		tag=$((tag + 1))
+
+		if [ $cnt -ge $maxtags_ ]; then
+			break
+		fi
+	done
+}
+
+delete()
+{
+	if [ $wcnt_ -ne 0 ]; then
+		return
+	fi
+
+	rm -fr $HOME/.yawm/screens/$scr_/tags/$tag_
+	echo "refresh-panel" > $ctl_
+}
+
+rename()
+{
+	if [ $# -eq 0 ]; then
+		return
+	fi
+
+	local path=$HOME/.yawm/screens/$scr_/tags/$tag_/.name
+
+	if [ ! -f $path ]; then
+		return
+	fi
+
+	printf "$1" > $path
+	echo "refresh-panel" > $ctl_
+}
+
+if [ -z "$tag_" ]; then
+	return
+fi
+
+if [ $tag_ -lt 0 ]; then
+	exit 1
+fi
+
+menu -n yawm-tagmenu -b -a -c $width_ -d $out_ |
+while read icon item param cmd arg; do
+	case $item in
+	"left"*) echo "move left";;
+	"right"*) echo "move right";;
+	"create"*) create $arg;;
+	"delete"*) delete;;
+	"rename"*) rename $arg;;
+	esac
+done
