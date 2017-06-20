@@ -3034,6 +3034,31 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
 	return pos + tag->w + TAG_GAP;
 }
 
+static int tag_del(struct screen *scr, uint8_t id)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &scr->tags) {
+		struct tag *tag = list2tag(cur);
+
+		if (tag->id != id)
+			continue;
+
+		if (!list_empty(&tag->clients))
+			return 0; /* do not delete non-empty tag */
+
+		list_del(&tag->head);
+
+		if (tag->name)
+			free(tag->name);
+
+		free(tag);
+		return 1;
+	}
+
+	return 1; /* not found */
+}
+
 /*
  * Tags dir structure:
  *
@@ -3049,6 +3074,7 @@ static int init_tags(struct screen *scr)
 	char name[TAG_NAME_MAX + 1] = "0";
 	int fd;
 	struct stat st;
+	uint8_t delete;
 
 	pos = scr->items[PANEL_AREA_TAGS].x;
 	if (!basedir) {
@@ -3057,11 +3083,16 @@ static int init_tags(struct screen *scr)
 	}
 
 	for (i = 0; i < UCHAR_MAX; i++ ) {
+		delete = 0;
 		st.st_mode = 0;
 		sprintf(path, "%s/screens/%d/tags/%d", basedir, scr->id, i);
+
 		if (stat(path, &st) < 0)
-			continue;
+			delete = 1;
 		if ((st.st_mode & S_IFMT) != S_IFDIR)
+			delete = 1;
+
+		if (delete && tag_del(scr, i))
 			continue;
 
 		sprintf(path, "%s/screens/%d/tags/%d/.name", basedir, scr->id, i);
