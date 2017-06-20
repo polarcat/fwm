@@ -449,7 +449,8 @@ static struct color defcolors[] = {
 #define color2xft(idx) *((XftColor *) defcolors[idx].val)
 #define color2ptr(idx) &defcolors[idx]
 
-static uint32_t panel_height;
+static int16_t panel_y;
+static uint16_t panel_height;
 static uint8_t panel_top;
 
 /* globals */
@@ -3347,7 +3348,6 @@ static void init_keys(void)
 
 static void init_panel(struct screen *scr)
 {
-	int16_t y;
 	uint32_t val[2], mask;
 
 	panel_height = font1->ascent + font1->descent + 2 * ITEM_V_MARGIN;
@@ -3362,13 +3362,13 @@ static void init_panel(struct screen *scr)
 	val[1] |= XCB_EVENT_MASK_VISIBILITY_CHANGE;
 
 	if (panel_top)
-		y = scr->y;
+		panel_y = scr->y;
 	else
-		y = (scr->h + scr->y) - panel_height;
+		panel_y = (scr->h + scr->y) - panel_height;
 
 	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, scr->panel.win,
 			  rootscr->root,
-			  scr->x, y, scr->w, panel_height, 0,
+			  scr->x, panel_y, scr->w, panel_height, 0,
 			  XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			  rootscr->root_visual, mask, val);
 	xcb_flush(dpy); /* flush this operation otherwise panel will be
@@ -3397,7 +3397,7 @@ static void init_panel(struct screen *scr)
 					DefaultColormap(xdpy, xscr));
 
 	ii("screen %d, panel 0x%x geo %ux%u+%d+%d\n", scr->id, scr->panel.win,
-	   scr->w, panel_height, scr->x, y);
+	   scr->w, panel_height, scr->x, panel_y);
 }
 
 static void move_panel(struct screen *scr)
@@ -3774,6 +3774,43 @@ static void update_seq()
 	fclose(f);
 }
 
+static void dump_tags(void)
+{
+	struct list_head *cur;
+	char path[baselen + sizeof("/tmp/tags")];
+	FILE *f;
+
+	sprintf(path, "%s/tmp/tags", basedir);
+
+	if (!(f = fopen(path, "w+"))) {
+		ee("fopen(%s) failed, %s\n", path, strerror(errno));
+		return;
+	}
+
+	list_walk(cur, &screens) {
+		struct list_head *curtag;
+		struct screen *scr = list2screen(cur);
+
+		list_walk(curtag, &scr->tags) {
+			struct list_head *cli;
+			struct tag *tag = list2tag(curtag);
+			char current;
+			uint16_t clicnt = 0;
+
+			list_walk(cli, &tag->clients)
+				clicnt++;
+
+			curscr->tag == tag ? (current = '*') : (current = ' ');
+			fprintf(f, "%u\t%u\t%s\t%ux%u%+d%+d\t%u\t%c\n", scr->id,
+				tag->id, tag->name, tag->w, panel_height,
+				tag->x, panel_y, clicnt, current);
+		}
+	}
+
+	fclose(f);
+	update_seq();
+}
+
 static void dump_screens(void)
 {
 	struct list_head *cur;
@@ -3792,7 +3829,7 @@ static void dump_screens(void)
 		char current;
 
 		curscr == scr ? (current = '*') : (current = ' ');
-		fprintf(f, "%u\t%s\t%ux%u %dx%d\t%c\n", scr->id, scr->name,
+		fprintf(f, "%u\t%s\t%ux%u%+d%+d\t%c\n", scr->id, scr->name,
 			scr->w, scr->h, scr->x, scr->y, current);
 	}
 
@@ -3894,10 +3931,12 @@ static void handle_user_request(int fd)
 		init_outputs();
 	} else if (match(name.str, "list-clients")) {
 		dump_clients(0);
-	} else if (match(name.str, "list-screens")) {
-		dump_screens();
 	} else if (match(name.str, "list-clients-all")) {
 		dump_clients(1);
+	} else if (match(name.str, "list-screens")) {
+		dump_screens();
+	} else if (match(name.str, "list-tags")) {
+		dump_tags();
 	} else if (match(name.str, "refresh-panel")) {
 		const char *arg = &name.str[sizeof("refresh-panel")];
 		if (arg)
