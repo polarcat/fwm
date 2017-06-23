@@ -2900,9 +2900,9 @@ static void print_menu(struct screen *scr)
 	}
 }
 
-static int tag_clicked(struct tag *tag, int16_t x, uint16_t pad)
+static int tag_pointed(struct tag *tag, int16_t x)
 {
-	if (x >= tag->x && x <= tag->x + tag->w + 2 * pad)
+	if (x >= tag->x && x <= tag->x + tag->w + TAG_GAP)
 		return 1;
 	return 0;
 }
@@ -2918,7 +2918,7 @@ static void point_tag(struct screen *scr, int x)
 
 		if (tag == scr->tag) {
 			continue;
-		} else if (tag_clicked(tag, x, scr->panel.pad)) {
+		} else if (tag_pointed(tag, x)) {
 			print_tag(scr, tag, color2ptr(FOCUSFG));
 			break;
 		}
@@ -2936,7 +2936,7 @@ static void select_tag(struct screen *scr, int x)
 		target_scr = NULL;
 	}
 
-	if (scr->tag && tag_clicked(scr->tag, x, scr->panel.pad)) {
+	if (scr->tag && tag_pointed(scr->tag, x)) {
 		return;
 	} else if (scr->tag) { /* deselect current tag instantly */
 		print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
@@ -2949,7 +2949,7 @@ static void select_tag(struct screen *scr, int x)
 
 		if (tag == scr->tag) {
 			continue;
-		} else if (!tag_clicked(tag, x, scr->panel.pad)) {
+		} else if (!tag_pointed(tag, x)) {
 			print_tag(scr, tag, color2ptr(TEXTFG_NORMAL));
 		} else {
 			print_tag(scr, tag, color2ptr(TEXTFG_ACTIVE));
@@ -4044,7 +4044,7 @@ static void mark_tag(int16_t x, int16_t y, int16_t tagx)
 		dd("scr %d tag '%s' x (pos:%d scr:%d tag:%d)",
 		   target_scr->id, tag->name, tagx, target_scr->x, tag->x);
 
-		if (!tag_clicked(tag, tagx, target_scr->panel.pad)) {
+		if (!tag_pointed(tag, tagx)) {
 			continue;
 		} else if (target_scr->tag == tag) { /* skip active tag */
 			continue;
