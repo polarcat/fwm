@@ -52,6 +52,7 @@
 
 typedef uint8_t strlen_t;
 
+#define PANEL_SCREEN_GAP 1
 #define ITEM_V_MARGIN 2
 #define ITEM_H_MARGIN 6
 #define TAG_GAP 2
@@ -1512,20 +1513,20 @@ static int16_t adjust_x(struct screen *scr, int16_t x, uint16_t w)
 
 static int16_t adjust_y(struct screen *scr, int16_t y, uint16_t h)
 {
-	int16_t ret;
-
-	if (y < scr->y || y > scr->y + scr->h || y + h > scr->y + scr->h)
-		ret = scr->y;
-	else
-		ret = y;
+	int16_t yy;
 
 	if (panel_top)
-		ret += panel_height + 1; /* make tiny gap */
+		yy = scr->y + panel_height + PANEL_SCREEN_GAP;
+	else
+		yy = scr->y;
 
-	return ret;
+	if (y < yy || y > yy + scr->h || y + h > yy + scr->h)
+		return yy;
+	else
+		return y;
 }
 
-static int16_t adjust_w(struct screen *scr, uint16_t w)
+static uint16_t adjust_w(struct screen *scr, uint16_t w)
 {
 	if (w > scr->w)
 		return scr->w - 2 * BORDER_WIDTH;
@@ -1534,7 +1535,7 @@ static int16_t adjust_w(struct screen *scr, uint16_t w)
 	return w;
 }
 
-static int16_t adjust_h(struct screen *scr, uint16_t h)
+static uint16_t adjust_h(struct screen *scr, uint16_t h)
 {
 	if (h > scr->h)
 		return scr->h - 2 * BORDER_WIDTH;
@@ -1990,6 +1991,10 @@ static void place_window(void *ptr)
 
 		x = curscr->x;
 		y = curscr->y + curscr->h - curscr->h / cli->div;
+
+		if (panel_top)
+			y += panel_height + PANEL_SCREEN_GAP;
+
 		goto halfh;
 	case WIN_POS_TOP_LEFT:
 		tt("WIN_POS_TOP_LEFT\n");
@@ -2005,11 +2010,19 @@ static void place_window(void *ptr)
 		tt("WIN_POS_BOTTOM_LEFT\n");
 		x = curscr->x;
 		y = curscr->y + curscr->h / 2;
+
+		if (panel_top)
+			y += panel_height + PANEL_SCREEN_GAP;
+
 		goto halfwh;
 	case WIN_POS_BOTTOM_RIGHT:
 		tt("WIN_POS_BOTTOM_RIGHT\n");
 		x = curscr->x + curscr->w / 2;
 		y = curscr->y + curscr->h / 2;
+
+		if (panel_top)
+			y += panel_height + PANEL_SCREEN_GAP;
+
 		goto halfwh;
 	default:
 		return;
@@ -2745,9 +2758,6 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		goto out;
 	}
 
-	if (panel_top)
-		g->y -= panel_height;
-
 	cli->tag = configured_tag(win); /* read tag from configuration */
 
 	if (!cli->tag && tag) /* not configured, restore from last session */
@@ -2786,7 +2796,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		center_pointer(cli);
 	}
 
-	ii("screen %d tag '%s' win 0x%x pid %d geo %ux%u+%d+%d cli %p\n",
+	ii("screen %d tag '%s' win 0x%x pid %d geo %ux%u%+d%+d cli %p\n",
 	   scr->id, cli->tag->name, cli->win, cli->pid, cli->w, cli->h,
 	   cli->x, cli->y, cli);
 
@@ -3421,7 +3431,7 @@ static void init_panel(struct screen *scr)
 	xcb_map_window(dpy, scr->panel.win);
 
 	/* now correct screen height */
-	scr->h -= panel_height + 1;
+	scr->h -= panel_height + PANEL_SCREEN_GAP;
 
 	scr->panel.draw = XftDrawCreate(xdpy, scr->panel.win,
 					DefaultVisual(xdpy, xscr),
