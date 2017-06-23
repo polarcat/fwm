@@ -36,18 +36,16 @@ while read scr tag name geo wcnt cur; do
 	fi
 done < $tmp_/tags
 
-if [ -f $out_ ]; then
-	printf "\a  \tclose menu\n" > $out_
-#	printf "\a  \tleft\n" >> $out_
-#	printf "\a  \tright\n" >> $out_
-	printf "\a  \tcreate <name>\n" >> $out_
+printf "\a  \tclose tag menu\n" > $out_
+#printf "\a  \tleft\n" >> $out_
+#printf "\a  \tright\n" >> $out_
+printf "\a  \tcreate <name>\n" >> $out_
 
-	if [ $wcnt_ -eq 0 ]; then
-		printf "\a  \tdelete [$name_]\n" >> $out_
-	fi
-
-	printf "\a  \trename <newname>\n" >> $out_
+if [ $wcnt_ -eq 0 ]; then
+	printf "\a  \tdelete [$name_]\n" >> $out_
 fi
+
+printf "\a  \trename <newname>\n" >> $out_
 
 create()
 {
@@ -64,7 +62,7 @@ create()
 		if [ ! -d $path ]; then
 			mkdir -p $path
 			printf "$1" > $path/.name
-			echo "refresh-panel" > $ctl_
+			echo "refresh-panel $scr_" > $ctl_
 			return
 		fi
 
@@ -83,7 +81,7 @@ delete()
 	fi
 
 	rm -fr $HOME/.yawm/screens/$scr_/tags/$tag_
-	echo "refresh-panel" > $ctl_
+	echo "refresh-panel $scr_" > $ctl_
 }
 
 rename()
@@ -99,7 +97,7 @@ rename()
 	fi
 
 	printf "$1" > $path
-	echo "refresh-panel" > $ctl_
+	echo "refresh-panel $scr_" > $ctl_
 }
 
 if [ -z "$tag_" ]; then
