@@ -4012,16 +4012,14 @@ static void handle_user_request(int fd)
 #ifndef VERBOSE
 #define dump_coords(scr, x) ;
 #else
-static void dump_coords(struct screen *scr, int x)
-{
-	int i;
-
-	for (i = 0; i < PANEL_AREA_MAX; i++) {
-		ii("%d: %d >= %d <= %d (w = %d)\n", i, scr->items[i].x, x,
-		   scr->items[i].w + scr->items[i].x, scr->items[i].w);
-		if pointer_inside(scr, i, x)
-			ii("inside element %d\n", i);
-	}
+#define dump_coords(scr, ex) {\
+	int i;\
+	for (i = 0; i < PANEL_AREA_MAX; i++) {\
+		ii("%d: %d <= %d <= %d (w = %d)\n", i, scr->items[i].x, ex,\
+		   scr->items[i + 1].x, scr->items[i].w);\
+		if pointer_inside(scr, i, ex)\
+			ii("inside element %d\n", i);\
+	}\
 }
 #endif
 
