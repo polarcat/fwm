@@ -3038,7 +3038,7 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
 		scr->tag = tag;
 	}
 
-	tag->x = pos + scr->panel.pad + 1;
+	tag->x = pos;
 	print_tag(scr, tag, fg);
 
 	return pos + tag->w + TAG_GAP;
@@ -3168,16 +3168,14 @@ static void update_panel_items(struct screen *scr)
 	else
 		text_exts(MENU_ICON1, sizeof(MENU_ICON1) - 1, &w, &h, font1);
 
-	scr->items[PANEL_AREA_MENU].x = scr->panel.pad;
-	scr->items[PANEL_AREA_MENU].w = w + scr->panel.pad * 2;
+	scr->items[PANEL_AREA_MENU].x = scr->x + TAG_GAP;
+	scr->items[PANEL_AREA_MENU].w = w + 2 * scr->panel.pad;
 
-	x += scr->items[PANEL_AREA_MENU].w + 1;
+	x += scr->items[PANEL_AREA_MENU].w + 2 * TAG_GAP;
 
 	scr->items[PANEL_AREA_TAGS].x = x;
 	scr->items[PANEL_AREA_TAGS].w = init_tags(scr);
-	x += scr->items[PANEL_AREA_TAGS].w + 1;
-
-	scr->items[PANEL_AREA_TITLE].x = x;
+	scr->items[PANEL_AREA_TITLE].x = scr->items[PANEL_AREA_TAGS].w;
 
 	dock_arrange(scr);
 	print_menu(scr);
@@ -4009,7 +4007,7 @@ static void handle_user_request(int fd)
 
 #define pointer_inside(scr, area, ex)\
 	(ex >= scr->items[area].x &&\
-	 ex <= scr->items[area].x + scr->items[area].w)
+	 ex <= scr->items[area + 1].x)
 
 #ifndef VERBOSE
 #define dump_coords(scr, x) ;
