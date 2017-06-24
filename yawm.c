@@ -85,6 +85,10 @@ typedef uint8_t strlen_t;
 #define MOUSE_BTN_MID 2
 #define MOUSE_BTN_RIGHT 3
 
+#define DIV_ICON1 ">"
+#define DIV_ICON2 ""
+//#define DIV_ICON2 ""
+
 #define MENU_ICON1 "="
 #define MENU_ICON2 ""
 //#define MENU_ICON2 " "
@@ -114,6 +118,7 @@ struct sprop { /* string property */
 enum panel_area { /* in order of appearance */
 	PANEL_AREA_MENU,
 	PANEL_AREA_TAGS,
+	PANEL_AREA_DIV,
 	PANEL_AREA_TITLE,
 	PANEL_AREA_DOCK,
 	PANEL_AREA_MAX,
@@ -2900,6 +2905,24 @@ static void print_menu(struct screen *scr)
 	}
 }
 
+static void print_div(struct screen *scr)
+{
+	uint16_t x, w;
+
+	x = scr->items[PANEL_AREA_DIV].x;
+	w = scr->items[PANEL_AREA_DIV].w;
+
+	if (font2) {
+		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
+				color2ptr(PANELBG), x, w, DIV_ICON2,
+				sizeof(DIV_ICON2) - 1, font2);
+	} else {
+		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
+				color2ptr(PANELBG), x, w, DIV_ICON1,
+				sizeof(DIV_ICON1) - 1, font1);
+	}
+}
+
 static int tag_pointed(struct tag *tag, int16_t x)
 {
 	if (x >= tag->x && x <= tag->x + tag->w + TAG_GAP)
@@ -3151,6 +3174,7 @@ static void redraw_panel_items(struct screen *scr)
 		print_tag(scr, tag, fg);
 	}
 
+	print_div(scr);
 	print_title(scr, XCB_WINDOW_NONE);
 }
 
@@ -3170,15 +3194,26 @@ static void update_panel_items(struct screen *scr)
 
 	scr->items[PANEL_AREA_MENU].x = scr->x + TAG_GAP;
 	scr->items[PANEL_AREA_MENU].w = w + 2 * scr->panel.pad;
-
 	x += scr->items[PANEL_AREA_MENU].w + 2 * TAG_GAP;
+	print_menu(scr);
 
 	scr->items[PANEL_AREA_TAGS].x = x;
 	scr->items[PANEL_AREA_TAGS].w = init_tags(scr);
-	scr->items[PANEL_AREA_TITLE].x = scr->items[PANEL_AREA_TAGS].w;
+
+	scr->items[PANEL_AREA_DIV].x = scr->items[PANEL_AREA_TAGS].w;
+
+	if (font2)
+		text_exts(DIV_ICON2, sizeof(DIV_ICON2) - 1, &w, &h, font2);
+	else
+		text_exts(DIV_ICON1, sizeof(DIV_ICON1) - 1, &w, &h, font1);
+
+	w += scr->items[PANEL_AREA_DIV].x + 2 * scr->panel.pad;
+	scr->items[PANEL_AREA_DIV].w = w;
+	print_div(scr);
+
+	scr->items[PANEL_AREA_TITLE].x = scr->items[PANEL_AREA_DIV].w;
 
 	dock_arrange(scr);
-	print_menu(scr);
 }
 
 static void refresh_panel(uint8_t id)
