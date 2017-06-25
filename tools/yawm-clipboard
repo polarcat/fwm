@@ -84,7 +84,7 @@ for sel in clipboard secondary primary; do
 	done
 done
 
-printf "\a  \t\t\n" > $out_
+printf "\a\t\t\n" > $out_
 
 i=0
 ls -1t $dat_/ | while read name; do

@@ -36,7 +36,7 @@ while read scr tag name geo wcnt cur; do
 	fi
 done < $tmp_/tags
 
-printf "\a  \tclose tag menu\n" > $out_
+printf "\a\t\n" > $out_
 #printf "\a  \tleft\n" >> $out_
 #printf "\a  \tright\n" >> $out_
 printf "\a  \tcreate <name>\n" >> $out_

@@ -2,11 +2,12 @@
 
 tmp_=$HOME/.yawm/tmp
 out_=$tmp_/menu
+colors_="-0 0x303030 -1 0xc0c0c0 -2 0x303030 -3 0x808080"
 
 mkdir -p $tmp_
 
-#if [ -f $out_ ]; then
-	printf "\a  \tclose menu\n" > $out_
+#if [ ! -f $out_ ]; then
+	printf "\a\t\n" > $out_
 	printf "\a  \trun...\n" >> $out_
 	printf "\a  \topen terminal\n" >> $out_
 	printf "\a  \topen browser\n" >> $out_
@@ -18,7 +19,7 @@ mkdir -p $tmp_
 	printf "\a  \texit\n" >> $out_
 #fi
 
-menu -n yawm-menu -b -0 0x303030 -1 0xc0c0c0 -2 0x303030 -3 0x808080 -c 30 -d $out_ |
+menu -n yawm-menu -b $colors_ -c 30 -d $out_ |
 while read icon item; do
 	echo "'$item'"
 	case $item in
