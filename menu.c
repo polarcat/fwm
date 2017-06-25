@@ -412,8 +412,6 @@ static void find_row(xcb_keysym_t sym)
 
 	if (sym == 0x75 && control_) { /* control + u */
 		search_idx_ = PROMPT_LEN;
-		draw_search_bar();
-		return;
 	} else if (sym == XK_BackSpace) {
 		if (search_idx_ > PROMPT_LEN)
 			search_idx_--;
