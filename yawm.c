@@ -2516,14 +2516,7 @@ static void del_window(xcb_window_t win)
 	if (!cli) {
 		ii("unmanaged win 0x%x\n", win);
 		xcb_unmap_subwindows_checked(dpy, win);
-
-		xcb_window_t curwin = pointer2win();
-
-		if (panel_window(curwin)) {
-			ii("panel win 0x%x nder focus\n", curwin);
-		}
-
-		goto out;
+		goto flush;
 	}
 
 	if (cli->flags & CLI_FLG_DOCK) {
@@ -2614,8 +2607,9 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	enum winstatus status = window_status(win);
 
 	if (status == WIN_STATUS_UNKNOWN) {
-		ww("ignore unknown window 0x%x\n", win);
+		ww("destroy unknown window 0x%x\n", win);
 		xcb_unmap_window_checked(dpy, win);
+		xcb_destroy_window_checked(dpy, win);
 		xcb_flush(dpy);
 		return NULL;
 	}
@@ -2658,6 +2652,15 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	if (!g) { /* could not get initial geometry */
 		ee("xcb_get_geometry() failed\n");
 		goto out;
+	}
+
+	if (g->width <= 1 || g->height <= 1) {
+		/* FIXME: current assumption is that window is not supposed
+		 * to be shown
+		 */
+		ww("ignore tiny window 0x%x geo %ux%u%+d%+d\n", win, g->width,
+		   g->height, g->x, g->y);
+		return NULL;
 	}
 
 	scr = NULL;
