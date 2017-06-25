@@ -242,6 +242,12 @@ static void swap_cols(struct row *row, uint8_t dst, uint8_t src)
 	cols_px_[src] = px;
 }
 
+static void warp_pointer(int16_t x, int16_t y)
+{
+	xcb_warp_pointer(dpy_, XCB_NONE, win_, 0, 0, 0, 0, x, y);
+	xcb_flush(dpy_);
+}
+
 static void draw_row(struct row *row, uint8_t idx, uint8_t focus)
 {
 	struct column *col = row->cols;
@@ -289,6 +295,9 @@ static void draw_row(struct row *row, uint8_t idx, uint8_t focus)
 		draw_col(x, y, row->cols[i].str, len, focus);
 		x += cols_px_[i];
 	}
+
+	if (focus)
+		warp_pointer(page_w_ + x_pad_, y);
 }
 
 static void draw_menu(void)
@@ -343,6 +352,7 @@ static void draw_menu(void)
 		ptr++;
 	}
 
+	warp_pointer(page_w_ + x_pad_, row_h_ - y_pad_);
 	draw_search_bar();
 }
 
@@ -686,20 +696,18 @@ static void follow_pointer(xcb_motion_notify_event_t *e)
 		if (page_idx_ >= pages_num_ - 1)
 			return;
 
-		xcb_warp_pointer(dpy_, XCB_NONE, win_, 0, 0,
-				 0, 0, x, y_pad_);
+		warp_pointer(page_w_ + x_pad_, y_pad_);
 		page_down();
 	} else if (e->event_y < y_pad_) { /* follow up */
 		if (!page_idx_)
 			return;
 
-		xcb_warp_pointer(dpy_, XCB_NONE, win_, 0, 0,
-				 0, 0, x, page_h_ - y_pad_);
+		warp_pointer(page_w_ + x_pad_, page_h_ - y_pad_);
 		page_up();
 	}
 }
 
-static void warp_pointer(void)
+static void grab_pointer(void)
 {
 	xcb_grab_pointer(dpy_, XCB_NONE, win_,
 			 XCB_EVENT_MASK_POINTER_MOTION |
@@ -707,8 +715,6 @@ static void warp_pointer(void)
 			 XCB_EVENT_MASK_BUTTON_RELEASE,
 			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
 			 win_, XCB_NONE, XCB_CURRENT_TIME);
-	xcb_warp_pointer_checked(dpy_, XCB_NONE, win_, 0, 0, 0, 0, 2 * x_pad_,
-				 2 * y_pad_);
 	xcb_flush(dpy_);
 	return;
 }
@@ -1212,8 +1218,8 @@ static uint8_t events(uint8_t wait)
 		break;
 	case XCB_EXPOSE:
 		dd("XCB_EXPOSE\n");
+		grab_pointer();
 		draw_menu();
-		warp_pointer();
 		break;
 	case XCB_KEY_PRESS:
 		key_press((xcb_key_press_event_t *) e);
