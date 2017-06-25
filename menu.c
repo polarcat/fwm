@@ -38,7 +38,7 @@
 #endif /* DEBUG */
 
 #define FONT_H_MARGIN 2
-#define COLOR_DISTANCE 5
+#define COLOR_DISTANCE 10
 
 #define PROMPT_LEN 2
 
