@@ -783,7 +783,7 @@ static int init_rows(void)
 	uint8_t col_max_len;
 	uint8_t row_max_len;
 
-	x_pad_ = font_->max_advance_width / 2;
+	x_pad_ = font1_size_ - 2;
 	y_pad_ = x_pad_;
 	row_h_ = font_->ascent + font_->descent + 2 * FONT_H_MARGIN;
 	text_y_ = font_->ascent + FONT_H_MARGIN;
