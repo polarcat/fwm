@@ -612,7 +612,7 @@ static void draw_panel_text(struct panel *panel, struct color *fg,
 			    struct color *bg, int16_t x, uint16_t w,
 			    const char *text, int len, XftFont *font)
 {
-	fill_rect(panel->win, panel->gc, bg, x, ITEM_V_MARGIN, w,
+	fill_rect(panel->win, panel->gc, bg, x, ITEM_V_MARGIN, w + TAG_GAP,
 		  panel_height - 2 * ITEM_V_MARGIN);
 
 	x += panel->pad;
