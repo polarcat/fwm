@@ -85,9 +85,7 @@ typedef uint8_t strlen_t;
 #define MOUSE_BTN_MID 2
 #define MOUSE_BTN_RIGHT 3
 
-#define DIV_ICON1 ">"
-#define DIV_ICON2 ""
-//#define DIV_ICON2 ""
+#define DIV_ICON "::"
 
 #define MENU_ICON1 "="
 #define MENU_ICON2 ""
@@ -1518,15 +1516,8 @@ static int16_t adjust_x(struct screen *scr, int16_t x, uint16_t w)
 
 static int16_t adjust_y(struct screen *scr, int16_t y, uint16_t h)
 {
-	int16_t yy;
-
-	if (panel_top)
-		yy = scr->y + panel_height + PANEL_SCREEN_GAP;
-	else
-		yy = scr->y;
-
-	if (y < yy || y > yy + scr->h || y + h > yy + scr->h)
-		return yy;
+	if (y < scr->y || y > scr->y + scr->h || y + h > scr->y + scr->h)
+		return scr->y;
 	else
 		return y;
 }
@@ -1996,10 +1987,6 @@ static void place_window(void *ptr)
 
 		x = curscr->x;
 		y = curscr->y + curscr->h - curscr->h / cli->div;
-
-		if (panel_top)
-			y += panel_height + PANEL_SCREEN_GAP;
-
 		goto halfh;
 	case WIN_POS_TOP_LEFT:
 		tt("WIN_POS_TOP_LEFT\n");
@@ -2015,19 +2002,11 @@ static void place_window(void *ptr)
 		tt("WIN_POS_BOTTOM_LEFT\n");
 		x = curscr->x;
 		y = curscr->y + curscr->h / 2;
-
-		if (panel_top)
-			y += panel_height + PANEL_SCREEN_GAP;
-
 		goto halfwh;
 	case WIN_POS_BOTTOM_RIGHT:
 		tt("WIN_POS_BOTTOM_RIGHT\n");
 		x = curscr->x + curscr->w / 2;
 		y = curscr->y + curscr->h / 2;
-
-		if (panel_top)
-			y += panel_height + PANEL_SCREEN_GAP;
-
 		goto halfwh;
 	default:
 		return;
@@ -2414,14 +2393,9 @@ static void dock_arrange(struct screen *scr)
 	scr->items[PANEL_AREA_DOCK].x = scr->x + scr->w;
 	scr->items[PANEL_AREA_DOCK].w = 0;
 
-	if (panel_top)
-		y = scr->y;
-	else
-		y = scr->y + scr->h;
-
-	y += ITEM_V_MARGIN;
-
 	x = scr->items[PANEL_AREA_DOCK].x;
+	y = panel_y + ITEM_V_MARGIN;
+
 	list_walk_safe(cur, tmp, &scr->dock) {
 		struct client *cli = list2client(cur);
 		if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
@@ -2915,15 +2889,9 @@ static void print_div(struct screen *scr)
 	x = scr->items[PANEL_AREA_DIV].x;
 	w = scr->items[PANEL_AREA_DIV].w;
 
-	if (font2) {
-		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
-				color2ptr(PANELBG), x, w, DIV_ICON2,
-				sizeof(DIV_ICON2) - 1, font2);
-	} else {
-		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
-				color2ptr(PANELBG), x, w, DIV_ICON1,
-				sizeof(DIV_ICON1) - 1, font1);
-	}
+	draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
+			color2ptr(PANELBG), x, w, DIV_ICON,
+			sizeof(DIV_ICON) - 1, font1);
 }
 
 static int tag_pointed(struct tag *tag, int16_t x)
@@ -3204,12 +3172,7 @@ static void update_panel_items(struct screen *scr)
 	scr->items[PANEL_AREA_TAGS].w = init_tags(scr);
 
 	scr->items[PANEL_AREA_DIV].x = scr->items[PANEL_AREA_TAGS].w;
-
-	if (font2)
-		text_exts(DIV_ICON2, sizeof(DIV_ICON2) - 1, &w, &h, font2);
-	else
-		text_exts(DIV_ICON1, sizeof(DIV_ICON1) - 1, &w, &h, font1);
-
+	text_exts(DIV_ICON, sizeof(DIV_ICON) - 1, &w, &h, font1);
 	w += scr->items[PANEL_AREA_DIV].x + 2 * scr->panel.pad;
 	scr->items[PANEL_AREA_DIV].w = w;
 	print_div(scr);
@@ -3438,10 +3401,12 @@ static void init_panel(struct screen *scr)
 	val[1] |= XCB_EVENT_MASK_BUTTON_RELEASE;
 	val[1] |= XCB_EVENT_MASK_VISIBILITY_CHANGE;
 
-	if (panel_top)
-		panel_y = scr->y;
-	else
+	if (!panel_top) {
 		panel_y = (scr->h + scr->y) - panel_height;
+	} else {
+		panel_y = scr->y;
+		scr->y += panel_height + PANEL_SCREEN_GAP;
+	}
 
 	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, scr->panel.win,
 			  rootscr->root,
@@ -3624,9 +3589,9 @@ static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 			   scr->w, scr->h + panel_height, scr->x, scr->y,
 			   r->width, r->height, r->x, r->y);
 			scr->x = r->x;
-			scr->y = r->y;
 			scr->w = r->width;
-			scr->h = r->height - panel_height;
+			scr->y = r->y;
+			scr->h = r->height;
 			move_panel(scr);
 			free(scr->name);
 			scr->name = strdup(name);
