@@ -3195,7 +3195,7 @@ static void update_panel_items(struct screen *scr)
 	else
 		text_exts(MENU_ICON1, sizeof(MENU_ICON1) - 1, &w, &h, font1);
 
-	scr->items[PANEL_AREA_MENU].x = scr->x + TAG_GAP;
+	scr->items[PANEL_AREA_MENU].x = TAG_GAP;
 	scr->items[PANEL_AREA_MENU].w = w + 2 * scr->panel.pad;
 	x += scr->items[PANEL_AREA_MENU].w + 2 * TAG_GAP;
 	print_menu(scr);
