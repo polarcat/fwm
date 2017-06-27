@@ -1346,9 +1346,16 @@ static struct screen *coord2scr(int16_t x, int16_t y)
 	struct list_head *cur;
 
 	list_walk(cur, &screens) {
+		int16_t yy;
 		struct screen *scr = list2screen(cur);
+
+		if (panel_top)
+			yy = panel_y;
+		else
+			yy = scr->y;
+
 		if (scr->x <= x && x <= (scr->x + scr->w - 1) &&
-		    scr->y <= y && y <= (scr->y + scr->h + panel_height - 1)) {
+		    yy <= y && y <= (yy + scr->h)) {
 			return scr;
 		}
 	}
