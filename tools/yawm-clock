@@ -1,0 +1,7 @@
+#!/bin/sh
+
+read bg < $HOME/.yawm/colors/panelbg
+read fg < $HOME/.yawm/colors/textfg_normal
+killall clock
+set -x
+exec clock -bg $bg -fg $fg -f "%Y-%m-%d/%W %a %H:%M" -c xcalendar &

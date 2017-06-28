@@ -23,6 +23,7 @@ yawm-keys
 yawm-restart
 yawm-suspend
 yawm-tagmenu
+yawm-clock
 "
 
 for tool in $tools_; do
