@@ -399,6 +399,7 @@ static XftColor textfg_active;
 static uint32_t textbg_normal;
 static uint32_t textbg_active;
 static uint32_t panelbg;
+static XftColor titlefg;
 static XftColor selectfg;
 static uint32_t selectbg;
 static XftColor alertfg;
@@ -421,6 +422,7 @@ enum coloridx {
 	TEXTBG_NORMAL,
 	TEXTBG_ACTIVE,
 	PANELBG,
+	TITLEFG,
 	SELECTFG,
 	SELECTBG,
 	TOOLFG,
@@ -439,6 +441,7 @@ static struct color defcolors[] = {
 	{ "textbg_normal", &textbg_normal, 0x202020, COLOR_TYPE_INT, },
 	{ "textbg_active", &textbg_active, 0x101010, COLOR_TYPE_INT, },
 	{ "panelbg", &panelbg, 0x202020, COLOR_TYPE_INT, },
+	{ "titlefg", &titlefg, 0xc0c0c0, COLOR_TYPE_XFT, },
 	{ "selectfg", &selectfg, 0x000000, COLOR_TYPE_XFT, },
 	{ "selectbg", &selectbg, 0x84aad2, COLOR_TYPE_INT, },
 	{ "toolfg", &toolfg, 0x505050, COLOR_TYPE_XFT, },
@@ -658,7 +661,7 @@ static void print_title(struct screen *scr, xcb_window_t win)
 		title.str[title.len - 1] = '.';
 	}
 
-	draw_panel_text(&scr->panel, color2ptr(TEXTFG_ACTIVE),
+	draw_panel_text(&scr->panel, color2ptr(TITLEFG),
 			color2ptr(PANELBG),
 			scr->items[PANEL_AREA_TITLE].x,
 			scr->items[PANEL_AREA_TITLE].w,
