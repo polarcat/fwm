@@ -21,6 +21,8 @@
 #include "yawm.h"
 #include "misc.h"
 
+#define FONT_H_MARGIN 2
+
 static int xscr;
 static Display *xdpy;
 static xcb_connection_t *dpy;
@@ -42,6 +44,8 @@ static const char *cmd;
 static uint16_t xpos;
 static uint16_t ypos;
 
+static char str[200];
+
 static void textexts(const char *text, int len, uint16_t *w, uint16_t *h)
 {
 	XGlyphInfo ext;
@@ -51,34 +55,8 @@ static void textexts(const char *text, int len, uint16_t *w, uint16_t *h)
 	ii("text: %s, geo (%d,%d %d,%d) off (%d,%d)\n",
 	   text, ext.x, ext.y, ext.width, ext.height, ext.xOff, ext.yOff);
 
-	if (ext.width % 2)
-		*w = ext.width + 1;
-	else
-		*w = ext.width;
-
-	*h = ext.height;
-}
-
-static void winsize()
-{
-	static char str[200];
-	time_t t;
-	struct tm *tmp;
-
-	t = time(NULL);
-
-	if (!(tmp = localtime(&t)))
-		return;
-
-	if (!strftime(str, sizeof(str), timefmt, tmp))
-		return;
-
-	textexts(str, strlen(str), &width, &height);
-
-	xpos = 2;
-	ypos = height;
-	width += 1;
-	height += 2;
+        ext.width % 2 ? (*w = ext.width + 1) : (*w = ext.width);
+        ext.height % 2 ? (*h = ext.height + 1) : (*h = ext.height);
 }
 
 static void clear(int16_t x, int16_t y, uint16_t w, uint16_t h)
@@ -90,7 +68,6 @@ static void clear(int16_t x, int16_t y, uint16_t w, uint16_t h)
 
 static void printtime(void)
 {
-	static char str[200];
 	time_t t;
 	struct tm *tmp;
 
@@ -170,6 +147,8 @@ static int opt(const char *arg, const char *args, const char *argl)
 
 int main(int argc, char *argv[])
 {
+	time_t t;
+	struct tm *tm;
 	struct pollfd pfd;
 	uint32_t mask;
 	xcb_screen_t *scr;
@@ -183,15 +162,21 @@ int main(int argc, char *argv[])
 			timefmt = argv[argc + 1];
 		} else if (opt(arg, "-c", "--cmd")) {
 			cmd = argv[argc + 1];
+		} else if (opt(arg, "-bg", "--bgcolor")) {
+			bg = strtol(argv[argc + 1], NULL, 16);
+		} else if (opt(arg, "-fg", "--fgcolor")) {
+			fg = strtol(argv[argc + 1], NULL, 16);
 		}
 	}
 
 	if (!timefmt) {
 		printf("Usage: %s <options>\n"
 			"Options:\n"
-			"-f, --fmt <str>  RFC 2822-compliant date format\n"
-			"-c, --cmd <str>  command to run on mouse click\n"
-			, argv[0]);
+			"-f, --fmt <str>       RFC 2822-compliant date format\n"
+			"-c, --cmd <str>       command to run on mouse click\n"
+			"-bg, --bgcolor <hex>  clock background color (0x%x)\n"
+			"-fg, --fgcolor <hex>  clock foreground color (0x%x)\n\n"
+			, argv[0], bg, fg);
 		return 1;
 	}
 
@@ -208,10 +193,10 @@ int main(int argc, char *argv[])
 	}
 
 	font = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
-			   FONT_NAME, XFT_SIZE, XftTypeDouble,
-			   FONT_SIZE, NULL);
+			   FONT1_NAME, XFT_SIZE, XftTypeDouble,
+			   FONT1_SIZE, NULL);
 	if (!font) {
-		ee("XftFontOpen(%s)\n", FONT_NAME);
+		ee("XftFontOpen(%s)\n", FONT1_NAME);
 		return 1;
 	}
 
@@ -241,11 +226,26 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	winsize();
-	if (!width || !height) {
-		ee("failed to calculate window size\n");
+	t = time(NULL);
+
+	if (!(tm = localtime(&t))) {
+		ee("localtime() failed\n");
 		return 1;
 	}
+
+	if (!strftime(str, sizeof(str), timefmt, tm)) {
+		ee("strftime() failed\n");
+		return 1;
+	}
+
+	textexts(str, strlen(str), &width, &height);
+
+	xpos = 2;
+	width += 2;
+
+	ypos = font->ascent;
+	height = font->ascent + font->descent + 2 * FONT_H_MARGIN;
+
 	ii("win dim (%d,%d) text pos (%d,%d)\n", width, height, xpos, ypos);
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
