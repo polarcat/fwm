@@ -45,10 +45,10 @@ paste()
 
 	ls -1t $dat_/ | while read name; do
 		if [ $i -eq $pref_ ]; then
-			cat $dat_/$name | xclip -i -selection primary
-			cat $dat_/$name | xclip -i -selection secondary
-			cat $dat_/$name | xclip -i -selection clipboard
-#			cat $dat_/$name | xclip -i -selection buffer-cut
+			xclip -i -selection primary $dat_/$name
+			xclip -i -selection secondary $dat_/$name
+			xclip -i -selection clipboard $dat_/$name
+#			xclip -i -selection buffer-cut $dat_/$name
 			break
 		fi
 		i=$((i + 1))
