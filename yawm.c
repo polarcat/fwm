@@ -3410,6 +3410,7 @@ static void init_panel(struct screen *scr)
 	val[1] = XCB_EVENT_MASK_BUTTON_PRESS;
 	val[1] |= XCB_EVENT_MASK_BUTTON_RELEASE;
 	val[1] |= XCB_EVENT_MASK_VISIBILITY_CHANGE;
+	val[1] |= XCB_EVENT_MASK_EXPOSURE;
 
 	if (!panel_top) {
 		panel_y = (scr->h + scr->y) - panel_height;
