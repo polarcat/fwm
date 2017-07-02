@@ -130,6 +130,7 @@ struct panel_item {
 };
 
 struct panel {
+	int16_t y;
 	uint16_t w;
 	uint16_t h;
 	uint8_t pad; /* text padding */
@@ -228,6 +229,7 @@ struct screen { /* per output abstraction */
 
 	struct tag *tag; /* current tag */
 
+	int16_t top; /* y position relative to panel */
 	int16_t x, y;
 	uint16_t w, h;
 
@@ -456,7 +458,6 @@ static struct color defcolors[] = {
 #define color2xft(idx) *((XftColor *) defcolors[idx].val)
 #define color2ptr(idx) &defcolors[idx]
 
-static int16_t panel_y;
 static uint16_t panel_height;
 static uint8_t panel_top;
 
@@ -1346,16 +1347,10 @@ static struct screen *coord2scr(int16_t x, int16_t y)
 	struct list_head *cur;
 
 	list_walk(cur, &screens) {
-		int16_t yy;
 		struct screen *scr = list2screen(cur);
 
-		if (panel_top)
-			yy = panel_y;
-		else
-			yy = scr->y;
-
 		if (scr->x <= x && x <= (scr->x + scr->w - 1) &&
-		    yy <= y && y <= (yy + scr->h)) {
+		    scr->y <= y && y <= (scr->y + scr->h)) {
 			return scr;
 		}
 	}
@@ -1526,8 +1521,8 @@ static int16_t adjust_x(struct screen *scr, int16_t x, uint16_t w)
 
 static int16_t adjust_y(struct screen *scr, int16_t y, uint16_t h)
 {
-	if (y < scr->y || y > scr->y + scr->h || y + h > scr->y + scr->h)
-		return scr->y;
+	if (y < scr->top || y > scr->top + scr->h || y + h > scr->top + scr->h)
+		return scr->top;
 	else
 		return y;
 }
@@ -1590,7 +1585,7 @@ static void make_grid(void *ptr)
 
 	if (!curscr->tag->anchor) {
 		curscr->tag->space.x = curscr->x;
-		curscr->tag->space.y = curscr->y;
+		curscr->tag->space.y = curscr->top;
 		curscr->tag->space.w = curscr->w;
 		curscr->tag->space.h = curscr->h;
 	}
@@ -1938,7 +1933,7 @@ static void place_window(void *ptr)
 		cli->flags |= CLI_FLG_FULLSCREEN;
 
 		x = curscr->x;
-		y = curscr->y;
+		y = curscr->top;
 		w = curscr->w - 2 * BORDER_WIDTH;
 		h = curscr->h - 2 * BORDER_WIDTH;
 		curscr->tag->anchor = NULL;
@@ -1960,7 +1955,7 @@ static void place_window(void *ptr)
 		cli->flags |= CLI_FLG_CENTER;
 
 		x = curscr->x + curscr->w / 2 - curscr->w / 4;
-		y = curscr->y + curscr->h / 2 - curscr->h / 4;
+		y = curscr->top + curscr->h / 2 - curscr->h / 4;
 		goto halfwh;
 	case WIN_POS_LEFT_FILL:
 		tt("WIN_POS_LEFT_FILL\n");
@@ -1969,7 +1964,7 @@ static void place_window(void *ptr)
 			cli->div = 2;
 
 		x = curscr->x;
-		y = curscr->y;
+		y = curscr->top;
 		goto halfw;
 	case WIN_POS_RIGHT_FILL:
 		tt("WIN_POS_RIGHT_FILL\n");
@@ -1987,7 +1982,7 @@ static void place_window(void *ptr)
 			cli->div = 2;
 
 		x = curscr->x;
-		y = curscr->y;
+		y = curscr->top;
 		goto halfh;
 	case WIN_POS_BOTTOM_FILL:
 		tt("WIN_POS_BOTTOM_FILL\n");
@@ -1996,27 +1991,27 @@ static void place_window(void *ptr)
 			cli->div = 2;
 
 		x = curscr->x;
-		y = curscr->y + curscr->h - curscr->h / cli->div;
+		y = curscr->top + curscr->h - curscr->h / cli->div;
 		goto halfh;
 	case WIN_POS_TOP_LEFT:
 		tt("WIN_POS_TOP_LEFT\n");
 		x = curscr->x;
-		y = curscr->y;
+		y = curscr->top;
 		goto halfwh;
 	case WIN_POS_TOP_RIGHT:
 		tt("WIN_POS_TOP_RIGHT\n");
 		x = curscr->x + curscr->w / 2;
-		y = curscr->y;
+		y = curscr->top;
 		goto halfwh;
 	case WIN_POS_BOTTOM_LEFT:
 		tt("WIN_POS_BOTTOM_LEFT\n");
 		x = curscr->x;
-		y = curscr->y + curscr->h / 2;
+		y = curscr->top + curscr->h / 2;
 		goto halfwh;
 	case WIN_POS_BOTTOM_RIGHT:
 		tt("WIN_POS_BOTTOM_RIGHT\n");
 		x = curscr->x + curscr->w / 2;
-		y = curscr->y + curscr->h / 2;
+		y = curscr->top + curscr->h / 2;
 		goto halfwh;
 	default:
 		return;
@@ -2052,10 +2047,10 @@ halfw:
 			curscr->tag->space.x = curscr->x + w + 2 * BORDER_WIDTH;
 		else
 			curscr->tag->space.x = curscr->x;
-		curscr->tag->space.y = curscr->y;
+		curscr->tag->space.y = curscr->top;
 		curscr->tag->space.w = curscr->w - curscr->w / cli->div;
 		curscr->tag->space.h = curscr->h;
-		struct arg arg = { .x = curscr->x, .y = curscr->y, };
+		struct arg arg = { .x = curscr->x, .y = curscr->top, };
 		make_grid(&arg);
 	}
 
@@ -2071,13 +2066,13 @@ halfh:
 		curscr->tag->space.x = curscr->x;
 
 		if (pos == WIN_POS_TOP_FILL)
-			curscr->tag->space.y = curscr->y + h + 2 * BORDER_WIDTH;
+			curscr->tag->space.y = curscr->top + h + 2 * BORDER_WIDTH;
 		else
-			curscr->tag->space.y = curscr->y;
+			curscr->tag->space.y = curscr->top;
 
 		curscr->tag->space.w = curscr->w;
 		curscr->tag->space.h = curscr->h - curscr->h / cli->div;
-		struct arg arg = { .x = curscr->x, .y = curscr->y, };
+		struct arg arg = { .x = curscr->x, .y = curscr->top, };
 		make_grid(&arg);
 	}
 
@@ -2284,8 +2279,10 @@ static void retag_window(struct arg *arg)
 	cli->scr = target_scr;
 	cli->tag = target_tag;
 
-	if (cli->scr != curscr)
-		client_moveresize(cli, cli->scr->x, cli->scr->y, cli->w, cli->h);
+	if (cli->scr != curscr) {
+		client_moveresize(cli, cli->scr->x, cli->scr->top, cli->w,
+				  cli->h);
+	}
 
 	window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
 	xcb_unmap_window_checked(dpy, cli->win);
@@ -2404,7 +2401,7 @@ static void dock_arrange(struct screen *scr)
 	scr->items[PANEL_AREA_DOCK].w = 0;
 
 	x = scr->items[PANEL_AREA_DOCK].x;
-	y = panel_y + ITEM_V_MARGIN;
+	y = scr->panel.y + ITEM_V_MARGIN;
 
 	list_walk_safe(cur, tmp, &scr->dock) {
 		struct client *cli = list2client(cur);
@@ -2542,7 +2539,7 @@ out:
 	if (!cli) {
 		focus_root();
 		warp_pointer(rootscr->root, curscr->x + curscr->w / 2,
-			     curscr->y + curscr->h / 2);
+			     curscr->top + curscr->h / 2);
 	}
 
 flush:
@@ -2730,7 +2727,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 
 	if (cli->flags & CLI_FLG_CENTER) {
 		g->x = scr->x + scr->w / 2 - g->width / 2;
-		g->y = scr->y + scr->h / 2 - g->height / 2;
+		g->y = scr->top + scr->h / 2 - g->height / 2;
 	} else if (cli->flags & CLI_FLG_TOPLEFT) {
 		g->x = 0;
 		g->y = 0;
@@ -2904,16 +2901,19 @@ static void print_div(struct screen *scr)
 			sizeof(DIV_ICON) - 1, font1);
 }
 
-static int tag_pointed(struct tag *tag, int16_t x)
+static int tag_pointed(struct tag *tag, int16_t x, int16_t y)
 {
-	if (x >= tag->x && x <= tag->x + tag->w + TAG_GAP)
+	if (0 <= y && y <= curscr->panel.y + panel_height &&
+	    x >= tag->x && x <= tag->x + tag->w + TAG_GAP) {
 		return 1;
+	}
+
 	return 0;
 }
 
 static xcb_timestamp_t tag_time;
 
-static void point_tag(struct screen *scr, int x)
+static void point_tag(struct screen *scr, int16_t x, int16_t y)
 {
 	struct list_head *cur;
 
@@ -2922,14 +2922,14 @@ static void point_tag(struct screen *scr, int x)
 
 		if (tag == scr->tag) {
 			continue;
-		} else if (tag_pointed(tag, x)) {
+		} else if (tag_pointed(tag, x, y)) {
 			print_tag(scr, tag, color2ptr(FOCUSFG));
 			break;
 		}
 	}
 }
 
-static void select_tag(struct screen *scr, int x)
+static void select_tag(struct screen *scr, int16_t x, int16_t y)
 {
 	struct list_head *cur;
 	struct tag *prev;
@@ -2940,7 +2940,7 @@ static void select_tag(struct screen *scr, int x)
 		target_scr = NULL;
 	}
 
-	if (scr->tag && tag_pointed(scr->tag, x)) {
+	if (scr->tag && tag_pointed(scr->tag, x, y)) {
 		return;
 	} else if (scr->tag) { /* deselect current tag instantly */
 		print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
@@ -2953,7 +2953,7 @@ static void select_tag(struct screen *scr, int x)
 
 		if (tag == scr->tag) {
 			continue;
-		} else if (!tag_pointed(tag, x)) {
+		} else if (!tag_pointed(tag, x, y)) {
 			print_tag(scr, tag, color2ptr(TEXTFG_NORMAL));
 		} else {
 			print_tag(scr, tag, color2ptr(TEXTFG_ACTIVE));
@@ -3412,16 +3412,17 @@ static void init_panel(struct screen *scr)
 	val[1] |= XCB_EVENT_MASK_VISIBILITY_CHANGE;
 	val[1] |= XCB_EVENT_MASK_EXPOSURE;
 
-	if (!panel_top) {
-		panel_y = (scr->h + scr->y) - panel_height;
+	if (panel_top) {
+		scr->panel.y = scr->y;
+		scr->top = scr->panel.y + panel_height + PANEL_SCREEN_GAP;
 	} else {
-		panel_y = scr->y;
-		scr->y += panel_height + PANEL_SCREEN_GAP;
+		scr->panel.y = (scr->h + scr->y) - panel_height;
+		scr->top = scr->y;
 	}
 
 	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, scr->panel.win,
 			  rootscr->root,
-			  scr->x, panel_y, scr->w, panel_height, 0,
+			  scr->x, scr->panel.y, scr->w, panel_height, 0,
 			  XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			  rootscr->root_visual, mask, val);
 	xcb_flush(dpy); /* flush this operation otherwise panel will be
@@ -3450,7 +3451,7 @@ static void init_panel(struct screen *scr)
 					DefaultColormap(xdpy, xscr));
 
 	ii("screen %d, panel 0x%x geo %ux%u+%d+%d\n", scr->id, scr->panel.win,
-	   scr->w, panel_height, scr->x, panel_y);
+	   scr->w, panel_height, scr->x, scr->panel.y);
 }
 
 static void move_panel(struct screen *scr)
@@ -3762,7 +3763,7 @@ static void focus_screen(uint8_t id)
 			focus_tag(scr, scr->tag);
 			curscr = scr;
 			warp_pointer(rootscr->root, curscr->x + curscr->w / 2,
-				     curscr->y + curscr->h / 2);
+				     curscr->top + curscr->h / 2);
 			return;
 		}
 	}
@@ -3856,7 +3857,7 @@ static void dump_tags(void)
 			curscr->tag == tag ? (current = '*') : (current = ' ');
 			fprintf(f, "%u\t%u\t%s\t%ux%u%+d%+d\t%u\t%c\n", scr->id,
 				tag->id, tag->name, tag->w, panel_height,
-				tag->x, panel_y, clicnt, current);
+				tag->x, scr->panel.y, clicnt, current);
 		}
 	}
 
@@ -4054,7 +4055,7 @@ static void mark_tag(int16_t x, int16_t y, int16_t tagx)
 		dd("scr %d tag '%s' x (pos:%d scr:%d tag:%d)",
 		   target_scr->id, tag->name, tagx, target_scr->x, tag->x);
 
-		if (!tag_pointed(tag, tagx)) {
+		if (!tag_pointed(tag, tagx, y)) {
 			continue;
 		} else if (target_scr->tag == tag) { /* skip active tag */
 			continue;
@@ -4157,7 +4158,7 @@ static void panel_button_press(xcb_button_press_event_t *e)
 	if pointer_inside(curscr, PANEL_AREA_TAGS, e->event_x) {
 		dd("panel press time %u", e->time);
 		tag_time = e->time;
-		point_tag(curscr, e->event_x);
+		point_tag(curscr, e->event_x, e->event_y);
 		xcb_flush(dpy);
 	} else if pointer_inside(curscr, PANEL_AREA_MENU, e->event_x) {
 		run_menu();
@@ -4191,7 +4192,7 @@ static void handle_button_release(xcb_button_release_event_t *e)
 			if (e->time - tag_time > TAG_LONG_PRESS)
 				mark_tag(e->root_x, e->root_y, e->event_x);
 			else
-				select_tag(curscr, e->event_x);
+				select_tag(curscr, e->event_x, e->event_y);
 		}
 	}
 
