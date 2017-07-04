@@ -1019,7 +1019,7 @@ static void focus_toolbar_item(int16_t x, int16_t y, uint8_t left)
 	}
 
 	if (y > panel_height) {
-		if (!(focused_item->flags & TOOL_FLG_LOCK))
+		if (focused_item && !(focused_item->flags & TOOL_FLG_LOCK))
 			draw_toolbar_text(focused_item, color2ptr(TOOLFG));
 		focused_item = end - 1;
 	}
