@@ -3528,7 +3528,7 @@ static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 	if (!r)
 		return;
 
-	ii("crtc%d geo %ux%u+%d+%d\n", i, r->width, r->height, r->x, r->y);
+	ii("crtc%d geo %ux%u%+d%+d\n", i, r->width, r->height, r->x, r->y);
 
 	/* find a screen that matches new geometry so we can re-use it */
 	list_walk(cur, &screens) {
@@ -3587,12 +3587,12 @@ static void init_output(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 	if (!r)
 		return;
 
-	len = xcb_randr_get_output_info_name_length(r);
+	len = xcb_randr_get_output_info_name_length(r) + 1;
 	if (len > sizeof(name))
 		len = sizeof(name);
 	snprintf(name, len, "%s", xcb_randr_get_output_info_name(r));
 
-	tt("output %s%d, %ux%u\n", name, i, r->mm_width, r->mm_height);
+	ii("output %s, size %ux%u\n", name, r->mm_width, r->mm_height);
 
 	if (r->connection != XCB_RANDR_CONNECTION_CONNECTED)
 		ii("output %s%d not connected\n", name, i);
@@ -3837,7 +3837,8 @@ static void dump_screens(void)
 
 		curscr == scr ? (current = '*') : (current = ' ');
 		fprintf(f, "%u\t%s\t%ux%u%+d%+d\t%c\n", scr->id, scr->name,
-			scr->w, scr->h, scr->x, scr->y, current);
+			scr->w, scr->h + panel_height + PANEL_SCREEN_GAP,
+			scr->x, scr->y, current);
 	}
 
 	fclose(f);
