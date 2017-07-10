@@ -1,21 +1,29 @@
 #!/bin/sh
 
+read c2 < $HOME/.yawm/colors/textfg_active
+read c3 < $HOME/.yawm/colors/textbg_active
+
 tmp_=$HOME/.yawm/tmp
 out_=$tmp_/menu
-colors_="-0 0x303030 -1 0xc0c0c0 -2 0x303030 -3 0x808080"
+#colors_="-0 0x303030 -1 0xc0c0c0 -2 0x303030 -3 0x808080"
+colors_="-0 0x404040 -1 0xd0d0d0 -2 $c2 -3 $c3"
 
 mkdir -p $tmp_
 
 #if [ ! -f $out_ ]; then
-	printf "\a\t\n" > $out_
+#	printf "\a\t\n" > $out_
+	printf "\a  \t\n" > $out_
 	printf "\a  \trun...\n" >> $out_
-	printf "\a  \topen terminal\n" >> $out_
-	printf "\a  \topen browser\n" >> $out_
-	printf "\a  \tlist applications\n" >> $out_
-	printf "\a  \tlist windows\n" >> $out_
-	printf "\a  \tlist shortcuts\n" >> $out_
-	printf "\a  \tmake grid\n" >> $out_
-	printf "\a  \tedit tag\n" >> $out_
+	printf "\a  \tterminal\n" >> $out_
+	printf "\a  \tfirefox\n" >> $out_
+	printf "\a  \tchrome\n" >> $out_
+#	printf "\a  \tlinks\n" >> $out_
+	printf "\a  \tclipboard\n" >> $out_
+	printf "\a  \tapplications\n" >> $out_
+	printf "\a  \twindows\n" >> $out_
+	printf "\a  \tshortcuts\n" >> $out_
+	printf "\a  \tgrid\n" >> $out_
+	printf "\a  \ttag editor\n" >> $out_
 	printf "\a  \texit\n" >> $out_
 #fi
 
@@ -24,13 +32,15 @@ while read icon item; do
 	echo "'$item'"
 	case $item in
 	"run..."*) exec yawm-run &;;
-	"open terminal"*) exec xterm &;;
-	"open browser"*) exec chromium-browser;;
-	"list applications"*) exec yawm-apps &;;
-	"list windows"*) exec yawm-clients &;;
-	"list shortcuts"*) exec yawm-keys &;;
-	"make grid"*) xdotool key Alt+F3;;
-	"edit tag"*) yawm-tagmenu &;;
+	"terminal"*) exec xterm &;;
+	"firefox"*) exec firefox;;
+	"chrome"*) exec chromium-browser;;
+	"clipboard"*) exec yawm-clipboard;;
+	"applications"*) exec yawm-apps &;;
+	"windows"*) exec yawm-clients &;;
+	"shortcuts"*) exec yawm-keys &;;
+	"grid"*) xdotool key Alt+F3;;
+	"tag editor"*) yawm-tagmenu &;;
 	"exit"*) killall yawm;;
 	esac
 done
