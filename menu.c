@@ -205,7 +205,7 @@ static void draw_search_bar(void)
 	int16_t y = draw_rect(rows_per_page_, 0) + text_y_;
 	uint8_t len = search_idx_ + 1;
 	char *str = search_buf_;
-	XftColor *fg = &selfg_xft_;
+	XftColor *fg = &fg_xft_;
 
 	search_buf_[0] = '>';
 	search_buf_[1] = ' ';
