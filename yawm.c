@@ -1990,7 +1990,7 @@ static void place_window(void *ptr)
 			cli->div = 2;
 
 		x = curscr->x;
-		y = curscr->top + curscr->h - curscr->h / cli->div;
+		y = curscr->top + curscr->h / cli->div;
 		goto halfh;
 	case WIN_POS_TOP_LEFT:
 		tt("WIN_POS_TOP_LEFT\n");
