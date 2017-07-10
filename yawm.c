@@ -52,13 +52,13 @@
 
 typedef uint8_t strlen_t;
 
-#define PANEL_SCREEN_GAP 1
+#define PANEL_SCREEN_GAP 0
 #define ITEM_V_MARGIN 2
 #define ITEM_H_MARGIN 6
 #define TAG_GAP 2
 
 #define BORDER_WIDTH 1
-#define WINDOW_PAD BORDER_WIDTH
+#define WINDOW_PAD 0
 
 #define WIN_WIDTH_MIN 2
 #define WIN_HEIGHT_MIN 2
