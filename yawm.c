@@ -256,6 +256,7 @@ struct tag {
 	char *name; /* visible name */
 	strlen_t nlen; /* name length */
 	struct rect space;
+	uint8_t grid2v; /* toggle vertical/horizontal split of 2-cells grid */
 	struct client *anchor;
 };
 
@@ -1783,6 +1784,26 @@ static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 
 #define GRIDCELL_MIN_WIDTH 100
 
+static uint8_t cell_size(uint16_t n, uint16_t *w, uint16_t *h)
+{
+	uint16_t i;
+
+	for (i = 1; i < curscr->tag->space.w / GRIDCELL_MIN_WIDTH; i++) {
+		if (i * i >= n) {
+			*w = curscr->tag->space.w / i;
+			*h = curscr->tag->space.h / i;
+			return 1;
+		} else if (i * (i + 1) >= n) {
+			*w = curscr->tag->space.w / (i + 1);
+			*h = curscr->tag->space.h / i;
+			return 1;
+		}
+	}
+
+	ww("failed to calculate cell size for screen %d\n", curscr->id);
+	return 0;
+}
+
 static void make_grid(void *ptr)
 {
 	struct arg *arg = (struct arg *) ptr;
@@ -1801,6 +1822,7 @@ static void make_grid(void *ptr)
 	}
 
 	n = 0;
+
 	list_walk(cur, &curscr->tag->clients) {
 		struct client *cli = list2client(cur);
 		if (curscr->tag->anchor == cli)
@@ -1809,21 +1831,22 @@ static void make_grid(void *ptr)
 			n++;
 	}
 
-	cw = ch = GRIDCELL_MIN_WIDTH;
-	for (i = 1; i < curscr->tag->space.w / GRIDCELL_MIN_WIDTH; i++) {
-		if (i * i >= n) {
-			cw = curscr->tag->space.w / i;
-			ch = curscr->tag->space.h / i;
-			goto done;
-		} else if (i * (i + 1) >= n) {
-			cw = curscr->tag->space.w / (i + 1);
-			ch = curscr->tag->space.h / i;
-			goto done;
+	if (n == 1) {
+		return;
+	} else if (n > 2 && !cell_size(n, &cw, &ch)) {
+		return;
+	} else if (n == 2) {
+		if (curscr->tag->grid2v) { /* vertical split */
+			curscr->tag->grid2v = 0;
+			cw = curscr->tag->space.w / 2;
+			ch = curscr->tag->space.h;
+		} else { /* horizontal split */
+			curscr->tag->grid2v = 1;
+			cw = curscr->tag->space.w;
+			ch = curscr->tag->space.h / 2;
 		}
 	}
-	ww("failed to calculate cell size for screen %d\n", curscr->id);
-	return;
-done:
+
 	ii("%d cells size of (%u,%u)\n", n, cw, ch);
 	i = x = y = 0;
 
