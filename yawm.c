@@ -1817,7 +1817,7 @@ static void make_grid(void *ptr)
 			goto done;
 		} else if (i * (i + 1) >= n) {
 			cw = curscr->tag->space.w / (i + 1);
-			ch = curscr->tag->space.h / i - BORDER_WIDTH;
+			ch = curscr->tag->space.h / i;
 			goto done;
 		}
 	}
@@ -1825,22 +1825,41 @@ static void make_grid(void *ptr)
 	return;
 done:
 	ii("%d cells size of (%u,%u)\n", n, cw, ch);
-	x = y = 0;
+	i = x = y = 0;
+
 	list_walk(cur, &curscr->tag->clients) {
+		int16_t yy;
+		int16_t xx;
+		uint16_t hh;
+		uint16_t ww;
 		struct client *cli = list2client(cur);
+
 		if (curscr->tag->anchor == cli)
 			continue;
 		if (window_status(cli->win) != WIN_STATUS_VISIBLE)
 			continue;
-		client_moveresize(cli, curscr->tag->space.x + x,
-				  curscr->tag->space.y + y,
-				  cw - BORDER_WIDTH - WINDOW_PAD,
-				  ch - BORDER_WIDTH - WINDOW_PAD);
+
+		xx = curscr->tag->space.x + x;
+		ww = (curscr->tag->space.x + curscr->tag->space.w) - (xx + cw);
+		(ww > 2 * BORDER_WIDTH) ? (ww = cw) : (ww += cw);
+		ww -= 2 * BORDER_WIDTH - WINDOW_PAD;
+
+		yy = curscr->tag->space.y + y;
+		hh = (curscr->tag->space.y + curscr->tag->space.h) - (yy + ch);
+		(hh > 2 * BORDER_WIDTH) ? (hh = ch) : (hh += ch);
+		hh -= 2 * BORDER_WIDTH - WINDOW_PAD;
+
+		if (++i >= n) /* last window occupies remaining space */
+			ww = curscr->w - 2 * BORDER_WIDTH - (xx - curscr->x);
+
+		client_moveresize(cli, xx, yy, ww, hh);
 		x += cw;
+
 		if (x > curscr->tag->space.w - cw) {
 			x = 0;
 			y += ch;
 		}
+
 		unfocus_window(cli->win);
 	}
 
@@ -3354,6 +3373,9 @@ static void init_panel(struct screen *scr)
 	uint32_t val[2], mask;
 
 	panel_height = font1->ascent + font1->descent + 2 * ITEM_V_MARGIN;
+
+	if (panel_height % 2)
+		panel_height++;
 
 	scr->panel.pad = ITEM_H_MARGIN;
 	scr->panel.win = xcb_generate_id(dpy);
