@@ -280,6 +280,7 @@ struct client {
 	struct tag *tag;
 	uint16_t flags;
 	uint32_t crc; /* based on class name */
+	uint8_t busy;
 };
 
 #define list2client(item) list_entry(item, struct client, head)
@@ -831,6 +832,7 @@ static void store_client(struct client *cli, uint8_t clean)
 
 static void free_client(struct client *cli)
 {
+	ii("free client win 0x%x\n", cli->win);
 	store_client(cli, 1);
 	list_del(&cli->head);
 	list_del(&cli->list);
@@ -855,6 +857,20 @@ static void ping_window(xcb_window_t win, xcb_timestamp_t time)
 	xcb_flush(dpy);
 }
 #endif
+
+static struct client *pid2cli(pid_t pid)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &clients) {
+		struct client *cli = glob2client(cur);
+
+		if (cli->pid == pid)
+			return cli;
+	}
+
+	return NULL;
+}
 
 #ifndef VERBOSE
 #define trace_screen_metrics(scr) do {} while(0)
@@ -1001,7 +1017,7 @@ static void focus_root(void)
 				    XCB_CURRENT_TIME);
 }
 
-static int focus_any(xcb_window_t del)
+static void focus_any(pid_t pid)
 {
 	struct client *cli;
 
@@ -1010,20 +1026,26 @@ static int focus_any(xcb_window_t del)
 	if (focus_root_) {
 		focus_root_ = 0;
 		focus_root();
-		return 0;
+		return;
 	}
 
-	if (!(cli = front_client(curscr->tag)))
+	cli = NULL;
+
+	if (pid)
+		cli = pid2cli(pid);
+
+	if (cli)
+		ii("pid %d win 0x%x\n", pid, cli->win);
+
+	if (!cli && !(cli = front_client(curscr->tag)))
 		cli = pointer2cli();
 
 	if (cli) {
 		if (window_status(cli->win) != WIN_STATUS_VISIBLE) {
 			ww("invisible front win 0x%x\n", cli->win);
 			cli = NULL;
-		} else if (cli->win == del) {
-			return -1; /* deleted window is not gone, try again */
 		} else {
-			ii("front win 0x%x\n", cli ? cli->win : 0);
+			ii("front win 0x%x\n", cli->win);
 			raise_window(cli->win);
 			focus_window(cli->win);
 			center_pointer(cli);
@@ -1035,8 +1057,6 @@ static int focus_any(xcb_window_t del)
 		warp_pointer(rootscr->root, curscr->x + curscr->w / 2,
 			     curscr->top + curscr->h / 2);
 	}
-
-	return 0;
 }
 
 static void close_client(struct client *cli)
@@ -1049,11 +1069,30 @@ static void close_client(struct client *cli)
 	free_client(cli);
 }
 
+static uint8_t can_close(pid_t pid)
+{
+	uint16_t n = 0;
+	struct list_head *cur;
+
+	list_walk(cur, &clients) {
+		struct client *cli = glob2client(cur);
+
+		if (cli->pid == pid && ++n > 1)
+			return 0;
+	}
+
+	return 1;
+}
+
 static void close_window(xcb_window_t win)
 {
+	uint8_t i;
+	struct timespec ts = { 0, 10000000 };
+	pid_t pid;
 	struct client *cli = win2cli(win);
-
 	xcb_client_message_event_t e = { 0 };
+
+	cli ? (pid = cli->pid) : (pid = 0);
 
 	/* try to close gracefully */
 
@@ -1068,22 +1107,25 @@ static void close_window(xcb_window_t win)
 			       (const char *) &e);
 	xcb_flush(dpy);
 
-	/* make sure that window is really gone */
+	cli->busy++; /* give client a chance to exit gracefully */
 
-	if (focus_any(win) < 0) {
-		xcb_kill_client_checked(dpy, win);
-		xcb_flush(dpy);
-	}
-
-	if (focus_any(win) < 0) { /* still open - terminate client */
-		if (cli) {
-			close_client(cli);
-			return;
+	for (i = 0; i < 50; ++i) { /* wait for 500 ms max */
+		if (window_status(win) != WIN_STATUS_VISIBLE) {
+			cli->busy = 0;
+			break;
 		}
+
+		ww("%u: window 0x%x still open (%u)\n", i, win, cli->busy);
+		nanosleep(&ts, NULL);
 	}
 
-	if (cli)
+	if (cli->busy > 1 && can_close(pid))
+		close_client(cli);
+	else if (cli && !cli->busy)
 		free_client(cli);
+
+	focus_any(pid);
+	xcb_flush(dpy);
 }
 
 static struct screen *cli2scr(struct client *cli)
@@ -1582,8 +1624,9 @@ static int setup_toolbar(void)
 					   DefaultVisual(xdpy, xscr),
 					   DefaultColormap(xdpy, xscr));
 
-	ii("toolbar 0x%x geo %ux%u+%d+%d\n", toolbar.panel.win,
-	   toolbar.panel.w, toolbar.panel.h, toolbar.x, toolbar.y);
+	ii("toolbar 0x%x geo %ux%u+%d+%d target 0x%x\n", toolbar.panel.win,
+	   toolbar.panel.w, toolbar.panel.h, toolbar.x, toolbar.y,
+	   toolbar.cli->win);
 	return 0;
 }
 
@@ -2538,7 +2581,7 @@ static void del_window(xcb_window_t win)
 		print_title(scr, XCB_WINDOW_NONE);
 
 out:
-	focus_any(XCB_WINDOW_NONE);
+	focus_any(0);
 
 flush:
 	update_client_list();
