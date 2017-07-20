@@ -1847,6 +1847,54 @@ static uint8_t cell_size(uint16_t n, uint16_t *w, uint16_t *h)
 	return 0;
 }
 
+static void space_halfh(uint16_t y, uint8_t div)
+{
+	curscr->tag->space.x = curscr->x;
+	curscr->tag->space.y = y;
+	curscr->tag->space.w = curscr->w;
+	curscr->tag->space.h = curscr->h - curscr->h / div;
+}
+
+static void space_halfw(uint16_t x, uint8_t div)
+{
+	curscr->tag->space.x = x;
+	curscr->tag->space.y = curscr->top;
+	curscr->tag->space.w = curscr->w - curscr->w / div;
+	curscr->tag->space.h = curscr->h;
+}
+
+static void space_fullscr(void)
+{
+	curscr->tag->space.x = curscr->x;
+	curscr->tag->space.y = curscr->top;
+	curscr->tag->space.w = curscr->w;
+	curscr->tag->space.h = curscr->h;
+}
+
+static void recalc_space(struct screen *scr, enum winpos pos)
+{
+	struct client *cli = scr->tag->anchor;
+
+	if (!cli)
+		space_fullscr();
+	else if (pos == WIN_POS_LEFT_FILL)
+		space_halfw(scr->x + cli->w + 2 * BORDER_WIDTH, cli->div);
+	else if (pos == WIN_POS_RIGHT_FILL)
+		space_halfw(scr->x, cli->div);
+	else if (pos == WIN_POS_TOP_FILL)
+		space_halfh(scr->top + cli->h + 2 * BORDER_WIDTH, cli->div);
+	else if (pos == WIN_POS_BOTTOM_FILL)
+		space_halfh(scr->top, cli->div);
+	else
+		space_fullscr();
+
+	ii("pos %d tag '%s' space geo %ux%u%+d%+d\n", pos, scr->tag->name,
+	   scr->tag->space.w, scr->tag->space.h, scr->tag->space.x,
+	   scr->tag->space.y);
+
+	return;
+}
+
 static void make_grid(void *ptr)
 {
 	struct arg *arg = (struct arg *) ptr;
@@ -1856,14 +1904,6 @@ static void make_grid(void *ptr)
 	int16_t x, y;
 
 	curscr = coord2scr(arg->x, arg->y);
-
-	if (!curscr->tag->anchor) {
-		curscr->tag->space.x = curscr->x;
-		curscr->tag->space.y = curscr->top;
-		curscr->tag->space.w = curscr->w;
-		curscr->tag->space.h = curscr->h;
-	}
-
 	n = 0;
 
 	list_walk(cur, &curscr->tag->clients) {
@@ -1879,12 +1919,17 @@ static void make_grid(void *ptr)
 	} else if (n > 2 && !cell_size(n, &cw, &ch)) {
 		return;
 	} else if (n == 2) {
+		if (!arg->data) { /* only toggle via shortcut */
+			if (curscr->tag->grid2v)
+				curscr->tag->grid2v = 0;
+			else
+				curscr->tag->grid2v = 1;
+		}
+
 		if (curscr->tag->grid2v) { /* vertical split */
-			curscr->tag->grid2v = 0;
 			cw = curscr->tag->space.w / 2;
 			ch = curscr->tag->space.h;
 		} else { /* horizontal split */
-			curscr->tag->grid2v = 1;
 			cw = curscr->tag->space.w;
 			ch = curscr->tag->space.h / 2;
 		}
@@ -1943,10 +1988,14 @@ static void flag_window(void *ptr)
 	curscr = coord2scr(arg->x, arg->y);
 	cli = curscr->tag->anchor;
 
-	if (curscr->tag->anchor)
+	if (curscr->tag->anchor) {
 		curscr->tag->anchor = NULL;
-	else
+	} else {
 		curscr->tag->anchor = pointer2cli();
+		curscr->tag->anchor->div = 1;
+		struct arg arg = { .data = WIN_POS_LEFT_FILL, };
+		place_window(&arg);
+	}
 
 	if (curscr->tag->anchor)
 		window_border_color(curscr->tag->anchor->win, alertbg);
@@ -1975,6 +2024,30 @@ static void flag_window(void *ptr)
 	}
 }
 
+static void window_halfh(uint16_t *w, uint16_t *h, uint8_t div)
+{
+	*w = curscr->w - 2 * BORDER_WIDTH;
+	*h = curscr->h / div - 2 * BORDER_WIDTH - WINDOW_PAD;
+
+	if (div == 2 && curscr->h % div)
+		(*h)++;
+}
+
+static void window_halfw(uint16_t *w, uint16_t *h, uint8_t div)
+{
+	*w = curscr->w / div - 2 * BORDER_WIDTH;
+	*h = curscr->h - 2 * BORDER_WIDTH;
+}
+
+static void window_halfwh(uint16_t *w, uint16_t *h)
+{
+	*w = curscr->w / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
+	*h = curscr->h / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
+
+	if (curscr->h % 2)
+		(*h)++;
+}
+
 static void place_window(void *ptr)
 {
 	struct arg *arg = (struct arg *) ptr;
@@ -1987,6 +2060,8 @@ static void place_window(void *ptr)
 
 	if (toolbar.cli)
 		cli = toolbar.cli;
+	else if (curscr->tag->anchor)
+		cli = curscr->tag->anchor;
 	else if (!(cli = pointer2cli()))
 		return;
 
@@ -2007,7 +2082,7 @@ static void place_window(void *ptr)
 			y = cli->prev_y;
 			w = cli->prev_w;
 			h = cli->prev_h;
-			goto out;
+			break;
 		}
 
 		cli->prev_x = cli->x;
@@ -2029,7 +2104,7 @@ static void place_window(void *ptr)
 			y = cli->prev_y;
 			w = cli->prev_w;
 			h = cli->prev_h;
-			goto out;
+			break;
 		}
 
 		cli->prev_x = cli->x;
@@ -2040,7 +2115,8 @@ static void place_window(void *ptr)
 
 		x = curscr->x + curscr->w / 2 - curscr->w / 4;
 		y = curscr->top + curscr->h / 2 - curscr->h / 4;
-		goto halfwh;
+		window_halfwh(&w, &h);
+		break;
 	case WIN_POS_LEFT_FILL:
 		tt("WIN_POS_LEFT_FILL\n");
 
@@ -2049,7 +2125,8 @@ static void place_window(void *ptr)
 
 		x = curscr->x;
 		y = curscr->top;
-		goto halfw;
+		window_halfw(&w, &h, cli->div);
+		break;
 	case WIN_POS_RIGHT_FILL:
 		tt("WIN_POS_RIGHT_FILL\n");
 
@@ -2058,7 +2135,8 @@ static void place_window(void *ptr)
 
 		x = curscr->x + curscr->w - curscr->w / cli->div;
 		y = curscr->x;
-		goto halfw;
+		window_halfw(&w, &h, cli->div);
+		break;
 	case WIN_POS_TOP_FILL:
 		tt("WIN_POS_TOP_FILL\n");
 
@@ -2067,7 +2145,8 @@ static void place_window(void *ptr)
 
 		x = curscr->x;
 		y = curscr->top;
-		goto halfh;
+		window_halfh(&w, &h, cli->div);
+		break;
 	case WIN_POS_BOTTOM_FILL:
 		tt("WIN_POS_BOTTOM_FILL\n");
 
@@ -2075,33 +2154,37 @@ static void place_window(void *ptr)
 			cli->div = 2;
 
 		x = curscr->x;
-		y = curscr->top + curscr->h / cli->div;
-		goto halfh;
+		y = curscr->top + curscr->h - curscr->h / cli->div;
+		window_halfh(&w, &h, cli->div);
+		break;
 	case WIN_POS_TOP_LEFT:
 		tt("WIN_POS_TOP_LEFT\n");
 		x = curscr->x;
 		y = curscr->top;
-		goto halfwh;
+		window_halfwh(&w, &h);
+		break;
 	case WIN_POS_TOP_RIGHT:
 		tt("WIN_POS_TOP_RIGHT\n");
 		x = curscr->x + curscr->w / 2;
 		y = curscr->top;
-		goto halfwh;
+		window_halfwh(&w, &h);
+		break;
 	case WIN_POS_BOTTOM_LEFT:
 		tt("WIN_POS_BOTTOM_LEFT\n");
 		x = curscr->x;
 		y = curscr->top + curscr->h / 2;
-		goto halfwh;
+		window_halfwh(&w, &h);
+		break;
 	case WIN_POS_BOTTOM_RIGHT:
 		tt("WIN_POS_BOTTOM_RIGHT\n");
 		x = curscr->x + curscr->w / 2;
 		y = curscr->top + curscr->h / 2;
-		goto halfwh;
+		window_halfwh(&w, &h);
+		break;
 	default:
 		return;
 	}
 
-out:
 	last_winpos = pos;
 	resort_client(cli);
 	raise_window(cli->win);
@@ -2112,58 +2195,21 @@ out:
 
 	client_moveresize(cli, x, y, w, h);
 
+	if (curscr->tag->anchor == cli) {
+		recalc_space(curscr, pos);
+		struct arg arg = {
+			.x = curscr->x,
+			.y = curscr->top,
+			.data = 1, /* disable vert/horiz toggle */
+		};
+		make_grid(&arg);
+	}
+
 	if (cli != toolbar.cli)
 		center_pointer(cli);
 
 	xcb_flush(dpy);
 	return;
-halfwh:
-	w = curscr->w / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
-	h = curscr->h / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
-
-	if (curscr->h % 2)
-		h++;
-
-	goto out;
-halfw:
-	w = curscr->w / cli->div - 2 * BORDER_WIDTH;
-	h = curscr->h - 2 * BORDER_WIDTH;
-
-	if (curscr->tag->anchor == cli) {
-		if (pos == WIN_POS_LEFT_FILL)
-			curscr->tag->space.x = curscr->x + w + 2 * BORDER_WIDTH;
-		else
-			curscr->tag->space.x = curscr->x;
-		curscr->tag->space.y = curscr->top;
-		curscr->tag->space.w = curscr->w - curscr->w / cli->div;
-		curscr->tag->space.h = curscr->h;
-		struct arg arg = { .x = curscr->x, .y = curscr->top, };
-		make_grid(&arg);
-	}
-
-	goto out;
-halfh:
-	w = curscr->w - 2 * BORDER_WIDTH;
-	h = curscr->h / cli->div - 2 * BORDER_WIDTH - WINDOW_PAD;
-
-	if (cli->div == 2 && curscr->h % cli->div)
-		h++;
-
-	if (curscr->tag->anchor == cli) {
-		curscr->tag->space.x = curscr->x;
-
-		if (pos == WIN_POS_TOP_FILL)
-			curscr->tag->space.y = curscr->top + h + 2 * BORDER_WIDTH;
-		else
-			curscr->tag->space.y = curscr->top;
-
-		curscr->tag->space.w = curscr->w;
-		curscr->tag->space.h = curscr->h - curscr->h / cli->div;
-		struct arg arg = { .x = curscr->x, .y = curscr->top, };
-		make_grid(&arg);
-	}
-
-	goto out;
 }
 
 static void next_window(void *ptr)
@@ -3054,6 +3100,11 @@ static struct tag *tag_get(struct screen *scr, const char *name, uint8_t id)
 
 	list_init(&tag->clients);
 	list_add(&scr->tags, &tag->head);
+
+	struct tag *tmp = scr->tag;
+	scr->tag = tag; /* this is temporary for space calculations */
+	recalc_space(scr, 0);
+	scr->tag = tmp;
 
 	return tag;
 }
@@ -4160,15 +4211,16 @@ static void toolbar_button_press(struct arg *arg)
 		}
 	} else if (focused_item->str == (const char *) BTN_FLAG) {
 		curscr = coord2scr(arg->x, arg->y);
-		if (!curscr->tag->anchor) {
+		if (!curscr->tag->anchor || curscr->tag->anchor != toolbar.cli) {
 			curscr->tag->anchor = toolbar.cli;
+			curscr->tag->anchor->div = 1;
 			focused_item->flags |= TOOL_FLG_LOCK;
-		} else if (curscr->tag->anchor != toolbar.cli) {
-			curscr->tag->anchor = toolbar.cli;
-			focused_item->flags |= TOOL_FLG_LOCK;
+			struct arg arg = { .data = WIN_POS_LEFT_FILL, };
+			place_window(&arg);
 		} else {
 			curscr->tag->anchor = NULL;
 			focused_item->flags &= ~TOOL_FLG_LOCK;
+			recalc_space(curscr, 0);
 		}
 	} else if (focused_item->str == (const char *) BTN_MOVE) {
 		struct client *cli = toolbar.cli;
