@@ -2858,6 +2858,12 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 
 	cli->pid = win2pid(win);
 	list_add(&clients, &cli->list); /* also add to global list of clients */
+
+	if (!scan) {
+		g->x += curscr->x;
+		g->y += curscr->y;
+	}
+
 	client_moveresize(cli, g->x, g->y, g->width, g->height);
 
 	if (scr->tag != cli->tag) {
