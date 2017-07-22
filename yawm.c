@@ -1579,7 +1579,8 @@ static int setup_toolbar(void)
 		return -1;
 	}
 
-	toolbar.cli = front_client(curscr->tag);
+	if (!(toolbar.cli = pointer2cli()))
+		toolbar.cli = front_client(curscr->tag);
 
 	if (!toolbar.cli) {
 		ww("no front client on scr %u tag '%s'\n", curscr->id,
