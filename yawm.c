@@ -155,9 +155,6 @@ struct panel {
 #define BTN_MOVE ""
 #define BTN_RESIZE ""
 #define BTN_GRID ""
-//#define BTN_LEFT "  "
-//#define BTN_CENTER "  "
-//#define BTN_RIGHT "  "
 #define BTN_LEFT ""
 #define BTN_RIGHT ""
 #define BTN_TOP ""
@@ -167,6 +164,7 @@ struct panel {
 #define BTN_RETAG ""
 //#define BTN_PIN ""
 #define BTN_FLAG ""
+#define BTN_TOOLS ""
 
 #define TOOL_FLG_LOCK (1 << 0)
 
@@ -204,6 +202,17 @@ struct toolbar {
 	uint8_t iprev; /* previous item index */
 	uint8_t ithis; /* current item index */
 };
+
+struct toolbox {
+	xcb_drawable_t win;
+	xcb_gcontext_t gc;
+	XftDraw *draw;
+	struct client *cli;
+	uint8_t skip;
+	uint8_t size;
+};
+
+static struct toolbox toolbox;
 
 static uint16_t text_yoffs;
 
@@ -914,37 +923,50 @@ static struct client *scr2cli(struct screen *scr, xcb_window_t win,
 	return NULL;
 }
 
-static struct screen *pointer2scr(void)
+static int pointer2coord(int16_t *x, int16_t *y, xcb_window_t *win)
 {
 	xcb_query_pointer_cookie_t c;
 	xcb_query_pointer_reply_t *r;
 
 	c = xcb_query_pointer(dpy, rootscr->root);
-        r = xcb_query_pointer_reply(dpy, c, NULL);
-        if (!r) {
-		curscr = list2screen(screens.prev);
-	} else {
-		curscr = coord2scr(r->root_x, r->root_y);
-		free(r);
-	}
+	r = xcb_query_pointer_reply(dpy, c, NULL);
 
-        return curscr;
+	if (!r)
+		return -1;
+
+	*x = r->root_x;
+	*y = r->root_y;
+
+	if (win)
+		*win = r->child;
+
+	free(r);
+	return 0;
+}
+
+static struct screen *pointer2scr(void)
+{
+	int16_t x;
+	int16_t y;
+
+	if (pointer2coord(&x, &y, NULL) < 0)
+		curscr = list2screen(screens.prev);
+	else
+		curscr = coord2scr(x, y);
+
+	return curscr;
 }
 
 static xcb_window_t pointer2win(void)
 {
+	int16_t x;
+	int16_t y;
 	xcb_window_t win;
-	xcb_query_pointer_cookie_t c;
-	xcb_query_pointer_reply_t *r;
 
-	c = xcb_query_pointer(dpy, rootscr->root);
-        r = xcb_query_pointer_reply(dpy, c, NULL);
-        if (!r)
+	if (pointer2coord(&x, &y, &win) < 0)
 		return XCB_WINDOW_NONE;
 
-	curscr = coord2scr(r->root_x, r->root_y);
-	win = r->child;
-	free(r);
+	curscr = coord2scr(x, y);
 	return win;
 }
 
@@ -1059,6 +1081,86 @@ static void focus_any(pid_t pid)
 	}
 }
 
+static void hide_toolbox()
+{
+	xcb_unmap_window(dpy, toolbox.win);
+	xcb_flush(dpy);
+	toolbox.cli = NULL;
+}
+
+static void show_toolbox(struct client *cli)
+{
+	uint32_t val[2];
+	uint32_t mask;
+
+	if (cli && cli->flags & (CLI_FLG_POPUP | CLI_FLG_EXCLUSIVE)) {
+		return;
+	} else if (toolbox.skip || !cli) {
+		toolbox.skip = 0;
+		hide_toolbox();
+		return;
+	}
+
+	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+#if 0
+	val[0] = cli->x + 2 * BORDER_WIDTH;
+	val[1] = cli->y + 2 * BORDER_WIDTH;
+#else
+	val[0] = (cli->x + cli->w) - toolbox.size;
+	val[1] = (cli->y + cli->h) - toolbox.size;
+#endif
+	raise_window(toolbox.win);
+	xcb_configure_window(dpy, toolbox.win, mask, val);
+	xcb_map_window(dpy, toolbox.win);
+	fill_rect(toolbox.win, toolbox.gc, color2ptr(ALERTBG), 0, 0,
+		  toolbox.size, toolbox.size);
+
+	struct color *fg = color2ptr(SELECTFG);
+	uint16_t x = (toolbox.size - FONT2_SIZE) / 2;
+
+	XftDrawStringUtf8(toolbox.draw, fg->val, font2, x, text_yoffs,
+			 (XftChar8 *) BTN_TOOLS, slen(BTN_TOOLS));
+	XSync(xdpy, 0);
+	xcb_flush(dpy);
+	toolbox.skip = 0;
+	toolbox.cli = cli;
+}
+
+static void init_toolbox(void)
+{
+	uint32_t val[2];
+	uint32_t mask;
+
+	toolbox.size = panel_height;
+
+#if 1
+	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
+	val[0] = color2int(ALERTBG);
+	val[1] = XCB_EVENT_MASK_BUTTON_PRESS;
+	val[1] |= XCB_EVENT_MASK_LEAVE_WINDOW;
+#else
+	mask = XCB_CW_EVENT_MASK;
+	val[0] = XCB_EVENT_MASK_BUTTON_PRESS;
+	val[0] |= XCB_EVENT_MASK_LEAVE_WINDOW;
+#endif
+	toolbox.win = xcb_generate_id(dpy);
+	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, toolbox.win,
+			  rootscr->root, 0, 0, toolbox.size, toolbox.size, 0,
+			  XCB_WINDOW_CLASS_INPUT_OUTPUT, rootscr->root_visual,
+			  mask, val);
+	window_border_width(toolbox.win, 0);
+	xcb_flush(dpy);
+	mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND;
+	val[0] = val[1] = color2int(PANELBG);
+	toolbox.gc = xcb_generate_id(dpy);
+	xcb_create_gc(dpy, toolbox.gc, toolbox.win, mask, val);
+	toolbox.draw = XftDrawCreate(xdpy, toolbox.win,
+				     DefaultVisual(xdpy, xscr),
+				     DefaultColormap(xdpy, xscr));
+	XSync(xdpy, 0);
+	xcb_flush(dpy);
+}
+
 static void close_client(struct client *cli)
 {
 	ii("terminate pid %d win 0x%x\n", cli->pid, cli->win);
@@ -1092,6 +1194,7 @@ static void close_window(xcb_window_t win)
 	struct client *cli = win2cli(win);
 	xcb_client_message_event_t e = { 0 };
 
+	hide_toolbox();
 	cli ? (pid = cli->pid) : (pid = 0);
 
 	/* try to close gracefully */
@@ -1157,7 +1260,7 @@ static void draw_toolbar_text(struct toolbar_item *item, struct color *fg)
 
 static struct toolbar_item *focused_item;
 
-static void focus_toolbar_item(int16_t x, int16_t y, uint8_t left)
+static void focus_toolbar_item(int16_t x, int16_t y)
 {
 	struct color *fg;
 	struct toolbar_item *ptr = toolbar_items;
@@ -1222,7 +1325,8 @@ static void draw_toolbar(void)
 		ptr++;
 	}
 
-	warp_pointer(toolbar.panel.win, 5 * toolbar.panel.pad, panel_height / 2);
+	warp_pointer(toolbar.panel.win, toolbar_items[0].x, panel_height / 2);
+	focus_toolbar_item(toolbar_items[0].x, 0);
 	xcb_flush(dpy);
 }
 
@@ -1715,6 +1819,7 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 {
 	struct client *cli;
 
+	hide_toolbox();
 	hide_toolbar();
 
 	if ((cli = pointer2cli())) {
@@ -2313,6 +2418,7 @@ static void hide_windows(struct tag *tag)
 
 static void focus_tag(struct screen *scr, struct tag *tag)
 {
+	hide_toolbox();
 	hide_toolbar();
 
 	if (scr->tag) {
@@ -2606,6 +2712,11 @@ static void del_window(xcb_window_t win)
 {
 	struct screen *scr;
 	struct client *cli;
+
+	if (toolbar.cli && toolbar.cli->win == win)
+		hide_toolbar();
+	if (toolbox.cli && toolbox.cli->win == win)
+		hide_toolbox();
 
 	scr = curscr;
 	cli = win2cli(win);
@@ -3026,6 +3137,7 @@ static void select_tag(struct screen *scr, int16_t x, int16_t y)
 	struct list_head *cur;
 	struct tag *prev;
 
+	hide_toolbox();
 	hide_toolbar();
 
 	if (target_tag) { /* un-mark tag if previously marked */
@@ -4246,6 +4358,9 @@ static void toolbar_button_press(struct arg *arg)
 	} else {
 		hide_toolbar();
 	}
+
+	hide_toolbox();
+	toolbox.skip = 1;
 }
 
 static void panel_button_press(xcb_button_press_event_t *e)
@@ -4296,6 +4411,7 @@ static void handle_button_release(xcb_button_release_event_t *e)
 			show_menu();
 		} else if pointer_inside(curscr, PANEL_AREA_DIV, e->event_x) {
 			show_toolbar();
+			hide_toolbox();
 		}
 	}
 
@@ -4308,6 +4424,13 @@ static void handle_button_press(xcb_button_press_event_t *e)
 	te("XCB_BUTTON_PRESS: root 0x%x, pos %d,%d; event 0x%x, pos %d,%d; "
 	   "child 0x%x, detail %d\n", e->root, e->root_x, e->root_y, e->event,
 	   e->event_x, e->event_y, e->child, e->detail);
+
+	if (toolbox.win &&
+	    (toolbox.win == e->event || toolbox.win == e->child)) {
+		hide_toolbox();
+		show_toolbar();
+		return;
+	}
 
 	curscr = coord2scr(e->root_x, e->root_y);
 	trace_screen_metrics(curscr);
@@ -4377,8 +4500,7 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	struct client *cli;
 
 	if (e->event == toolbar.panel.win) {
-		focus_toolbar_item(e->event_x, e->event_y,
-				   pointer_x > e->event_x);
+		focus_toolbar_item(e->event_x, e->event_y);
 		pointer_x = e->event_x;
 		return;
 	}
@@ -4531,6 +4653,9 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 {
 	struct client *cli;
 
+	if (e->event == toolbox.win)
+		return;
+
 	if (e->event == toolbar.panel.win) {
 		focus_window(e->event);
 		xcb_grab_pointer(dpy, 1, toolbar.panel.win,
@@ -4579,11 +4704,17 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 		raise_window(e->event);
 
 	xcb_flush(dpy);
+	show_toolbox(cli);
 }
 
 static void handle_leave_notify(xcb_leave_notify_event_t *e)
 {
 	struct client *cli = win2cli(e->event);
+
+	hide_toolbox();
+
+	if (e->event == toolbox.win)
+		return;
 
 	if (cli && cli->flags & CLI_FLG_POPUP) {
 		close_client(cli);
@@ -4934,6 +5065,11 @@ static int handle_events(void)
 		   ((xcb_enter_notify_event_t *) e)->detail,
 		   ((xcb_enter_notify_event_t *) e)->state,
 		   ((xcb_enter_notify_event_t *) e)->mode);
+		te("at root %d,%d event %d,%d\n",
+		   ((xcb_enter_notify_event_t *) e)->root_x,
+		   ((xcb_enter_notify_event_t *) e)->root_y,
+		   ((xcb_enter_notify_event_t *) e)->event_x,
+		   ((xcb_enter_notify_event_t *) e)->event_y);
 		handle_enter_notify((xcb_enter_notify_event_t *) e);
 		break;
 	case XCB_LEAVE_NOTIFY:
@@ -5302,6 +5438,7 @@ int main()
 	init_rootwin();
 	init_randr();
 	init_outputs();
+	init_toolbox();
 
 	autostart();
 
