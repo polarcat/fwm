@@ -1953,28 +1953,28 @@ static uint8_t cell_size(uint16_t n, uint16_t *w, uint16_t *h)
 	return 0;
 }
 
-static void space_halfh(uint16_t y, uint8_t div)
+static void space_halfh(struct screen *scr, uint16_t y, uint8_t div)
 {
-	curscr->tag->space.x = curscr->x;
-	curscr->tag->space.y = y;
-	curscr->tag->space.w = curscr->w;
-	curscr->tag->space.h = curscr->h - curscr->h / div;
+	scr->tag->space.x = scr->x;
+	scr->tag->space.y = y;
+	scr->tag->space.w = scr->w;
+	scr->tag->space.h = scr->h - scr->h / div;
 }
 
-static void space_halfw(uint16_t x, uint8_t div)
+static void space_halfw(struct screen *scr, uint16_t x, uint8_t div)
 {
-	curscr->tag->space.x = x;
-	curscr->tag->space.y = curscr->top;
-	curscr->tag->space.w = curscr->w - curscr->w / div;
-	curscr->tag->space.h = curscr->h;
+	scr->tag->space.x = x;
+	scr->tag->space.y = scr->top;
+	scr->tag->space.w = scr->w - scr->w / div;
+	scr->tag->space.h = scr->h;
 }
 
-static void space_fullscr(void)
+static void space_fullscr(struct screen *scr)
 {
-	curscr->tag->space.x = curscr->x;
-	curscr->tag->space.y = curscr->top;
-	curscr->tag->space.w = curscr->w;
-	curscr->tag->space.h = curscr->h;
+	scr->tag->space.x = scr->x;
+	scr->tag->space.y = scr->top;
+	scr->tag->space.w = scr->w;
+	scr->tag->space.h = scr->h;
 }
 
 static void recalc_space(struct screen *scr, enum winpos pos)
@@ -1982,17 +1982,17 @@ static void recalc_space(struct screen *scr, enum winpos pos)
 	struct client *cli = scr->tag->anchor;
 
 	if (!cli)
-		space_fullscr();
+		space_fullscr(scr);
 	else if (pos == WIN_POS_LEFT_FILL)
-		space_halfw(scr->x + cli->w + 2 * BORDER_WIDTH, cli->div);
+		space_halfw(scr, scr->x + cli->w + 2 * BORDER_WIDTH, cli->div);
 	else if (pos == WIN_POS_RIGHT_FILL)
-		space_halfw(scr->x, cli->div);
+		space_halfw(scr, scr->x, cli->div);
 	else if (pos == WIN_POS_TOP_FILL)
-		space_halfh(scr->top + cli->h + 2 * BORDER_WIDTH, cli->div);
+		space_halfh(scr, scr->top + cli->h + 2 * BORDER_WIDTH, cli->div);
 	else if (pos == WIN_POS_BOTTOM_FILL)
-		space_halfh(scr->top, cli->div);
+		space_halfh(scr, scr->top, cli->div);
 	else
-		space_fullscr();
+		space_fullscr(scr);
 
 	ii("pos %d tag '%s' space geo %ux%u%+d%+d\n", pos, scr->tag->name,
 	   scr->tag->space.w, scr->tag->space.h, scr->tag->space.x,
@@ -2066,8 +2066,10 @@ static void make_grid(void *ptr)
 		(hh > 2 * BORDER_WIDTH) ? (hh = ch) : (hh += ch);
 		hh -= 2 * BORDER_WIDTH - WINDOW_PAD;
 
-		if (++i >= n) /* last window occupies remaining space */
-			ww = curscr->w - 2 * BORDER_WIDTH - (xx - curscr->x);
+		if (++i >= n) { /* last window occupies remaining space */
+			ww = curscr->tag->space.w - 2 * BORDER_WIDTH;
+			ww -= xx - curscr->tag->space.x;
+		}
 
 		client_moveresize(cli, xx, yy, ww, hh);
 		x += cw;
@@ -2944,6 +2946,9 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		cli->h = g->height;
 		dock_add(cli, g->border_width);
 		goto out;
+	} else if (!scan) {
+		g->x += scr->x;
+		g->y += scr->y;
 	}
 
 	cli->tag = configured_tag(win); /* read tag from configuration */
@@ -2964,18 +2969,10 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		val[0] |= XCB_EVENT_MASK_LEAVE_WINDOW;
 
 	xcb_change_window_attributes_checked(dpy, win, XCB_CW_EVENT_MASK, val);
-
 	unfocus_clients(curscr->tag);
 	list_add(&cli->tag->clients, &cli->head);
-
 	cli->pid = win2pid(win);
 	list_add(&clients, &cli->list); /* also add to global list of clients */
-
-	if (!scan) {
-		g->x += curscr->x;
-		g->y += curscr->y;
-	}
-
 	client_moveresize(cli, g->x, g->y, g->width, g->height);
 
 	if (scr->tag != cli->tag) {
