@@ -1084,7 +1084,6 @@ static void focus_any(pid_t pid)
 static void hide_toolbox()
 {
 	xcb_unmap_window(dpy, toolbox.win);
-	xcb_flush(dpy);
 	toolbox.cli = NULL;
 }
 
@@ -1121,7 +1120,6 @@ static void show_toolbox(struct client *cli)
 	XftDrawStringUtf8(toolbox.draw, fg->val, font2, x, text_yoffs,
 			 (XftChar8 *) BTN_TOOLS, slen(BTN_TOOLS));
 	XSync(xdpy, 0);
-	xcb_flush(dpy);
 	toolbox.skip = 0;
 	toolbox.cli = cli;
 }
@@ -2316,6 +2314,7 @@ static void place_window(void *ptr)
 	if (cli != toolbar.cli)
 		center_pointer(cli);
 
+	hide_toolbox();
 	xcb_flush(dpy);
 	return;
 }
@@ -4477,6 +4476,7 @@ static void handle_button_press(xcb_button_press_event_t *e)
 
 	raise_window(e->child);
 	panel_raise(curscr);
+	hide_toolbox();
 
 	/* subscribe to motion events */
 
@@ -4700,8 +4700,8 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	if (e->mode == MOD)
 		raise_window(e->event);
 
-	xcb_flush(dpy);
 	show_toolbox(cli);
+	xcb_flush(dpy);
 }
 
 static void handle_leave_notify(xcb_leave_notify_event_t *e)
