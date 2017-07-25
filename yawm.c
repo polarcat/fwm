@@ -55,6 +55,7 @@ typedef uint8_t strlen_t;
 #define PANEL_SCREEN_GAP 0
 #define ITEM_V_MARGIN 2
 #define ITEM_H_MARGIN 6
+#define TOOLBAR_ITEM_XPAD 2
 #define TAG_GAP 2
 
 #define BORDER_WIDTH 1
@@ -133,7 +134,6 @@ struct panel {
 	int16_t y;
 	uint16_t w;
 	uint16_t h;
-	uint8_t pad; /* text padding */
 	xcb_gcontext_t gc;
 	xcb_drawable_t win;
 	XftDraw *draw;
@@ -201,6 +201,7 @@ struct toolbar {
 	xcb_keycode_t kclose; /* hide toolbar */
 	uint8_t iprev; /* previous item index */
 	uint8_t ithis; /* current item index */
+	uint16_t title_x;
 };
 
 struct toolbox {
@@ -615,12 +616,13 @@ static void fill_rect(xcb_window_t win, xcb_gcontext_t gc, struct color *color,
 
 static void draw_panel_text(struct panel *panel, struct color *fg,
 			    struct color *bg, int16_t x, uint16_t w,
-			    const char *text, int len, XftFont *font)
+			    const char *text, int len, XftFont *font,
+			    uint8_t xpad)
 {
 	fill_rect(panel->win, panel->gc, bg, x, ITEM_V_MARGIN, w + TAG_GAP,
 		  panel_height - 2 * ITEM_V_MARGIN);
 
-	x += panel->pad;
+	x += xpad;
 
 	XftDrawStringUtf8(panel->draw, fg->val, font, x, text_yoffs,
 			  (XftChar8 *) text, len);
@@ -642,7 +644,7 @@ static void print_title(struct screen *scr, xcb_window_t win)
 				color2ptr(PANELBG),
 				scr->items[PANEL_AREA_TITLE].x,
 				scr->items[PANEL_AREA_TITLE].w, NULL, 0,
-				font1);
+				font1, ITEM_H_MARGIN);
 		return;
 	}
 
@@ -669,7 +671,7 @@ static void print_title(struct screen *scr, xcb_window_t win)
 			color2ptr(PANELBG),
 			scr->items[PANEL_AREA_TITLE].x,
 			scr->items[PANEL_AREA_TITLE].w,
-			title.str, title.len, font1);
+			title.str, title.len, font1, ITEM_H_MARGIN);
 out:
 	free(title.ptr);
 }
@@ -1253,7 +1255,7 @@ static void draw_toolbar_text(struct toolbar_item *item, struct color *fg)
 	struct color *bg = color2ptr(PANELBG);
 
 	draw_panel_text(&toolbar.panel, fg, bg, item->x, item->w,
-			item->str, item->len, font2);
+			item->str, item->len, font2, TOOLBAR_ITEM_XPAD);
 }
 
 static struct toolbar_item *focused_item;
@@ -1266,7 +1268,7 @@ static void focus_toolbar_item(int16_t x, int16_t y)
 	uint16_t xx = 0;
 
 	while (ptr < end) {
-		xx = ptr->x + ptr->w + 2 * toolbar.panel.pad;
+		xx = ptr->x + ptr->w + 2 * ITEM_H_MARGIN;
 
 		if (x < ptr->x || x > xx || y > panel_height) {
 			ptr++;
@@ -1627,6 +1629,26 @@ static void window_state(xcb_window_t win, uint8_t state)
 				    a_state, a_state, 32, 2, data);
 }
 
+static void title_width(struct screen *scr)
+{
+	int16_t end = scr->items[PANEL_AREA_DOCK].x;
+	uint16_t x, h, i;
+	char *tmp;
+	struct panel_item *title = &scr->items[PANEL_AREA_TITLE];
+
+	i = 1;
+	x = 0;
+	while (x + title->x < end) {
+		tmp = calloc(1, i + 1);
+		memset(tmp, 'w', i);
+		text_exts(tmp, strlen(tmp), &x, &h, font1);
+		free(tmp);
+		i++;
+	}
+
+	title->w = x - ITEM_H_MARGIN;
+}
+
 static void disable_events(xcb_window_t win)
 {
 	uint32_t val = 0;
@@ -1664,6 +1686,8 @@ static void hide_toolbar(void)
 		center_pointer(cli);
 	}
 
+	toolbar.scr->items[PANEL_AREA_TITLE].x = toolbar.title_x;
+	title_width(toolbar.scr);
 	xcb_flush(dpy);
 	clean_toolbar();
 }
@@ -1760,6 +1784,10 @@ static void show_toolbar(void)
 	raise_window(toolbar.panel.win);
 	focus_window(toolbar.panel.win);
 	draw_toolbar();
+	toolbar.title_x = toolbar.scr->items[PANEL_AREA_TITLE].x;
+	toolbar.scr->items[PANEL_AREA_TITLE].x = toolbar.x + toolbar.panel.w;
+	title_width(toolbar.scr);
+	print_title(toolbar.scr, toolbar.cli->win);
 	xcb_flush(dpy);
 }
 
@@ -2374,7 +2402,7 @@ static void print_tag(struct screen *scr, struct tag *tag, struct color *fg)
 		bg = color2ptr(TEXTBG_NORMAL);
 
 	draw_panel_text(&scr->panel, fg, bg, tag->x, tag->w, tag->name,
-			tag->nlen, font1);
+			tag->nlen, font1, ITEM_H_MARGIN);
 }
 
 static void show_windows(struct tag *tag, uint8_t focus)
@@ -2611,26 +2639,6 @@ static struct tag *configured_tag(xcb_window_t win)
 	return NULL;
 }
 
-static void calc_title_width(struct screen *scr)
-{
-	int16_t end = scr->items[PANEL_AREA_DOCK].x;
-	uint16_t x, h, i;
-	char *tmp;
-
-	i = 1;
-	x = 0;
-	while (x + scr->items[PANEL_AREA_TITLE].x < end) {
-		tmp = calloc(1, i + 1);
-		memset(tmp, 'w', i);
-		text_exts(tmp, strlen(tmp), &x, &h, font1);
-		free(tmp);
-		i++;
-	}
-
-	scr->items[PANEL_AREA_TITLE].w = x - scr->panel.pad;
-	print_title(scr, XCB_WINDOW_NONE);
-}
-
 static void dock_arrange(struct screen *scr)
 {
 	struct list_head *cur, *tmp;
@@ -2650,13 +2658,14 @@ static void dock_arrange(struct screen *scr)
 			free(cli);
 			continue;
 		}
-		x -= (cli->w + scr->panel.pad + 2 * BORDER_WIDTH);
+		x -= (cli->w + ITEM_H_MARGIN + 2 * BORDER_WIDTH);
 		client_moveresize(cli, x, y, cli->w, cli->h);
 	}
 
 	scr->items[PANEL_AREA_DOCK].x = x;
 	scr->items[PANEL_AREA_DOCK].w = scr->items[PANEL_AREA_DOCK].x - x;
-	calc_title_width(scr);
+	title_width(scr);
+	print_title(scr, XCB_WINDOW_NONE);
 }
 
 static void dock_del(struct client *cli)
@@ -3082,11 +3091,11 @@ static void print_menu(struct screen *scr)
 	if (font2) {
 		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
 				color2ptr(PANELBG), x, w, MENU_ICON2,
-				sizeof(MENU_ICON2) - 1, font2);
+				sizeof(MENU_ICON2) - 1, font2, ITEM_H_MARGIN);
 	} else {
 		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
 				color2ptr(PANELBG), x, w, MENU_ICON1,
-				sizeof(MENU_ICON1) - 1, font1);
+				sizeof(MENU_ICON1) - 1, font1, ITEM_H_MARGIN);
 	}
 }
 
@@ -3099,7 +3108,7 @@ static void print_div(struct screen *scr)
 
 	draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
 			color2ptr(PANELBG), x, w, DIV_ICON,
-			sizeof(DIV_ICON) - 1, font1);
+			sizeof(DIV_ICON) - 1, font1, ITEM_H_MARGIN);
 }
 
 static int tag_pointed(struct tag *tag, int16_t x, int16_t y)
@@ -3236,7 +3245,7 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
 		return 0;
 
 	text_exts(name, tag->nlen, &tag->w, &h, font1);
-	tag->w += scr->panel.pad * 2;
+	tag->w += ITEM_H_MARGIN * 2;
 	ii("tag '%s' len %u width %u\n", name, tag->nlen, tag->w);
 
 	if (pos != scr->items[PANEL_AREA_TAGS].x) {
@@ -3378,7 +3387,7 @@ static void update_panel_items(struct screen *scr)
 		text_exts(MENU_ICON1, sizeof(MENU_ICON1) - 1, &w, &h, font1);
 
 	scr->items[PANEL_AREA_MENU].x = TAG_GAP;
-	scr->items[PANEL_AREA_MENU].w = w + 2 * scr->panel.pad;
+	scr->items[PANEL_AREA_MENU].w = w + 2 * ITEM_H_MARGIN;
 	x += scr->items[PANEL_AREA_MENU].w + 2 * TAG_GAP;
 	print_menu(scr);
 
@@ -3387,7 +3396,7 @@ static void update_panel_items(struct screen *scr)
 
 	scr->items[PANEL_AREA_DIV].x = scr->items[PANEL_AREA_TAGS].w;
 	text_exts(DIV_ICON, sizeof(DIV_ICON) - 1, &w, &h, font1);
-	w += scr->items[PANEL_AREA_DIV].x + 2 * scr->panel.pad;
+	w += scr->items[PANEL_AREA_DIV].x + 2 * ITEM_H_MARGIN;
 	scr->items[PANEL_AREA_DIV].w = w;
 	print_div(scr);
 
@@ -3609,7 +3618,6 @@ static void init_panel(struct screen *scr)
 	if (panel_height % 2)
 		panel_height++;
 
-	scr->panel.pad = ITEM_H_MARGIN;
 	scr->panel.win = xcb_generate_id(dpy);
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
@@ -4279,7 +4287,7 @@ static void mark_tag(int16_t x, int16_t y, int16_t tagx)
 		fg = color2ptr(SELECTFG);
 		bg = color2ptr(SELECTBG);
 		draw_panel_text(&target_scr->panel, fg, bg, tag->x, tag->w,
-				tag->name, tag->nlen, font1);
+				tag->name, tag->nlen, font1, ITEM_H_MARGIN);
 		xcb_flush(dpy);
 		return;
 	}
@@ -4732,7 +4740,7 @@ static void handle_wmname(xcb_property_notify_event_t *e)
 		bg = color2ptr(ALERTBG);
 		draw_panel_text(&cli->scr->panel, fg, bg, cli->tag->x,
 				cli->tag->w, cli->tag->name, cli->tag->nlen,
-				font1);
+				font1, ITEM_H_MARGIN);
 		xcb_flush(dpy);
 	}
 }
