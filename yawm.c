@@ -2859,16 +2859,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	if (scan && !(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
 		restore_window(win, &scr, &tag);
 
-	if (!scr && g->x == 0 && g->y == 0) {
-		scr = pointer2scr();
-	} else if (!scr) {
-		/* preserve current location of already existed windows */
-		scr = coord2scr(g->x, g->y);
-		if (!scr)
-			scr = pointer2scr();
-	}
-
-	if (!scr) {
+	if (!scr && !(scr = pointer2scr())) {
 		if (panel_window(win)) {
 			goto out;
 		} else if ((cli = win2cli(win))) {
