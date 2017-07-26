@@ -2925,6 +2925,20 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	cli->crc = crc;
 	cli->flags = flags;
 
+#define DONT_CENTER (\
+	CLI_FLG_TOPLEFT |\
+	CLI_FLG_TOPRIGHT |\
+	CLI_FLG_BOTLEFT |\
+	CLI_FLG_BOTRIGHT |\
+	CLI_FLG_TRAY |\
+	CLI_FLG_DOCK\
+)
+
+	if (!scan && g->width < scr->w / 2 && g->height < scr->h / 2 &&
+	    !(flags & DONT_CENTER)) {
+		cli->flags |= CLI_FLG_CENTER; /* show such windows in center */
+	}
+
 	if (cli->flags & CLI_FLG_CENTER) {
 		g->x = scr->x + scr->w / 2 - g->width / 2;
 		g->y = scr->top + scr->h / 2 - g->height / 2;
