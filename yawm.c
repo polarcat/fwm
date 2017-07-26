@@ -2046,9 +2046,9 @@ static void make_grid(void *ptr)
 			n++;
 	}
 
-	if (n == 1) {
+	if (n == 0) {
 		return;
-	} else if (n > 2 && !cell_size(n, &cw, &ch)) {
+	} else if (!cell_size(n, &cw, &ch)) {
 		return;
 	} else if (n == 2) {
 		if (!arg->data) { /* only toggle via shortcut */
