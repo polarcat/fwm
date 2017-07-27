@@ -161,7 +161,6 @@ struct panel {
 #define BTN_BOTTOM ""
 #define BTN_CENTER ""
 #define BTN_EXPAND ""
-#define BTN_RETAG ""
 //#define BTN_PIN ""
 #define BTN_FLAG ""
 #define BTN_TOOLS ""
@@ -185,7 +184,6 @@ static struct toolbar_item toolbar_items[] = {
 	{ BTN_TOP, slen(BTN_TOP), },
 	{ BTN_BOTTOM, slen(BTN_BOTTOM), },
 	{ BTN_EXPAND, slen(BTN_EXPAND), },
-	{ BTN_RETAG, slen(BTN_RETAG), },
 	{ BTN_FLAG, slen(BTN_FLAG), },
 	{ BTN_CLOSE, slen(BTN_CLOSE), },
 };
@@ -248,13 +246,18 @@ struct screen { /* per output abstraction */
 #define list2screen(item) list_entry(item, struct screen, head)
 
 struct list_head screens;
-struct tag *target_tag; /* target tag for interactive window re-tagging */
-struct screen *target_scr; /* target screen for interactive window re-tagging */
 struct screen *curscr;
 struct screen *defscr;
 static xcb_screen_t *rootscr; /* root window details */
 static struct toolbar toolbar; /* window toolbar */
 static uint8_t focus_root_;
+static struct client *motion_cli;
+static int16_t motion_init_x;
+static int16_t motion_init_y;
+
+#define ITEM_FLG_NORMAL (1 << 0)
+#define ITEM_FLG_FOCUSED (1 << 1)
+#define ITEM_FLG_ACTIVE (1 << 2)
 
 struct tag {
 	struct list_head head;
@@ -268,6 +271,7 @@ struct tag {
 	struct rect space;
 	uint8_t grid2v; /* toggle vertical/horizontal split of 2-cells grid */
 	struct client *anchor;
+	uint8_t flags;
 };
 
 #define list2tag(item) list_entry(item, struct tag, head)
@@ -2392,15 +2396,29 @@ static void panel_raise(struct screen *scr)
 	}
 }
 
-static void print_tag(struct screen *scr, struct tag *tag, struct color *fg)
+static void print_tag(struct screen *scr, struct tag *tag, uint8_t flag)
 {
+	struct color *fg;
 	struct color *bg;
 
-	if (fg == color2ptr(TEXTFG_ACTIVE))
-		bg = color2ptr(TEXTBG_ACTIVE);
-	else
-		bg = color2ptr(TEXTBG_NORMAL);
+	if (tag->flags & flag)
+		return;
 
+	if (flag == ITEM_FLG_ACTIVE) {
+		fg = color2ptr(TEXTFG_ACTIVE);
+		bg = color2ptr(TEXTBG_ACTIVE);
+		tag->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_NORMAL);
+	} else if (flag == ITEM_FLG_FOCUSED) {
+		fg = color2ptr(FOCUSFG);
+		bg = color2ptr(TEXTBG_NORMAL);
+		tag->flags &= ~(ITEM_FLG_ACTIVE | ITEM_FLG_NORMAL);
+	} else {
+		fg = color2ptr(TEXTFG_NORMAL);
+		bg = color2ptr(TEXTBG_NORMAL);
+		tag->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_ACTIVE);
+	}
+
+	tag->flags |= flag;
 	draw_panel_text(&scr->panel, fg, bg, tag->x, tag->w, tag->name,
 			tag->nlen, font1, ITEM_H_MARGIN);
 }
@@ -2451,12 +2469,12 @@ static void focus_tag(struct screen *scr, struct tag *tag)
 	hide_toolbar();
 
 	if (scr->tag) {
-		print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
+		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
 		hide_windows(scr->tag);
 	}
 
 	scr->tag = tag;
-	print_tag(scr, scr->tag, color2ptr(TEXTFG_ACTIVE));
+	print_tag(scr, scr->tag, ITEM_FLG_ACTIVE);
 
 	show_windows(tag, 1);
 }
@@ -2519,40 +2537,6 @@ static void retag_client(void *ptr)
 	raise_window(cli->win);
 	focus_window(cli->win);
 	center_pointer(cli);
-	xcb_flush(dpy);
-	store_client(cli, 0);
-}
-
-static void retag_window(struct arg *arg)
-{
-	struct client *cli = toolbar.cli;
-
-	if (!cli) {
-		cli = win2cli((xcb_window_t) arg->data);
-		if (!cli)
-			return;
-	}
-
-	curscr = coord2scr(arg->x, arg->y);
-	switch_window(curscr, DIR_NEXT); /* focus window */
-	list_del(&cli->head);
-	list_add(&target_tag->clients, &cli->head); /* re-tag window */
-
-	if (list_empty(&cli->tag->clients)) {
-		xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
-				    XCB_CURRENT_TIME);
-	}
-
-	cli->scr = target_scr;
-	cli->tag = target_tag;
-
-	if (cli->scr != curscr) {
-		client_moveresize(cli, cli->scr->x, cli->scr->top, cli->w,
-				  cli->h);
-	}
-
-	window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
-	xcb_unmap_window_checked(dpy, cli->win);
 	xcb_flush(dpy);
 	store_client(cli, 0);
 }
@@ -3118,7 +3102,7 @@ static void print_div(struct screen *scr)
 
 static int tag_pointed(struct tag *tag, int16_t x, int16_t y)
 {
-	if (0 <= y && y <= curscr->panel.y + panel_height &&
+	if (tag && 0 <= y && y <= curscr->panel.y + panel_height &&
 	    x >= tag->x && x <= tag->x + tag->w + TAG_GAP) {
 		return 1;
 	}
@@ -3126,20 +3110,53 @@ static int tag_pointed(struct tag *tag, int16_t x, int16_t y)
 	return 0;
 }
 
-static void point_tag(struct screen *scr, int16_t x, int16_t y)
+static void motion_retag(int16_t x, int16_t y)
 {
+	struct client *cli = motion_cli;
 	struct list_head *cur;
+	struct tag *tag = NULL;
 
-	list_walk(cur, &scr->tags) {
-		struct tag *tag = list2tag(cur);
+	if (!cli)
+		return;
 
-		if (tag == scr->tag) {
-			continue;
-		} else if (tag_pointed(tag, x, y)) {
-			print_tag(scr, tag, color2ptr(FOCUSFG));
+	motion_cli = NULL;
+
+	list_walk(cur, &curscr->tags) {
+		tag = list2tag(cur);
+
+		if (tag_pointed(tag, x, y))
 			break;
-		}
+
+		tag = NULL;
 	}
+
+	if (!tag)
+		return;
+
+	switch_window(curscr, DIR_NEXT); /* focus window */
+	list_del(&cli->head);
+	list_add(&tag->clients, &cli->head); /* re-tag window */
+
+	if (cli->scr != curscr) {
+		/* new screen can have different size so place window in
+		 * top-left corner */
+		x = curscr->x;
+		y = curscr->y;
+	} else { /* use initial coords */
+		x = motion_init_x;
+		y = motion_init_y;
+	}
+
+	motion_init_x = motion_init_y = 0;
+
+	cli->scr = curscr;
+	cli->tag = tag;
+
+	client_moveresize(cli, x, y, cli->w, cli->h);
+	window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
+	xcb_unmap_window_checked(dpy, cli->win);
+	xcb_flush(dpy);
+	store_client(cli, 0);
 }
 
 static void select_tag(struct screen *scr, int16_t x, int16_t y)
@@ -3150,29 +3167,20 @@ static void select_tag(struct screen *scr, int16_t x, int16_t y)
 	hide_toolbox();
 	hide_toolbar();
 
-	if (target_tag) { /* un-mark tag if previously marked */
-		print_tag(target_scr, target_tag, color2ptr(TEXTFG_NORMAL));
-		target_tag = NULL;
-		target_scr = NULL;
-	}
-
-	if (scr->tag && tag_pointed(scr->tag, x, y)) {
+	if (scr->tag && tag_pointed(scr->tag, x, y))
 		return;
-	} else if (scr->tag) { /* deselect current tag instantly */
-		print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
-	}
+	else if (scr->tag) /* deselect current tag instantly */
+		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
 
 	prev = scr->tag;
 
 	list_walk(cur, &scr->tags) { /* refresh labels */
 		struct tag *tag = list2tag(cur);
 
-		if (tag == scr->tag) {
-			continue;
-		} else if (!tag_pointed(tag, x, y)) {
-			print_tag(scr, tag, color2ptr(TEXTFG_NORMAL));
+		if (!tag_pointed(tag, x, y)) {
+			print_tag(scr, tag, ITEM_FLG_NORMAL);
 		} else {
-			print_tag(scr, tag, color2ptr(TEXTFG_ACTIVE));
+			print_tag(scr, tag, ITEM_FLG_ACTIVE);
 			scr->tag = tag;
 			break;
 		}
@@ -3241,7 +3249,7 @@ static struct tag *tag_get(struct screen *scr, const char *name, uint8_t id)
 static int tag_add(struct screen *scr, const char *name, uint8_t id,
 		   uint16_t pos)
 {
-	struct color *fg;
+	uint8_t flg;
 	struct tag *tag;
 	uint16_t h;
 
@@ -3254,14 +3262,15 @@ static int tag_add(struct screen *scr, const char *name, uint8_t id,
 	ii("tag '%s' len %u width %u\n", name, tag->nlen, tag->w);
 
 	if (pos != scr->items[PANEL_AREA_TAGS].x) {
-		fg = color2ptr(TEXTFG_NORMAL);
+		flg = ITEM_FLG_NORMAL;
 	} else {
-		fg = color2ptr(TEXTFG_ACTIVE);
+		flg = ITEM_FLG_ACTIVE;
 		scr->tag = tag;
 	}
 
 	tag->x = pos;
-	print_tag(scr, tag, fg);
+	tag->flags = 0;
+	print_tag(scr, tag, flg);
 
 	return pos + tag->w + TAG_GAP;
 }
@@ -3353,7 +3362,6 @@ out:
 
 static void redraw_panel_items(struct screen *scr)
 {
-	struct color *fg;
 	struct list_head *cur;
 
 	/* clean panel */
@@ -3363,14 +3371,17 @@ static void redraw_panel_items(struct screen *scr)
 	print_menu(scr);
 
 	list_walk(cur, &scr->tags) {
+		uint8_t flg;
 		struct tag *tag = list2tag(cur);
 
-		if (scr->tag == tag)
-			fg = color2ptr(TEXTFG_ACTIVE);
-		else
-			fg = color2ptr(TEXTFG_NORMAL);
+		tag->flags = 0; /* reset tag */
 
-		print_tag(scr, tag, fg);
+		if (scr->tag == tag)
+			flg = ITEM_FLG_ACTIVE;
+		else
+			flg = ITEM_FLG_NORMAL;
+
+		print_tag(scr, tag, flg);
 	}
 
 	print_div(scr);
@@ -3419,7 +3430,7 @@ static void refresh_panel(uint8_t id)
 		if (scr->id != id)
 			continue;
 
-		print_tag(scr, scr->tag, color2ptr(TEXTFG_NORMAL));
+		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
 		hide_windows(scr->tag);
 		update_panel_items(scr);
 		focus_tag(scr, list2tag(scr->tags.next));
@@ -3629,6 +3640,7 @@ static void init_panel(struct screen *scr)
 	val[0] = color2int(PANELBG);
 	val[1] = XCB_EVENT_MASK_BUTTON_PRESS;
 	val[1] |= XCB_EVENT_MASK_BUTTON_RELEASE;
+	val[1] |= XCB_EVENT_MASK_POINTER_MOTION;
 	val[1] |= XCB_EVENT_MASK_VISIBILITY_CHANGE;
 	val[1] |= XCB_EVENT_MASK_EXPOSURE;
 
@@ -4259,47 +4271,6 @@ static void handle_user_request(int fd)
 }
 #endif
 
-static void mark_tag(int16_t x, int16_t y, int16_t tagx)
-{
-	struct color *bg, *fg;
-	struct list_head *head;
-
-	if (target_scr && target_tag)
-		print_tag(target_scr, target_tag, color2ptr(TEXTFG_NORMAL));
-
-	/* new selection */
-
-	target_scr = coord2scr(x, y);
-	list_walk(head, &target_scr->tags) {
-		struct tag *tag = list2tag(head);
-
-		dd("scr %d tag '%s' x (pos:%d scr:%d tag:%d)",
-		   target_scr->id, tag->name, tagx, target_scr->x, tag->x);
-
-		if (!tag_pointed(tag, tagx, y)) {
-			continue;
-		} else if (target_scr->tag == tag) { /* skip active tag */
-			continue;
-		} else if (target_tag && target_tag == tag) { /* un-mark tag */
-			print_tag(target_scr, target_tag,
-				  color2ptr(TEXTFG_NORMAL));
-			target_tag = NULL;
-			target_scr = NULL;
-			return;
-		}
-
-		target_tag = tag;
-		fg = color2ptr(SELECTFG);
-		bg = color2ptr(SELECTBG);
-		draw_panel_text(&target_scr->panel, fg, bg, tag->x, tag->w,
-				tag->name, tag->nlen, font1, ITEM_H_MARGIN);
-		xcb_flush(dpy);
-		return;
-	}
-
-	target_tag = NULL; /* not found */
-}
-
 static void toolbar_button_press(struct arg *arg)
 {
 	dd("toolbar focused item '%s'",
@@ -4332,11 +4303,6 @@ static void toolbar_button_press(struct arg *arg)
 	} else if (focused_item->str == (const char *) BTN_EXPAND) {
 		arg->data = WIN_POS_FILL;
 		place_window((void *) arg);
-	} else if (focused_item->str == (const char *) BTN_RETAG) {
-		if (toolbar.cli && target_tag) {
-			arg->data = toolbar.cli->win;
-			retag_window(arg);
-		}
 	} else if (focused_item->str == (const char *) BTN_FLAG) {
 		curscr = coord2scr(arg->x, arg->y);
 		if (!curscr->tag->anchor || curscr->tag->anchor != toolbar.cli) {
@@ -4382,7 +4348,7 @@ static void panel_button_press(xcb_button_press_event_t *e)
 	if pointer_inside(curscr, PANEL_AREA_TAGS, e->event_x) {
 		dd("panel press time %u", e->time);
 		tag_time = e->time;
-		point_tag(curscr, e->event_x, e->event_y);
+		select_tag(curscr, e->event_x, e->event_y);
 		xcb_flush(dpy);
 	} else if pointer_inside(curscr, PANEL_AREA_TITLE, e->event_x) {
 		ii("title\n");
@@ -4409,13 +4375,12 @@ static void handle_button_release(xcb_button_release_event_t *e)
 
 	curscr = coord2scr(e->root_x, e->root_y);
 
-	if (curscr->panel.win == e->event) {
+	if (curscr->panel.win == e->event || curscr->panel.win == e->child) {
 		if pointer_inside(curscr, PANEL_AREA_TAGS, e->event_x) {
 			dd("panel release time %u", e->time - tag_time);
 			if (e->time - tag_time > TAG_LONG_PRESS)
-				mark_tag(e->root_x, e->root_y, e->event_x);
-			else
-				select_tag(curscr, e->event_x, e->event_y);
+				ii("panel long press\n");
+			motion_retag(e->event_x, e->event_y);
 		} else if pointer_inside(curscr, PANEL_AREA_MENU, e->event_x) {
 			show_menu();
 		} else if pointer_inside(curscr, PANEL_AREA_DIV, e->event_x) {
@@ -4470,20 +4435,8 @@ static void handle_button_press(xcb_button_press_event_t *e)
 
 	/* pressed with modifier */
 
-	if (e->event != e->root || e->child == XCB_WINDOW_NONE) {
+	if (e->event != e->root || e->child == XCB_WINDOW_NONE)
 		return;
-	} else if (curscr->panel.win == e->child) {
-		mark_tag(e->root_x, e->root_y, e->event_x);
-		return;
-	} else if (target_tag) { /* re-tag requested */
-		struct arg arg = {
-			.x = e->root_x,
-			.y = e->root_y,
-			.data = e->child,
-		};
-		retag_window(&arg);
-		return;
-	}
 
 	/* prepare for motion event */
 
@@ -4499,6 +4452,28 @@ static void handle_button_press(xcb_button_press_event_t *e)
 			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
 			 e->child, XCB_NONE, XCB_CURRENT_TIME);
 	xcb_flush(dpy);
+
+	motion_cli = NULL;
+	motion_init_x = motion_init_y = 0;
+}
+
+static void handle_panel_motion(int16_t x, int16_t y)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &curscr->tags) {
+		struct tag *tag = list2tag(cur);
+
+		if (tag == curscr->tag) {
+			continue;
+		} else if (!tag_pointed(tag, x, y)) {
+			if (tag->flags & ITEM_FLG_FOCUSED)
+				print_tag(curscr, tag, ITEM_FLG_NORMAL);
+		} else if (tag_pointed(tag, x, y)) {
+			if (!(tag->flags & ITEM_FLG_FOCUSED))
+				print_tag(curscr, tag, ITEM_FLG_FOCUSED);
+		}
+	}
 }
 
 static uint16_t pointer_x;
@@ -4508,6 +4483,11 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	uint16_t mask;
 	uint32_t val[2];
 	struct client *cli;
+
+	te("XCB_MOTION_NOTIFY: root %+d%+d, event 0x%x %+d%+d, child 0x%x\n",
+	   e->root_x, e->root_y, e->event, e->event_x, e->event_y, e->child);
+
+	te("panel 0x%x\n", curscr->panel.win);
 
 	if (e->event == toolbar.panel.win) {
 		focus_toolbar_item(e->event_x, e->event_y);
@@ -4521,6 +4501,8 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 
 	trace_screen_metrics(curscr);
 	if (curscr && curscr->panel.win == e->child) {
+		/* panel window is a child in motion with modifier key */
+		handle_panel_motion(e->event_x, e->event_y);
 		return;
 	} else if (!e->child) {
 		handle_button_release(NULL);
@@ -4533,6 +4515,16 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 		ww("win 0x%x is not managed\n", e->child);
 		return;
 	}
+
+	/* save initial coords on the first move */
+
+	if (!motion_init_x)
+		motion_init_x = cli->x;
+
+	if (!motion_init_y)
+		motion_init_y = cli->y;
+
+	motion_cli = cli;
 
 	cli->x = e->root_x - cli->w / 2;
 	cli->y = e->root_y - cli->h / 2;
@@ -4771,6 +4763,8 @@ static void handle_property_notify(xcb_property_notify_event_t *e)
 			panel_raise(scr);
 			redraw_panel_items(scr);
 		}
+
+		xcb_flush(dpy);
 	}
 }
 
@@ -5051,7 +5045,6 @@ static int handle_events(void)
 		handle_button_release((xcb_button_release_event_t *) e);
 		break;
 	case XCB_MOTION_NOTIFY:
-		te("XCB_MOTION_NOTIFY\n");
 		handle_motion_notify((xcb_motion_notify_event_t *) e);
 		break;
 	case XCB_CONFIGURE_REQUEST:
