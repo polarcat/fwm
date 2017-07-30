@@ -99,6 +99,12 @@ typedef uint8_t strlen_t;
 #define SHIFT XCB_MOD_MASK_SHIFT
 #define CTRL XCB_MOD_MASK_CONTROL
 
+#define ITEM_FLG_NORMAL (1 << 0)
+#define ITEM_FLG_FOCUSED (1 << 1)
+#define ITEM_FLG_ACTIVE (1 << 2)
+#define ITEM_FLG_ALERT (1 << 3)
+#define ITEM_FLG_LOCKED (1 << 4)
+
 /* data structures */
 
 struct color {
@@ -165,8 +171,6 @@ struct panel {
 #define BTN_FLAG ""
 #define BTN_TOOLS ""
 
-#define TOOL_FLG_LOCK (1 << 0)
-
 struct toolbar_item {
 	const char *str;
 	uint8_t len;
@@ -177,6 +181,7 @@ struct toolbar_item {
 
 static struct toolbar_item toolbar_items[] = {
 	{ BTN_MOUSE, slen(BTN_MOUSE), },
+	{ BTN_CLOSE, slen(BTN_CLOSE), },
 	{ BTN_MOVE, slen(BTN_MOVE), },
 	{ BTN_CENTER, slen(BTN_CENTER), },
 	{ BTN_LEFT, slen(BTN_LEFT), },
@@ -185,7 +190,6 @@ static struct toolbar_item toolbar_items[] = {
 	{ BTN_BOTTOM, slen(BTN_BOTTOM), },
 	{ BTN_EXPAND, slen(BTN_EXPAND), },
 	{ BTN_FLAG, slen(BTN_FLAG), },
-	{ BTN_CLOSE, slen(BTN_CLOSE), },
 };
 
 struct toolbar {
@@ -196,9 +200,8 @@ struct toolbar {
 	struct client *cli;
 	xcb_keycode_t knext; /* item's navigation */
 	xcb_keycode_t kprev;
+	xcb_keycode_t kenter;
 	xcb_keycode_t kclose; /* hide toolbar */
-	uint8_t iprev; /* previous item index */
-	uint8_t ithis; /* current item index */
 	uint16_t title_x;
 };
 
@@ -254,10 +257,6 @@ static uint8_t focus_root_;
 static struct client *motion_cli;
 static int16_t motion_init_x;
 static int16_t motion_init_y;
-
-#define ITEM_FLG_NORMAL (1 << 0)
-#define ITEM_FLG_FOCUSED (1 << 1)
-#define ITEM_FLG_ACTIVE (1 << 2)
 
 struct tag {
 	struct list_head head;
@@ -602,11 +601,7 @@ static void text_exts(const char *text, int len, uint16_t *w, uint16_t *h,
 	   "  xOff = %d\n  yOff = %d\n",
 	   text, ext.x, ext.y, ext.width, ext.height, ext.xOff, ext.yOff);
 
-	if (ext.width % 2)
-		*w = ext.width + 1;
-	else
-		*w = ext.width;
-
+	*w = ext.width;
 	*h = ext.height;
 }
 
@@ -623,7 +618,7 @@ static void draw_panel_text(struct panel *panel, struct color *fg,
 			    const char *text, int len, XftFont *font,
 			    uint8_t xpad)
 {
-	fill_rect(panel->win, panel->gc, bg, x, ITEM_V_MARGIN, w + TAG_GAP,
+	fill_rect(panel->win, panel->gc, bg, x, ITEM_V_MARGIN, w,
 		  panel_height - 2 * ITEM_V_MARGIN);
 
 	x += xpad;
@@ -643,14 +638,8 @@ static void print_title(struct screen *scr, xcb_window_t win)
 		  scr->items[PANEL_AREA_TITLE].x, 0,
 		  scr->items[PANEL_AREA_DOCK].x, panel_height);
 
-	if (win == XCB_WINDOW_NONE) {
-		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
-				color2ptr(PANELBG),
-				scr->items[PANEL_AREA_TITLE].x,
-				scr->items[PANEL_AREA_TITLE].w, NULL, 0,
-				font1, ITEM_H_MARGIN);
+	if (win == XCB_WINDOW_NONE)
 		return;
-	}
 
 	get_sprop(&title, win, a_net_wm_name, UINT_MAX);
 	if (!title.ptr || !title.len) {
@@ -1254,81 +1243,106 @@ static struct screen *cli2scr(struct client *cli)
 #endif
 }
 
-static void draw_toolbar_text(struct toolbar_item *item, struct color *fg)
+static void draw_locked_text(struct toolbar_item *item)
 {
-	struct color *bg = color2ptr(PANELBG);
+	struct color *fg;
+	struct color *bg;
+	int16_t xx;
+	uint16_t ww;
 
-	draw_panel_text(&toolbar.panel, fg, bg, item->x, item->w,
-			item->str, item->len, font2, TOOLBAR_ITEM_XPAD);
+	if (item->flags & ITEM_FLG_LOCKED) {
+		fg = color2ptr(SELECTFG);
+		bg = color2ptr(ALERTBG);
+	} else {
+		fg = color2ptr(TEXTFG_NORMAL);
+		bg = color2ptr(PANELBG);
+	}
+
+	ww = panel_height - ITEM_V_MARGIN;
+	xx = (ww - item->w) / 2;
+	draw_panel_text(&toolbar.panel, fg, bg, item->x, ww,
+			item->str, item->len, font2, xx);
+}
+
+static void draw_toolbar_text(struct toolbar_item *item, uint8_t flag)
+{
+	struct color *fg;
+	struct color *bg;
+	int16_t xx;
+	uint16_t ww;
+
+	if (item->flags & flag)
+		return;
+
+	if (flag == ITEM_FLG_ALERT) {
+		fg = color2ptr(ALERTFG);
+		bg = color2ptr(ALERTBG);
+		item->flags &= ~(ITEM_FLG_ACTIVE | ITEM_FLG_NORMAL);
+		item->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_ALERT);
+	} else if (flag == ITEM_FLG_FOCUSED || flag == ITEM_FLG_LOCKED) {
+		fg = color2ptr(SELECTFG);
+		bg = color2ptr(ALERTBG);
+		item->flags &= ~(ITEM_FLG_ACTIVE | ITEM_FLG_NORMAL);
+		item->flags &= ~ITEM_FLG_ALERT;
+	} else {
+		fg = color2ptr(TEXTFG_NORMAL);
+		bg = color2ptr(PANELBG);
+		item->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_ACTIVE);
+		item->flags &= ~ITEM_FLG_ALERT;
+	}
+
+	ww = panel_height - ITEM_V_MARGIN;
+	xx = (ww - item->w) / 2;
+
+	if (item->w % 2)
+		ww -= 2; /* FIXME: fonts looks better centered this way but
+			  * this is not very logical */
+
+	item->flags |= flag;
+	draw_panel_text(&toolbar.panel, fg, bg, item->x, ww,
+			item->str, item->len, font2, xx);
 }
 
 static struct toolbar_item *focused_item;
 
 static void focus_toolbar_item(int16_t x, int16_t y)
 {
-	struct color *fg;
 	struct toolbar_item *ptr = toolbar_items;
 	struct toolbar_item *end = toolbar_items + ARRAY_SIZE(toolbar_items);
 	uint16_t xx = 0;
+	uint8_t flg;
+
+	focused_item = NULL;
+
+	if (y > panel_height) /* out of range */
+		return;
 
 	while (ptr < end) {
-		xx = ptr->x + ptr->w + 2 * ITEM_H_MARGIN;
+		xx = ptr->x + panel_height - ITEM_V_MARGIN - 1;
 
-		if (x < ptr->x || x > xx || y > panel_height) {
-			ptr++;
-			continue;
+		if (x < ptr->x || x > xx) { /* out of focus */
+			if (ptr->flags & ITEM_FLG_LOCKED) {
+				ptr->flags &= ~ITEM_FLG_LOCKED; /* toggle lock */
+				flg = ITEM_FLG_LOCKED;
+			} else {
+				flg = ITEM_FLG_NORMAL;
+			}
+		} else { /* in focus */
+			if (ptr->str == (const char *) BTN_CLOSE)
+				flg = ITEM_FLG_ALERT;
+			else
+				flg = ITEM_FLG_FOCUSED;
+
+			focused_item = ptr;
 		}
 
-		if (focused_item == ptr) {
-			ptr++;
-			continue;
-		}
-
-		/* reset keyboard focus */
-		struct toolbar_item *tmp = &toolbar_items[toolbar.ithis];
-		if (tmp->flags & TOOL_FLG_LOCK)
-			fg = color2ptr(FOCUSFG);
-		else
-			fg = color2ptr(TOOLFG);
-
-		draw_toolbar_text(tmp, fg);
-
-		ii("pointer at %d, select item '%s' [%u,%u]\n", x, ptr->str,
-		    ptr->x, ptr->w);
-
-		if (focused_item && focused_item->flags & TOOL_FLG_LOCK)
-			draw_toolbar_text(focused_item, color2ptr(FOCUSFG));
-		else if (focused_item)
-			draw_toolbar_text(focused_item, color2ptr(TOOLFG));
-
-		if (ptr->str == (const char *) BTN_CLOSE)
-			fg = color2ptr(ALERTFG);
-		else
-			fg = color2ptr(FOCUSFG);
-
-		draw_toolbar_text(ptr, fg);
-
-		focused_item = ptr++;
+		draw_toolbar_text(ptr, flg);
+		ptr++;
 	}
 }
 
 static void draw_toolbar(void)
 {
-	struct toolbar_item *ptr = toolbar_items;
-	struct toolbar_item *end = toolbar_items + ARRAY_SIZE(toolbar_items);
-	uint8_t locked = !!(toolbar.cli == curscr->tag->anchor);
-
-	focused_item = NULL;
-
-	while (ptr < end) {
-		if (ptr->str == (const char *) BTN_FLAG && locked)
-			draw_toolbar_text(ptr, color2ptr(FOCUSFG));
-		else
-			draw_toolbar_text(ptr, color2ptr(TOOLFG));
-
-		ptr++;
-	}
-
 	warp_pointer(toolbar.panel.win, toolbar_items[0].x, panel_height / 2);
 	focus_toolbar_item(toolbar_items[0].x, 0);
 	xcb_flush(dpy);
@@ -1660,17 +1674,71 @@ static void disable_events(xcb_window_t win)
 	xcb_flush(dpy);
 }
 
-static void clean_toolbar(void)
+static uint16_t reset_toolbar(void)
 {
-	/* no memset becuase of key mapping is done at start up */
+	struct toolbar_item *ptr = toolbar_items;
+	struct toolbar_item *end = toolbar_items + ARRAY_SIZE(toolbar_items);
+	uint16_t h;
+	uint16_t w = 0;
+
+	while (ptr < end) {
+		ptr->flags = 0;
+
+		if (ptr->str == (const char *) BTN_FLAG &&
+		    curscr->tag->anchor) {
+			ptr->flags = ITEM_FLG_LOCKED;
+		}
+
+		ptr->x = w;
+		text_exts(ptr->str, ptr->len, &ptr->w, &h, font2);
+		w += (panel_height - ITEM_V_MARGIN);
+		ptr++;
+	}
+
+	focused_item = NULL;
 	toolbar.cli = NULL;
 	toolbar.scr = NULL;
 	toolbar.panel.win = XCB_WINDOW_NONE;
+
+	ii("toolbar width %u\n", w);
+	return w;
+}
+
+static void toolbar_ungrab_input(void)
+{
+	xcb_ungrab_pointer(dpy, XCB_CURRENT_TIME);
+	xcb_ungrab_key(dpy, toolbar.kprev, rootscr->root,
+		       XCB_MOD_MASK_ANY);
+	xcb_ungrab_key(dpy, toolbar.knext, rootscr->root,
+		       XCB_MOD_MASK_ANY);
+	xcb_ungrab_key(dpy, toolbar.kenter, rootscr->root,
+		       XCB_MOD_MASK_ANY);
+	xcb_ungrab_key(dpy, toolbar.kclose, rootscr->root,
+		       XCB_MOD_MASK_ANY);
+}
+
+static void toolbar_grab_input(void)
+{
+	xcb_grab_pointer(dpy, 1, rootscr->root,
+			 XCB_EVENT_MASK_BUTTON_MOTION |
+			 XCB_EVENT_MASK_BUTTON_PRESS |
+			 XCB_EVENT_MASK_BUTTON_RELEASE,
+			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
+			 toolbar.panel.win, XCB_NONE, XCB_CURRENT_TIME);
+
+	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.kprev,
+		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.knext,
+		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.kenter,
+		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.kclose,
+		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
 }
 
 static void hide_toolbar(void)
 {
-	xcb_ungrab_pointer(dpy, XCB_CURRENT_TIME);
+	toolbar_ungrab_input();
 
 	if (toolbar.panel.win == XCB_WINDOW_NONE)
 		return;
@@ -1693,16 +1761,15 @@ static void hide_toolbar(void)
 	toolbar.scr->items[PANEL_AREA_TITLE].x = toolbar.title_x;
 	title_width(toolbar.scr);
 	xcb_flush(dpy);
-	clean_toolbar();
+	reset_toolbar();
 }
-
-static uint16_t toolbar_width;
 
 static int setup_toolbar(void)
 {
+	uint16_t w;
 	uint32_t val[2], mask;
 
-	clean_toolbar();
+	w = reset_toolbar();
 
 	if (list_empty(&curscr->tag->clients)) {
 		ww("nothing to show on empty tag\n");
@@ -1718,12 +1785,10 @@ static int setup_toolbar(void)
 		return -1;
 	}
 
-	toolbar.iprev = 0;
-	toolbar.ithis = 0;
 	toolbar.scr = curscr;
 	toolbar.x = curscr->items[PANEL_AREA_TITLE].x;
 	toolbar.y = curscr->y;
-	toolbar.panel.w = toolbar_width;
+	toolbar.panel.w = w;
 	toolbar.panel.h = panel_height;
 	toolbar.panel.win = xcb_generate_id(dpy);
 
@@ -1785,37 +1850,20 @@ static void show_toolbar(void)
 	ii("toolbar 0x%x on scr %d, tag %s\n", toolbar.panel.win,
 	   toolbar.scr->id, toolbar.scr->tag->name);
 	xcb_map_window(dpy, toolbar.panel.win);
-	raise_window(toolbar.panel.win);
-	focus_window(toolbar.panel.win);
 	draw_toolbar();
 	toolbar.title_x = toolbar.scr->items[PANEL_AREA_TITLE].x;
 	toolbar.scr->items[PANEL_AREA_TITLE].x = toolbar.x + toolbar.panel.w;
 	title_width(toolbar.scr);
 	print_title(toolbar.scr, toolbar.cli->win);
+	raise_window(toolbar.panel.win);
+	focus_window(toolbar.panel.win);
+	toolbar_grab_input();
 	xcb_flush(dpy);
 }
 
 static void toggle_toolbar(unused(void *ptr))
 {
 	show_toolbar();
-}
-
-static void init_toolbar(void)
-{
-	struct toolbar_item *ptr = toolbar_items;
-	struct toolbar_item *end = toolbar_items + ARRAY_SIZE(toolbar_items);
-	uint16_t h;
-
-	toolbar_width = FONT2_SIZE / 2;
-
-	while (ptr < end) {
-		text_exts(ptr->str, ptr->len, &ptr->w, &h, font2);
-		ptr->x = toolbar_width;
-		toolbar_width += ptr->w + FONT2_SIZE / 2;
-		ptr++;
-	}
-
-	ii("toolbar width %u\n", toolbar_width);
 }
 
 static struct client *prev_client(struct client *cli)
@@ -2117,7 +2165,6 @@ static void make_grid(void *ptr)
 
 static void flag_window(void *ptr)
 {
-	struct color *fg;
 	struct arg *arg = (struct arg *) ptr;
 	struct toolbar_item *cur = toolbar_items;
 	struct toolbar_item *end = toolbar_items + ARRAY_SIZE(toolbar_items);
@@ -2147,15 +2194,14 @@ static void flag_window(void *ptr)
 
 	while (cur < end) {
 		if (cur->str == (const char *) BTN_FLAG) {
-			if (curscr->tag->anchor) {
-				cur->flags |= TOOL_FLG_LOCK;
-				fg = color2ptr(FOCUSFG);
-			} else {
-				cur->flags &= ~TOOL_FLG_LOCK;
-				fg = color2ptr(TOOLFG);
-			}
+			uint8_t flg;
 
-			draw_toolbar_text(cur, fg);
+			if (curscr->tag->anchor)
+				flg = ITEM_FLG_LOCKED;
+			else
+				flg = ITEM_FLG_NORMAL;
+
+			draw_toolbar_text(cur, flg);
 			break;
 		}
 		cur++;
@@ -2409,8 +2455,8 @@ static void print_tag(struct screen *scr, struct tag *tag, uint8_t flag)
 		bg = color2ptr(TEXTBG_ACTIVE);
 		tag->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_NORMAL);
 	} else if (flag == ITEM_FLG_FOCUSED) {
-		fg = color2ptr(FOCUSFG);
-		bg = color2ptr(TEXTBG_NORMAL);
+		fg = color2ptr(SELECTFG);
+		bg = color2ptr(SELECTBG);
 		tag->flags &= ~(ITEM_FLG_ACTIVE | ITEM_FLG_NORMAL);
 	} else {
 		fg = color2ptr(TEXTFG_NORMAL);
@@ -3559,9 +3605,18 @@ static void init_toolbar_keys(xcb_key_symbols_t *syms)
 	toolbar.knext = *key;
 	free(key);
 
-	key = xcb_key_symbols_get_keycode(syms, XK_Down);
+	key = xcb_key_symbols_get_keycode(syms, XK_Return);
 	if (!key) {
-		ee("xcb_key_symbols_get_keycode(sym=0x%x) failed\n", XK_Down);
+		ee("xcb_key_symbols_get_keycode(sym=0x%x) failed\n", XK_Return);
+		return;
+	}
+
+	toolbar.kenter = *key;
+	free(key);
+
+	key = xcb_key_symbols_get_keycode(syms, XK_Escape);
+	if (!key) {
+		ee("xcb_key_symbols_get_keycode(sym=0x%x) failed\n", XK_Escape);
 		return;
 	}
 
@@ -4273,9 +4328,6 @@ static void handle_user_request(int fd)
 
 static void toolbar_button_press(struct arg *arg)
 {
-	dd("toolbar focused item '%s'",
-	   focused_item ? focused_item->str : "<nil>");
-
 	if (!focused_item) {
 		hide_toolbar();
 		return;
@@ -4308,14 +4360,16 @@ static void toolbar_button_press(struct arg *arg)
 		if (!curscr->tag->anchor || curscr->tag->anchor != toolbar.cli) {
 			curscr->tag->anchor = toolbar.cli;
 			curscr->tag->anchor->div = 1;
-			focused_item->flags |= TOOL_FLG_LOCK;
+			focused_item->flags |= ITEM_FLG_LOCKED;
 			struct arg arg = { .data = WIN_POS_LEFT_FILL, };
 			place_window(&arg);
 		} else {
 			curscr->tag->anchor = NULL;
-			focused_item->flags &= ~TOOL_FLG_LOCK;
+			focused_item->flags &= ~ITEM_FLG_LOCKED;
 			recalc_space(curscr, 0);
 		}
+
+		draw_locked_text(focused_item);
 	} else if (focused_item->str == (const char *) BTN_MOVE) {
 		struct client *cli = toolbar.cli;
 		cli->flags |= CLI_FLG_MOVE;
@@ -4389,7 +4443,9 @@ static void handle_button_release(xcb_button_release_event_t *e)
 		}
 	}
 
-	xcb_ungrab_pointer(dpy, XCB_CURRENT_TIME);
+	if (toolbar.panel.win != e->event && toolbar.panel.win != e->child)
+		toolbar_ungrab_input();
+
 	xcb_flush(dpy);
 }
 
@@ -4549,46 +4605,52 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 
 static void toolbar_key_press(xcb_key_press_event_t *e)
 {
-	uint8_t i;
-
-	ii("toolbar key 0x%x\n", e->detail);
-	return;
+	uint8_t flg;
+	struct toolbar_item *cur;
+	struct toolbar_item *end;
 
 	if (toolbar.kclose == e->detail) {
 		hide_toolbar();
 		return;
+	} else if (toolbar.kenter == e->detail) {
+		struct arg data = { .x = e->root_x, .y = e->root_y, };
+		toolbar_button_press(&data);
+		return;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(toolbar_items); i++) {
-		if (toolbar.kprev == e->detail) {
-			toolbar.iprev = toolbar.ithis--;
-			break;
-		} else if (toolbar.knext == e->detail) {
-			toolbar.iprev = toolbar.ithis++;
-			break;
-		}
+	cur = focused_item;
+	end = toolbar_items + ARRAY_SIZE(toolbar_items);
+
+	if (!focused_item)
+		focused_item = toolbar_items;
+
+	if (toolbar.knext == e->detail) {
+		if (++focused_item == end)
+			focused_item = toolbar_items;
+	} else if (toolbar.kprev == e->detail) {
+		if (--focused_item == toolbar_items - 1)
+			focused_item = end - 1;
 	}
 
-	if (toolbar.ithis == UCHAR_MAX)
-		toolbar.ithis = ARRAY_SIZE(toolbar_items) - 1;
-	else if (toolbar.ithis > ARRAY_SIZE(toolbar_items) - 1)
-		toolbar.ithis = 0;
+	if (cur)
+		draw_toolbar_text(cur, ITEM_FLG_NORMAL);
 
-	draw_toolbar_text(&toolbar_items[toolbar.iprev], color2ptr(TOOLFG));
-	draw_toolbar_text(&toolbar_items[toolbar.ithis], color2ptr(FOCUSFG));
+	if (focused_item->str == (const char *) BTN_CLOSE)
+		flg = ITEM_FLG_ALERT;
+	else
+		flg = ITEM_FLG_FOCUSED;
+
+	draw_toolbar_text(focused_item, flg);
 }
 
 static void handle_key_press(xcb_key_press_event_t *e)
 {
 	struct list_head *cur;
 
-	if ((e->event == toolbar.panel.win || e->child == toolbar.panel.win)
-	    && (e->detail == toolbar.kprev || e->detail == toolbar.knext ||
-	    e->detail == toolbar.kclose) && e->state != MOD) {
-		ii("toolbar key 0x%x, prev 0x%x, next 0x%x\n", e->detail,
-		   toolbar.kprev, toolbar.knext);
-			toolbar_key_press(e);
-			return;
+	if (toolbar.panel.win &&
+	    (e->event == toolbar.panel.win || e->child == toolbar.panel.win)) {
+		toolbar_key_press(e);
+		return;
 	}
 
 	ii("screen %d, event 0x%x, child 0x%x, key 0x%x, state 0x%x, pos %d,%d\n",
@@ -4660,12 +4722,7 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 
 	if (e->event == toolbar.panel.win) {
 		focus_window(e->event);
-		xcb_grab_pointer(dpy, 1, toolbar.panel.win,
-			 XCB_EVENT_MASK_BUTTON_MOTION |
-			 XCB_EVENT_MASK_BUTTON_PRESS |
-			 XCB_EVENT_MASK_BUTTON_RELEASE,
-			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
-			 toolbar.panel.win, XCB_NONE, XCB_CURRENT_TIME);
+		toolbar_grab_input();
 		xcb_flush(dpy);
 		return;
 	}
@@ -5415,7 +5472,6 @@ int main()
 	xscr = DefaultScreen(xdpy);
 	init_font();
 	init_colors();
-	init_toolbar();
 #if 0
 	dpy = xcb_connect(NULL, NULL);
 #else
