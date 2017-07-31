@@ -516,6 +516,7 @@ static strlen_t actname_max = UCHAR_MAX - 1;
 static uint8_t baselen;
 static char *basedir;
 static char *homedir;
+static struct toolbar_item *focused_item;
 
 static uint8_t randrbase;
 
@@ -626,6 +627,26 @@ static void draw_panel_text(struct panel *panel, struct color *fg,
 	XftDrawStringUtf8(panel->draw, fg->val, font, x, text_yoffs,
 			  (XftChar8 *) text, len);
 	XSync(xdpy, 0);
+}
+
+static void title_width(struct screen *scr)
+{
+	int16_t end = scr->items[PANEL_AREA_DOCK].x;
+	uint16_t x, h, i;
+	char *tmp;
+	struct panel_item *title = &scr->items[PANEL_AREA_TITLE];
+
+	i = 1;
+	x = 0;
+	while (x + title->x < end) {
+		tmp = calloc(1, i + 1);
+		memset(tmp, 'w', i);
+		text_exts(tmp, strlen(tmp), &x, &h, font1);
+		free(tmp);
+		i++;
+	}
+
+	title->w = x - ITEM_H_MARGIN;
 }
 
 static void print_title(struct screen *scr, xcb_window_t win)
@@ -1164,19 +1185,102 @@ static void close_client(struct client *cli)
 	free_client(cli);
 }
 
-static uint8_t can_close(pid_t pid)
+static void disable_events(xcb_window_t win)
 {
-	uint16_t n = 0;
-	struct list_head *cur;
+	uint32_t val = 0;
+	xcb_change_window_attributes_checked(dpy, win, XCB_CW_EVENT_MASK, &val);
+	xcb_flush(dpy);
+}
 
-	list_walk(cur, &clients) {
-		struct client *cli = glob2client(cur);
+static uint16_t reset_toolbar(void)
+{
+	struct toolbar_item *ptr = toolbar_items;
+	struct toolbar_item *end = toolbar_items + ARRAY_SIZE(toolbar_items);
+	uint16_t h;
+	uint16_t w = 0;
 
-		if (cli->pid == pid && ++n > 1)
-			return 0;
+	while (ptr < end) {
+		ptr->flags = 0;
+
+		if (ptr->str == (const char *) BTN_FLAG &&
+		    curscr->tag->anchor) {
+			ptr->flags = ITEM_FLG_LOCKED;
+		}
+
+		ptr->x = w;
+		text_exts(ptr->str, ptr->len, &ptr->w, &h, font2);
+		w += (panel_height - ITEM_V_MARGIN);
+		ptr++;
 	}
 
-	return 1;
+	focused_item = NULL;
+	toolbar.cli = NULL;
+	toolbar.scr = NULL;
+	toolbar.panel.win = XCB_WINDOW_NONE;
+
+	ii("toolbar width %u\n", w);
+	return w;
+}
+
+static void toolbar_ungrab_input(void)
+{
+	xcb_ungrab_pointer(dpy, XCB_CURRENT_TIME);
+	xcb_ungrab_key(dpy, toolbar.kprev, rootscr->root,
+		       XCB_MOD_MASK_ANY);
+	xcb_ungrab_key(dpy, toolbar.knext, rootscr->root,
+		       XCB_MOD_MASK_ANY);
+	xcb_ungrab_key(dpy, toolbar.kenter, rootscr->root,
+		       XCB_MOD_MASK_ANY);
+	xcb_ungrab_key(dpy, toolbar.kclose, rootscr->root,
+		       XCB_MOD_MASK_ANY);
+}
+
+
+static void toolbar_grab_input(void)
+{
+	xcb_grab_pointer(dpy, 1, rootscr->root,
+			 XCB_EVENT_MASK_BUTTON_MOTION |
+			 XCB_EVENT_MASK_BUTTON_PRESS |
+			 XCB_EVENT_MASK_BUTTON_RELEASE,
+			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
+			 toolbar.panel.win, XCB_NONE, XCB_CURRENT_TIME);
+
+	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.kprev,
+		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.knext,
+		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.kenter,
+		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.kclose,
+		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+}
+
+static void hide_toolbar(void)
+{
+	toolbar_ungrab_input();
+
+	if (toolbar.panel.win == XCB_WINDOW_NONE)
+		return;
+
+	disable_events(toolbar.panel.win);
+	xcb_flush(dpy);
+	XftDrawDestroy(toolbar.panel.draw);
+	xcb_free_gc(dpy, toolbar.panel.gc);
+	xcb_destroy_window_checked(dpy, toolbar.panel.win);
+	dd("destroyed toolbar win 0x%x", toolbar.panel.win);
+
+	if (toolbar.cli) {
+		struct client *cli = toolbar.cli;
+		toolbar.cli = NULL;
+		raise_window(cli->win);
+		focus_window(cli->win);
+		center_pointer(cli);
+	}
+
+	toolbar.scr->items[PANEL_AREA_TITLE].x = toolbar.title_x;
+	title_width(toolbar.scr);
+	xcb_flush(dpy);
+	reset_toolbar();
 }
 
 static void close_window(xcb_window_t win)
@@ -1187,7 +1291,6 @@ static void close_window(xcb_window_t win)
 	struct client *cli = win2cli(win);
 	xcb_client_message_event_t e = { 0 };
 
-	hide_toolbox();
 	cli ? (pid = cli->pid) : (pid = 0);
 
 	/* try to close gracefully */
@@ -1215,10 +1318,15 @@ static void close_window(xcb_window_t win)
 		nanosleep(&ts, NULL);
 	}
 
-	if (cli->busy > 1 && can_close(pid))
+	if (cli->busy > 2) {
 		close_client(cli);
-	else if (cli && !cli->busy)
+		hide_toolbox();
+		hide_toolbar();
+	} else if (cli && !cli->busy) {
 		free_client(cli);
+		hide_toolbox();
+		hide_toolbar();
+	}
 
 	focus_any(pid);
 	xcb_flush(dpy);
@@ -1302,8 +1410,6 @@ static void draw_toolbar_text(struct toolbar_item *item, uint8_t flag)
 	draw_panel_text(&toolbar.panel, fg, bg, item->x, ww,
 			item->str, item->len, font2, xx);
 }
-
-static struct toolbar_item *focused_item;
 
 static void focus_toolbar_item(int16_t x, int16_t y)
 {
@@ -1647,142 +1753,29 @@ static void window_state(xcb_window_t win, uint8_t state)
 				    a_state, a_state, 32, 2, data);
 }
 
-static void title_width(struct screen *scr)
-{
-	int16_t end = scr->items[PANEL_AREA_DOCK].x;
-	uint16_t x, h, i;
-	char *tmp;
-	struct panel_item *title = &scr->items[PANEL_AREA_TITLE];
-
-	i = 1;
-	x = 0;
-	while (x + title->x < end) {
-		tmp = calloc(1, i + 1);
-		memset(tmp, 'w', i);
-		text_exts(tmp, strlen(tmp), &x, &h, font1);
-		free(tmp);
-		i++;
-	}
-
-	title->w = x - ITEM_H_MARGIN;
-}
-
-static void disable_events(xcb_window_t win)
-{
-	uint32_t val = 0;
-	xcb_change_window_attributes_checked(dpy, win, XCB_CW_EVENT_MASK, &val);
-	xcb_flush(dpy);
-}
-
-static uint16_t reset_toolbar(void)
-{
-	struct toolbar_item *ptr = toolbar_items;
-	struct toolbar_item *end = toolbar_items + ARRAY_SIZE(toolbar_items);
-	uint16_t h;
-	uint16_t w = 0;
-
-	while (ptr < end) {
-		ptr->flags = 0;
-
-		if (ptr->str == (const char *) BTN_FLAG &&
-		    curscr->tag->anchor) {
-			ptr->flags = ITEM_FLG_LOCKED;
-		}
-
-		ptr->x = w;
-		text_exts(ptr->str, ptr->len, &ptr->w, &h, font2);
-		w += (panel_height - ITEM_V_MARGIN);
-		ptr++;
-	}
-
-	focused_item = NULL;
-	toolbar.cli = NULL;
-	toolbar.scr = NULL;
-	toolbar.panel.win = XCB_WINDOW_NONE;
-
-	ii("toolbar width %u\n", w);
-	return w;
-}
-
-static void toolbar_ungrab_input(void)
-{
-	xcb_ungrab_pointer(dpy, XCB_CURRENT_TIME);
-	xcb_ungrab_key(dpy, toolbar.kprev, rootscr->root,
-		       XCB_MOD_MASK_ANY);
-	xcb_ungrab_key(dpy, toolbar.knext, rootscr->root,
-		       XCB_MOD_MASK_ANY);
-	xcb_ungrab_key(dpy, toolbar.kenter, rootscr->root,
-		       XCB_MOD_MASK_ANY);
-	xcb_ungrab_key(dpy, toolbar.kclose, rootscr->root,
-		       XCB_MOD_MASK_ANY);
-}
-
-static void toolbar_grab_input(void)
-{
-	xcb_grab_pointer(dpy, 1, rootscr->root,
-			 XCB_EVENT_MASK_BUTTON_MOTION |
-			 XCB_EVENT_MASK_BUTTON_PRESS |
-			 XCB_EVENT_MASK_BUTTON_RELEASE,
-			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
-			 toolbar.panel.win, XCB_NONE, XCB_CURRENT_TIME);
-
-	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.kprev,
-		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.knext,
-		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.kenter,
-		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-	xcb_grab_key(dpy, 0, rootscr->root, 0, toolbar.kclose,
-		     XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-}
-
-static void hide_toolbar(void)
-{
-	toolbar_ungrab_input();
-
-	if (toolbar.panel.win == XCB_WINDOW_NONE)
-		return;
-
-	disable_events(toolbar.panel.win);
-	xcb_flush(dpy);
-	XftDrawDestroy(toolbar.panel.draw);
-	xcb_free_gc(dpy, toolbar.panel.gc);
-	xcb_destroy_window_checked(dpy, toolbar.panel.win);
-	dd("destroyed toolbar win 0x%x", toolbar.panel.win);
-
-	if (toolbar.cli) {
-		struct client *cli = toolbar.cli;
-		toolbar.cli = NULL;
-		raise_window(cli->win);
-		focus_window(cli->win);
-		center_pointer(cli);
-	}
-
-	toolbar.scr->items[PANEL_AREA_TITLE].x = toolbar.title_x;
-	title_width(toolbar.scr);
-	xcb_flush(dpy);
-	reset_toolbar();
-}
-
-static int setup_toolbar(void)
+static int setup_toolbar(struct client *cli)
 {
 	uint16_t w;
 	uint32_t val[2], mask;
 
 	w = reset_toolbar();
 
-	if (list_empty(&curscr->tag->clients)) {
-		ww("nothing to show on empty tag\n");
-		return -1;
-	}
+	if (cli) {
+		toolbar.cli = cli;
+	} else {
+		if (list_empty(&curscr->tag->clients)) {
+			ww("nothing to show on empty tag\n");
+			return -1;
+		}
 
-	if (!(toolbar.cli = pointer2cli()))
-		toolbar.cli = front_client(curscr->tag);
+		if (!(toolbar.cli = pointer2cli()))
+			toolbar.cli = front_client(curscr->tag);
 
-	if (!toolbar.cli) {
-		ww("no front client on scr %u tag '%s'\n", curscr->id,
-		   curscr->tag->name);
-		return -1;
+		if (!toolbar.cli) {
+			ww("no front client on scr %u tag '%s'\n", curscr->id,
+			   curscr->tag->name);
+			return -1;
+		}
 	}
 
 	toolbar.scr = curscr;
@@ -1826,17 +1819,19 @@ static int setup_toolbar(void)
 	return 0;
 }
 
-static void show_toolbar(void)
+static void show_toolbar(struct client *cli)
 {
 	uint32_t val[4];
 	uint32_t mask;
 
 	if (toolbar.cli) {
 		hide_toolbar();
-		return;
+
+		if (!cli)
+			return;
 	}
 
-	if (setup_toolbar() < 0)
+	if (setup_toolbar(cli) < 0)
 		return;
 
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
@@ -1863,7 +1858,7 @@ static void show_toolbar(void)
 
 static void toggle_toolbar(unused(void *ptr))
 {
-	show_toolbar();
+	show_toolbar(NULL);
 }
 
 static struct client *prev_client(struct client *cli)
@@ -4336,7 +4331,6 @@ static void toolbar_button_press(struct arg *arg)
 	if (focused_item->str == (const char *) BTN_CLOSE) {
 		if (toolbar.cli)
 			close_window(toolbar.cli->win);
-		hide_toolbar();
 	} else if (focused_item->str == (const char *) BTN_LEFT) {
 		arg->data = WIN_POS_LEFT_FILL;
 		place_window((void *) arg);
@@ -4438,7 +4432,7 @@ static void handle_button_release(xcb_button_release_event_t *e)
 		} else if pointer_inside(curscr, PANEL_AREA_MENU, e->event_x) {
 			show_menu();
 		} else if pointer_inside(curscr, PANEL_AREA_DIV, e->event_x) {
-			show_toolbar();
+			show_toolbar(NULL);
 			hide_toolbox();
 		}
 	}
@@ -4458,7 +4452,7 @@ static void handle_button_press(xcb_button_press_event_t *e)
 	if (toolbox.win &&
 	    (toolbox.win == e->event || toolbox.win == e->child)) {
 		hide_toolbox();
-		show_toolbar();
+		show_toolbar(NULL);
 		return;
 	}
 
