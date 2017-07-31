@@ -4409,12 +4409,7 @@ static void panel_button_press(xcb_button_press_event_t *e)
 
 static void handle_button_release(xcb_button_release_event_t *e)
 {
-	struct client *cli;
-
-	if (!e)
-		return;
-
-	cli = win2cli(e->child);
+	struct client *cli = win2cli(e->child);
 
 	if (cli && cli->flags & CLI_FLG_MOVE) {
 		cli->flags &= ~CLI_FLG_MOVE;
@@ -4555,7 +4550,6 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 		handle_panel_motion(e->event_x, e->event_y);
 		return;
 	} else if (!e->child) {
-		handle_button_release(NULL);
 		return;
 	}
 
