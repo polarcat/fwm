@@ -512,7 +512,6 @@ static xcb_keysym_t get_keysyms(xcb_keycode_t code)
 {
 	const xkb_keysym_t *syms;
 	int len;
-	int i;
 
 	if (!keymap_)
 		return (xcb_keysym_t) 0;
@@ -520,6 +519,7 @@ static xcb_keysym_t get_keysyms(xcb_keycode_t code)
 	len = xkb_keymap_key_get_syms_by_level(keymap_, code, 0, level_, &syms);
 
 #ifdef DEBUG
+	int i;
 	for (i = 0; i < len; i++) {
 		char name[64];
 		const xkb_keysym_t sym = syms[i];
@@ -649,9 +649,6 @@ static void key_press(xcb_key_press_event_t *e)
 static void follow_pointer(xcb_motion_notify_event_t *e)
 {
 	uint8_t i;
-	xcb_query_pointer_cookie_t c;
-	xcb_query_pointer_reply_t *r;
-	int16_t x;
 	uint8_t rows_num;
 
 	if (pages_num_ && page_idx_ == pages_num_ - 1)
@@ -679,16 +676,6 @@ static void follow_pointer(xcb_motion_notify_event_t *e)
 
 	if (!pages_num_)
 		return;
-
-	c = xcb_query_pointer(dpy_, win_);
-	r = xcb_query_pointer_reply(dpy_, c, NULL);
-
-	if (!r) {
-		x = 0;
-	} else {
-		x = r->win_x;
-		free(r);
-	}
 
 	if (e->event_y >= page_h_ + y_pad_) { /* follow down */
 		if (page_idx_ >= pages_num_ - 1)
@@ -780,7 +767,6 @@ static int init_rows(void)
 	char *end = data_ + data_size_;
 	uint16_t w;
 	uint16_t h;
-	uint8_t col_max_len;
 	uint8_t row_max_len;
 
 	x_pad_ = font1_size_ - 2;
@@ -828,8 +814,10 @@ static int init_rows(void)
 	if (search_col_idx_ >= cols_per_row_)
 		search_col_idx_ = 0;
 
-	col_max_len = row_len_ / cols_per_row_;
+#ifdef DEBUG
+	uint8_t col_max_len = row_len_ / cols_per_row_;
 	dd("max col len %u\n", col_max_len);
+#endif
 	ptr = data_;
 	col_start = ptr;
 	row_start = ptr;
@@ -1181,8 +1169,10 @@ static uint8_t events(uint8_t wait)
 	else
 		e = xcb_poll_for_event(dpy_);
 
-	if (!e)
+	if (!e) {
+		done_ = 1;
 		return 0;
+	}
 
 	switch (e->response_type & ~0x80) {
 	case XCB_VISIBILITY_NOTIFY:
