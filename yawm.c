@@ -61,8 +61,13 @@ typedef uint8_t strlen_t;
 #define BORDER_WIDTH 1
 #define WINDOW_PAD 0
 
-#define WIN_WIDTH_MIN 2
-#define WIN_HEIGHT_MIN 2
+#ifndef WIN_WIDTH_MIN
+#define WIN_WIDTH_MIN 10
+#endif
+
+#ifndef WIN_HEIGHT_MIN
+#define WIN_HEIGHT_MIN 10
+#endif
 
 #define CLI_FLG_DOCK (1 << 0)
 #define CLI_FLG_TRAY (1 << 1)
@@ -76,6 +81,7 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_MOVE (1 << 9)
 #define CLI_FLG_FULLSCREEN (1 << 10)
 #define CLI_FLG_POPUP (1 << 11)
+#define CLI_FLG_IGNORED (1 << 12)
 
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
@@ -2482,15 +2488,16 @@ static void show_windows(struct tag *tag, uint8_t focus)
 		xcb_map_window_checked(dpy, cli->win);
 	}
 
-	if (focus && (cli = front_client(tag))) {
-		if (window_status(cli->win) != WIN_STATUS_VISIBLE) {
-			focus_root();
-		} else {
-			raise_window(cli->win);
-			focus_window(cli->win);
-			center_pointer(cli);
-		}
+	if (!focus || !(cli = front_client(tag)) ||
+	    (cli->flags & CLI_FLG_IGNORED) ||
+	    window_status(cli->win) != WIN_STATUS_VISIBLE) {
+		focus_root();
+		return;
 	}
+
+	raise_window(cli->win);
+	focus_window(cli->win);
+	center_pointer(cli);
 }
 
 static void hide_windows(struct tag *tag)
@@ -2816,15 +2823,24 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	struct client *cli;
 	uint32_t val[1];
 	uint32_t crc;
+	xcb_window_t leader;
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
 	enum winstatus status = window_status(win);
 
 	if (status == WIN_STATUS_UNKNOWN) {
-		ww("destroy unknown window 0x%x\n", win);
-		xcb_unmap_window_checked(dpy, win);
-		xcb_destroy_window_checked(dpy, win);
+		if (scan) { /* ignore window and save it for next wm session */
+			ww("ignore unknown window 0x%x\n", win);
+			xcb_change_property(dpy, XCB_PROP_MODE_APPEND,
+					    rootscr->root, a_client_list,
+					    XCB_ATOM_WINDOW, 32, 1, &win);
+		} else {
+			ww("destroy unknown window 0x%x\n", win);
+			xcb_unmap_window_checked(dpy, win);
+			xcb_destroy_window_checked(dpy, win);
+		}
+
 		xcb_flush(dpy);
 		return NULL;
 	}
@@ -2869,13 +2885,23 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		goto out;
 	}
 
-	if (g->width <= 1 || g->height <= 1) {
+	if (g->width <= WIN_WIDTH_MIN || g->height <= WIN_HEIGHT_MIN) {
 		/* FIXME: current assumption is that window is not supposed
 		 * to be shown
 		 */
 		ww("ignore tiny window 0x%x geo %ux%u%+d%+d\n", win, g->width,
 		   g->height, g->x, g->y);
-		return NULL;
+		xcb_change_property(dpy, XCB_PROP_MODE_APPEND, rootscr->root,
+				    a_client_list, XCB_ATOM_WINDOW, 32, 1, &win);
+		xcb_flush(dpy);
+		goto out;
+	}
+
+	leader = window_leader(win);
+
+	if (leader != XCB_WINDOW_NONE && !win2cli(leader)) {
+		ww("ignore win 0x%x with hidden leader 0x%x\n", win, leader);
+		flags |= CLI_FLG_IGNORED;
 	}
 
 	scr = NULL;
@@ -2930,6 +2956,10 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 
 	if (!(flags & CLI_FLG_TRAY) && a->override_redirect) {
 		ww("ignore redirected window 0x%x\n", win);
+		xcb_change_property(dpy, XCB_PROP_MODE_APPEND, rootscr->root,
+				    a_client_list, XCB_ATOM_WINDOW, 32, 1,
+				    &win);
+		xcb_flush(dpy);
 		goto out;
 	}
 
@@ -4068,6 +4098,11 @@ static void focus_window_req(xcb_window_t win)
 		if (cli->win == win) {
 			struct screen *scr;
 
+			if (cli->flags & CLI_FLG_IGNORED) {
+				ww("win 0x%x is ignored\n", cli->win);
+				return;
+			}
+
 			if (!(scr = cli2scr(cli))) {
 				ww("cannot focus offscreen win 0x%x\n", win);
 				return;
@@ -4196,6 +4231,11 @@ static void dump_clients(uint8_t all)
 		enum winstatus status;
 		const char *tag;
 		char current;
+
+		if (cli->flags & CLI_FLG_IGNORED) {
+			ww("win 0x%x is ignored\n", cli->win);
+			continue;
+		}
 
 		cli->win == win ? (current = '*') : (current = ' ');
 		status = window_status(cli->win);
@@ -4743,6 +4783,7 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	if (!cli) {
 		focus_window(e->event);
 	} else {
+		cli->flags &= ~CLI_FLG_IGNORED;
 		focus_window(cli->win);
 		resort_client(cli);
 	}
@@ -5486,6 +5527,8 @@ int main()
 	init_randr();
 	init_outputs();
 	init_toolbox();
+	focus_root();
+	xcb_flush(dpy);
 
 	autostart();
 
