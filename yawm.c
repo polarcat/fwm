@@ -1231,16 +1231,11 @@ static uint16_t reset_toolbar(void)
 static void toolbar_ungrab_input(void)
 {
 	xcb_ungrab_pointer(dpy, XCB_CURRENT_TIME);
-	xcb_ungrab_key(dpy, toolbar.kprev, rootscr->root,
-		       XCB_MOD_MASK_ANY);
-	xcb_ungrab_key(dpy, toolbar.knext, rootscr->root,
-		       XCB_MOD_MASK_ANY);
-	xcb_ungrab_key(dpy, toolbar.kenter, rootscr->root,
-		       XCB_MOD_MASK_ANY);
-	xcb_ungrab_key(dpy, toolbar.kclose, rootscr->root,
-		       XCB_MOD_MASK_ANY);
+	xcb_ungrab_key(dpy, toolbar.kprev, rootscr->root, 0);
+	xcb_ungrab_key(dpy, toolbar.knext, rootscr->root, 0);
+	xcb_ungrab_key(dpy, toolbar.kenter, rootscr->root, 0);
+	xcb_ungrab_key(dpy, toolbar.kclose, rootscr->root, 0);
 }
-
 
 static void toolbar_grab_input(void)
 {
