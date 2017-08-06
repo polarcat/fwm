@@ -1,0 +1,14 @@
+#!/bin/sh
+
+mkdir -p $HOME/bin
+
+cp -v yawm $HOME/bin
+cp -v etc/start-yawm $HOME/bin
+cp -v etc/xinitrc $HOME/.xinitrc-yawm
+
+if [ ! -L $HOME/.xinitrc ]; then
+	set -e
+	cd $HOME
+	ln -sf .xinitrc-yawm .xinitrc
+	mv -v .xinitrc .xinitrc-$(date +%Y%m%d-%H%M%S%s)
+fi
