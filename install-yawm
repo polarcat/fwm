@@ -1,14 +1,44 @@
 #!/bin/sh
 
-mkdir -p $HOME/bin
+pwd_=$PWD
+bin_=$HOME/bin
+base_=$HOME/.yawm
+keys_=$base_/keys
+panel_=$base_/panel
 
-cp -v yawm $HOME/bin
-cp -v etc/start-yawm $HOME/bin
+mkdir -p $bin_
+mkdir -p $keys_
+mkdir -p $panel_
+
+cp -v yawm $bin_
+cp -v menu $bin_
+cp -v etc/start-yawm $bin_
 cp -v etc/xinitrc $HOME/.xinitrc-yawm
+cp -v tools/yawm-menu $panel_/menu
 
-if [ ! -L $HOME/.xinitrc ]; then
-	set -e
-	cd $HOME
-	ln -sf .xinitrc-yawm .xinitrc
+cd $HOME
+
+if [ ! -L .xinitrc ]; then
 	mv -v .xinitrc .xinitrc-$(date +%Y%m%d-%H%M%S%s)
+fi
+
+ln -sf .xinitrc-yawm .xinitrc
+
+# set defaults
+
+cd $keys_
+
+if [ ! -f ctrl_alt_delete ]; then
+	printf "#!/bin/sh\nexec xscreensaver-command -lock &" > ctrl_alt_delete
+	chmod +x ctrl_alt_delete
+fi
+
+if [ ! -f mod_t ]; then
+	printf "#!/bin/sh\nexec xterm &" > mod_t
+	chmod +x mod_t
+fi
+
+if [ ! -f mod_m ]; then
+	printf "#!/bin/sh\nexec yawm-menu &" > mod_m
+	chmod +x mod_m
 fi

@@ -1,46 +1,75 @@
 #!/bin/sh
 
+force_=0
 base_=$HOME/.yawm
-dirs_="
-center
-exclusive
-top-left
-"
+keys_=$base_/keys
+ifs_=$IFS
 
-for dir in $dirs_; do
-	mkdir -p $base_/$dir
-done
+help()
+{
+	local app=$(basename $0)
 
-mkdir -p $HOME/bin
+	printf "$app <options>\nOptions:\n  -f|--force  override existing keys\n"
+	exit 0
+}
+
+parse() { key_="$1"; pos_="$2"; shift 2; cmd_="$@"; }
+
+# tools: <key>:<position>:<cmd>
 
 tools_="
-yawm-screens
-yawm-clients
-yawm-clipboard
-yawm-apps
-yawm-run
-yawm-keys
-yawm-restart
-yawm-suspend
-yawm-tagmenu
-yawm-clock
+mod_e:center:yawm-tagmenu
+mod_k:center:yawm-keys
+mod_l:center:yawm-clients
+mod_m:center:yawm-menu
+mod_o:center:yawm-screens
+mod_p:center:yawm-apps
+mod_r:center:yawm-run
+mod_v:center:yawm-clipboard
+:center:yawm-suspend
+:dock:yawm-clock
+::yawm-restart
 "
 
-for tool in $tools_; do
-	cp -v tools/$tool $HOME/bin/
-	chmod 755 $HOME/bin/$tool
-	touch $base_/center/$tool
-	touch $base_/exclusive/$tool
-done
+case $1 in
+-h|--help) help;;
+-f|--force) force_=1;;
+esac
 
-keys_=$base_/keys
+mkdir -p $HOME/bin
 mkdir -p $keys_
 
-cp -v tools/yawm-menu $HOME/bin/
-chmod 755 $HOME/bin/yawm-menu
-touch $base_/top-left/yawm-menu
-touch $base_/exclusive/yawm-menu
+for tool in $tools_; do
+	key_=''
+	pos_=''
+	cmd_=''
+	IFS=':'; parse $tool; IFS=$ifs_
 
-printf "#!/bin/sh\nexec yawm-menu &\n" > $keys_/mod_m
-chmod +x $keys_/mod_m
-echo "reload-keys" > $base_/.control
+	if [ -z "$cmd_" ]; then
+		continue
+	fi
+
+	cp -v tools/$cmd_ $HOME/bin/
+	chmod 0755 $HOME/bin/$cmd_
+
+	if [ -n "$pos_" ]; then
+		mkdir -p $base_/$pos_
+		touch $base_/$pos_/$cmd_
+	fi
+
+	if [ -z "$key_" ]; then
+		continue
+	fi
+
+	if [ $force_ -eq 0 ] && [ -f $keys_/$key_ ]; then
+		printf "key \033[0;32m$key_\033[0m already defined\n"
+		printf "run with -f parameter to override\n"
+		continue
+	fi
+
+	printf "#!/bin/sh\nexec $cmd_ &\n" > $keys_/$key_
+	chmod 0755 $keys_/$key_
+done
+
+# TODO: yawm should have per X session control file
+# echo "reload-keys" > $base_/.control
