@@ -90,7 +90,9 @@ static float font2_size_ = FONT1_SIZE;
 
 static struct xkb_context *xkb_;
 static struct xkb_keymap *keymap_;
+#if 0
 static struct xkb_state *state_;
+#endif
 static uint8_t level_;
 static uint8_t control_;
 
@@ -962,10 +964,13 @@ static int init_xkb(void)
 		return -1;
 	}
 
+#if 0
+	dd("DEBUG %s:%d\n", __func__, __LINE__);
 	if (!(state_ = xkb_x11_state_new_from_device(keymap_, dpy_, dev))) {
 		ee("xkb_x11_state_new_from_device() failed\n");
 		return -1;
 	}
+#endif
 
 	return 0;
 }
@@ -1011,7 +1016,7 @@ err:
 
 static void help(const char *name)
 {
-	ii("Usage: %s [options] <file>\n"
+	dd("Usage: %s [options] <file>\n"
 	   "\nOptions:\n"
 	   "  -h, --help                   print this message\n"
 	   "  -c, --cols <width>           menu width in characters\n"
@@ -1169,10 +1174,8 @@ static uint8_t events(uint8_t wait)
 	else
 		e = xcb_poll_for_event(dpy_);
 
-	if (!e) {
-		done_ = 1;
+	if (!e)
 		return 0;
-	}
 
 	switch (e->response_type & ~0x80) {
 	case XCB_VISIBILITY_NOTIFY:
@@ -1248,7 +1251,7 @@ int main(int argc, char *argv[])
 
 	if (!xdpy_) {
 		ee("XOpenDisplay() failed\n");
-		goto out;
+		return 255;
 	}
 
 	xscr_ = DefaultScreen(xdpy_);
@@ -1256,12 +1259,12 @@ int main(int argc, char *argv[])
 
 	if (!dpy_) {
 		ee("xcb_connect() failed\n");
-		goto out;
+		return 255;
 	}
 
 	if (!(font1_ = load_font(font1_name_, font1_size_))) {
 		ee("XftFontOpen(%s) failed\n", font1_name_);
-		goto out;
+		return 255;
 	}
 
 	font_ = font1_; /* default */
@@ -1308,11 +1311,11 @@ int main(int argc, char *argv[])
 
 	if (!draw_) {
 		ee("XftDrawCreate() failed\n");
-		goto out;
+		return 255;
 	}
 
 	if ((fd = init_menu()) < 0)
-		goto out;
+		return 255;
 
 	dd("padding %u,%u\n", x_pad_, y_pad_);
 
@@ -1359,7 +1362,8 @@ int main(int argc, char *argv[])
 	if (!(syms_ = xcb_key_symbols_alloc(dpy_)))
 		ww("xcb_key_symbols_alloc() failed\n");
 
-	init_xkb();
+	if (init_xkb() < 0)
+		return 255;
 
 	while (!done_)
 		events(1);
@@ -1379,40 +1383,13 @@ int main(int argc, char *argv[])
 		if (errno == EINTR)
 			continue;
 
-		if (pfd.revents & POLLIN)
+		if (pfd.revents & POLLHUP)
+			break;
+		else if (pfd.revents & POLLIN)
 			while (events(0)) {};
 
 		pfd.revents = 0;
 	}
 
-out:
-	if (state_)
-		xkb_state_unref(state_);
-
-	if (keymap_)
-		xkb_keymap_unref(keymap_);
-
-	if (xkb_)
-		xkb_context_unref(xkb_);
-
-	if (draw_)
-		XftDrawDestroy(draw_);
-
-	if (xdpy_) {
-		if (font1_)
-			XftFontClose(xdpy_, font1_);
-		if (font2_ && font2_ != font1_)
-			XftFontClose(xdpy_, font2_);
-	}
-
-	if (win_ != XCB_WINDOW_NONE) {
-		xcb_destroy_window(dpy_, win_);
-		xcb_flush(dpy_);
-	}
-
-	if (data_)
-		munmap(data_, data_size_);
-
-	close(fd);
 	return 0;
 }

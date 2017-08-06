@@ -259,11 +259,11 @@ int main(int argc, char *argv[])
 
         xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, win,
 			    XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
-                            sizeof("xclock") - 1, "xclock");
+                            sizeof("yawm-clock") - 1, "yawm-clock");
 
         xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, win,
 			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
-                            sizeof("xclock") - 1, "xclock");
+                            sizeof("yawm-clock") - 1, "yawm-clock");
 
 	xcb_map_window(dpy, win);
 	xcb_flush(dpy);
@@ -273,7 +273,7 @@ int main(int argc, char *argv[])
 	pfd.revents = 0;
 
 	while (!done) {
-		int rc = poll(&pfd, 1, 3000);
+		int rc = poll(&pfd, 1, 5000);
 		if (rc == 0) { /* timeout */
 			printtime();
 		} else if (rc < 0) {
@@ -283,12 +283,17 @@ int main(int argc, char *argv[])
 			continue;
 		}
 
-		if (pfd.revents & POLLIN)
+		if (pfd.revents & POLLHUP)
+			break;
+		else if (pfd.revents & POLLIN)
 			while (events()) {} /* read all events */
+
+		pfd.revents = 0;
 	}
 
 	xcb_destroy_window(dpy, win);
 	if (font)
 		XftFontClose(xdpy, font);
+
 	return 0;
 }
