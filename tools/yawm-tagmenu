@@ -1,6 +1,6 @@
 #!/bin/sh
 
-ctl_=$HOME/.yawm/.control
+ctl_=$HOME/.yawm/.control$DISPLAY
 tmp_=$HOME/.yawm/tmp
 seq_=$tmp_/.seq
 out_=$tmp_/tagmenu
@@ -90,13 +90,13 @@ rename()
 		return
 	fi
 
-	local path=$HOME/.yawm/screens/$scr_/tags/$tag_/.name
+	local path=$HOME/.yawm/screens/$scr_/tags/$tag_
 
-	if [ ! -f $path ]; then
+	if [ ! -d $path ]; then
 		return
 	fi
 
-	printf "$1" > $path
+	printf "$1" > $path/.name
 	echo "refresh-panel $scr_" > $ctl_
 }
 

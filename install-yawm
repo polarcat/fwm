@@ -12,6 +12,7 @@ mkdir -p $panel_
 
 cp -v yawm $bin_
 cp -v menu $bin_
+cp -v clock $bin_
 cp -v etc/start-yawm $bin_
 cp -v etc/xinitrc $HOME/.xinitrc-yawm
 cp -v tools/yawm-menu $panel_/menu
@@ -25,6 +26,8 @@ fi
 ln -sf .xinitrc-yawm .xinitrc
 
 # set defaults
+
+mkdir -p $base_/screens/0/tags/0
 
 cd $keys_
 

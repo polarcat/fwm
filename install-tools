@@ -3,6 +3,7 @@
 force_=0
 base_=$HOME/.yawm
 keys_=$base_/keys
+ctl_=$base_/.control$DISPLAY
 ifs_=$IFS
 
 help()
@@ -71,5 +72,6 @@ for tool in $tools_; do
 	chmod 0755 $keys_/$key_
 done
 
-# TODO: yawm should have per X session control file
-# echo "reload-keys" > $base_/.control
+if [ -p $ctl_ ]; then
+	echo "reload-keys" > $ctl_
+fi

@@ -1,6 +1,6 @@
 #!/bin/sh
 
-ctl_=$HOME/.yawm/.control
+ctl_=$HOME/.yawm/.control$DISPLAY
 cli_=$HOME/.yawm/tmp/clients
 seq_=$HOME/.yawm/tmp/.seq
 

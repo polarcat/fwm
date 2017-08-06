@@ -1,6 +1,6 @@
 #!/bin/sh
 
-ctl_=$HOME/.yawm/.control
+ctl_=$HOME/.yawm/.control$DISPLAY
 scr_=$HOME/.yawm/tmp/screens
 
 menu -n yawm-screens -b -c 25 -d $scr_ |
