@@ -5451,6 +5451,14 @@ enum fdtypes {
 	FD_MAX,
 };
 
+static int open_control(int fd)
+{
+	char path[sizeof(YAWM_CTRL) + sizeof("255") - 1];
+
+	snprintf(path, sizeof(path), YAWM_CTRL ":%d", xscr);
+	return open_fifo(path, fd);
+}
+
 static inline void handle_server_event(struct pollfd *pfd)
 {
 	if (pfd->revents & POLLIN)
@@ -5465,7 +5473,7 @@ static inline void handle_control_event(struct pollfd *pfd)
 		handle_user_request(pfd->fd);
 
 	/* reset pipe */
-	pfd->fd = open_fifo(YAWM_CTRL, pfd->fd);
+	pfd->fd = open_control(pfd->fd);
 	pfd->revents = 0;
 }
 
@@ -5535,7 +5543,7 @@ int main()
 	pfds[FD_SRV].events = POLLIN;
 	pfds[FD_SRV].revents = 0;
 
-	pfds[FD_CTL].fd = open_fifo(YAWM_CTRL, -1);
+	pfds[FD_CTL].fd = open_control(-1);
 	pfds[FD_CTL].events = POLLIN;
 	pfds[FD_CTL].revents = 0;
 
