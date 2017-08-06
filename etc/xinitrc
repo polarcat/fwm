@@ -1,0 +1,23 @@
+#!/bin/sh
+
+xset -b
+setxkbmap -model pc105 -variant nodeadkeys -option grp:alt_shift_toggle \
+	-layout "fi(nodeadkeys),ru"
+xsetroot -solid black -cursor_name left_ptr
+xscreensaver -no-splash &
+xdeskd &
+
+while :; do
+	if [ ! -f $HOME/.yawm-enable-log ]; then
+		yawm
+	else
+		log=$HOME/yawm${DISPLAY}.log
+		YAWM_LOG=$log yawm
+	fi
+
+	yawm-restart
+
+	if [ $? -eq 0 ]; then
+		break
+	fi
+done
