@@ -94,10 +94,6 @@ typedef uint8_t strlen_t;
 
 #define DIV_ICON "::"
 
-#define MENU_ICON1 "="
-#define MENU_ICON2 ""
-//#define MENU_ICON2 " "
-
 #define ALT XCB_MOD_MASK_1
 #ifndef MOD
 #define MOD XCB_MOD_MASK_1
@@ -473,6 +469,14 @@ static struct color defcolors[] = {
 #define color2xft(idx) *((XftColor *) defcolors[idx].val)
 #define color2ptr(idx) &defcolors[idx]
 
+#define MENU_ICON_DEF "="
+#define MENU_ICON_DOWN ""
+#define MENU_ICON_UP ""
+//#define MENU_ICON_DEF " "
+
+static XftFont *menu_font;
+static char *menu_icon = MENU_ICON_DEF;
+static uint8_t menu_icon_len = sizeof(MENU_ICON_DEF) - 1;
 static uint16_t panel_height;
 static uint8_t panel_top;
 static xcb_timestamp_t tag_time;
@@ -1781,7 +1785,7 @@ static int setup_toolbar(struct client *cli)
 
 	toolbar.scr = curscr;
 	toolbar.x = curscr->items[PANEL_AREA_TITLE].x;
-	toolbar.y = curscr->y;
+	toolbar.y = curscr->panel.y;
 	toolbar.panel.w = w;
 	toolbar.panel.h = panel_height;
 	toolbar.panel.win = xcb_generate_id(dpy);
@@ -3143,15 +3147,9 @@ static void print_menu(struct screen *scr)
 	x = scr->items[PANEL_AREA_MENU].x;
 	w = scr->items[PANEL_AREA_MENU].w;
 
-	if (font2) {
-		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
-				color2ptr(PANELBG), x, w, MENU_ICON2,
-				sizeof(MENU_ICON2) - 1, font2, ITEM_H_MARGIN);
-	} else {
-		draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
-				color2ptr(PANELBG), x, w, MENU_ICON1,
-				sizeof(MENU_ICON1) - 1, font1, ITEM_H_MARGIN);
-	}
+	draw_panel_text(&scr->panel, color2ptr(TEXTFG_NORMAL),
+			color2ptr(PANELBG), x, w, menu_icon, menu_icon_len,
+			menu_font, ITEM_H_MARGIN);
 }
 
 static void print_div(struct screen *scr)
@@ -3463,10 +3461,7 @@ static void update_panel_items(struct screen *scr)
 	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(PANELBG), scr->x, 0,
 		  scr->w, panel_height);
 
-	if (font2)
-		text_exts(MENU_ICON2, sizeof(MENU_ICON2) - 1, &w, &h, font2);
-	else
-		text_exts(MENU_ICON1, sizeof(MENU_ICON1) - 1, &w, &h, font1);
+	text_exts(menu_icon, menu_icon_len, &w, &h, menu_font);
 
 	scr->items[PANEL_AREA_MENU].x = TAG_GAP;
 	scr->items[PANEL_AREA_MENU].w = w + 2 * ITEM_H_MARGIN;
@@ -3978,10 +3973,15 @@ static void init_outputs(void)
 	out = xcb_randr_get_screen_resources_current_outputs(r);
 	ii("found %d screens\n", len);
 
-	if (stat("panel/top", &st) == 0)
+	if (stat("panel/top", &st) == 0) {
 		panel_top = 1;
-	else
+		menu_icon = MENU_ICON_DOWN;
+		menu_icon_len = sizeof(MENU_ICON_DOWN) - 1;
+	} else {
 		panel_top = 0;
+		menu_icon = MENU_ICON_UP;
+		menu_icon_len = sizeof(MENU_ICON_UP) - 1;
+	}
 
 	/* reset geometry of previously found screens */
 	list_walk_safe(cur, tmp, &screens) {
@@ -5251,8 +5251,12 @@ static void init_font(void)
 	font2 = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
 			    FONT2_NAME, XFT_SIZE, XftTypeDouble,
 			    FONT2_SIZE, NULL);
-	if (!font2)
+	if (font2) {
+		menu_font = font2;
+	} else {
+		menu_font = font1;
 		ee("XftFontOpen(%s)\n", FONT2_NAME);
+	}
 }
 
 static void init_keys_def(void)
