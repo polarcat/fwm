@@ -4392,6 +4392,7 @@ static void toolbar_button_press(struct arg *arg)
 
 static void panel_button_press(xcb_button_press_event_t *e)
 {
+	motion_cli = NULL;
 	curscr = coord2scr(e->root_x, e->root_y);
 
 	dd("screen %d, press at %d,%d", curscr->id, e->event_x, e->event_y);
