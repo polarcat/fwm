@@ -296,6 +296,7 @@ struct client {
 	uint16_t flags;
 	uint32_t crc; /* based on class name */
 	uint8_t busy;
+	uint8_t pos; /* enum winpos */
 };
 
 #define list2client(item) list_entry(item, struct client, head)
@@ -4436,6 +4437,14 @@ static void handle_button_release(xcb_button_release_event_t *e)
 			show_toolbar(NULL);
 			hide_toolbox();
 		}
+	} else if (cli && cli->pos) {
+		struct arg arg = {
+			.x = curscr->x,
+			.y = curscr->top,
+			.data = cli->pos,
+		};
+		cli->pos = 0;
+		place_window(&arg);
 	}
 
 	if (toolbar.panel.win != e->event && toolbar.panel.win != e->child)
@@ -4527,6 +4536,46 @@ static void handle_panel_motion(int16_t x, int16_t y)
 	}
 }
 
+#define MOTION_ZONE_DIV 7
+#define MOTION_ZONE_MUL 3
+
+static void motion_place(struct client *cli, int16_t x, int16_t y)
+{
+	uint32_t color = notice_bg;
+	uint16_t dw = curscr->w / MOTION_ZONE_DIV;
+	uint16_t dh = curscr->h / MOTION_ZONE_DIV;
+	uint16_t sw = curscr->x + curscr->w;
+	uint16_t sh = curscr->y + curscr->h + panel_height;
+	int16_t sx = curscr->x;
+	int16_t sy = curscr->y;
+	uint16_t dw2 = dw * MOTION_ZONE_MUL;
+	uint16_t dh2 = dh * MOTION_ZONE_MUL;
+
+	if (x >= sx  && x < sx + dw && y >= sy && y < sy + dh) {
+		cli->pos = WIN_POS_TOP_LEFT;
+	} else if (x >= sx && x < sx + dw && y > sh - dh && y <= sh) {
+		cli->pos = WIN_POS_BOTTOM_LEFT;
+	} else if (x > sw - dw && x <= sw && y >= sy && y < sy + dh) {
+		cli->pos = WIN_POS_TOP_RIGHT;
+	} else if (x > sw - dw && x <= sw && y > sh - dh && y <= sh) {
+		cli->pos = WIN_POS_BOTTOM_RIGHT;
+	} else if (x > sx + dw2 && x <= sw - dw2 && y > sy && y < sy + dh) {
+		cli->pos = WIN_POS_TOP_FILL;
+	} else if (x > sx + dw2 && x <= sw - dw2 && y > sh - dh && y <= sh) {
+		cli->pos = WIN_POS_BOTTOM_FILL;
+	} else if (x >= sx && x <= sx + dw && y > sy + dh2 && y <= sh - dh2) {
+		cli->pos = WIN_POS_LEFT_FILL;
+	} else if (x > sw - dw && x <= sw && y > sy + dh2 && y < sh - dh2) {
+		cli->pos = WIN_POS_RIGHT_FILL;
+	} else {
+		cli->pos = 0;
+		color = active_bg;
+	}
+
+	cli->div = 1;
+	window_border_color(cli->win, color);
+}
+
 static uint16_t pointer_x;
 
 static void handle_motion_notify(xcb_motion_notify_event_t *e)
@@ -4564,6 +4613,8 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 		return;
 	}
 
+	motion_place(cli, e->root_x, e->root_y);
+
 	/* save initial coords on the first move */
 
 	if (!motion_init_x)
@@ -4574,8 +4625,8 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 
 	motion_cli = cli;
 
-	cli->x = e->root_x - cli->w / 2;
-	cli->y = e->root_y - cli->h / 2;
+	cli->x = e->root_x - cli->w / 2 - BORDER_WIDTH;
+	cli->y = e->root_y - cli->h / 2 - BORDER_WIDTH;
 
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	val[0] = cli->x;
