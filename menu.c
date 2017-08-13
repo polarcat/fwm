@@ -49,6 +49,7 @@ static xcb_drawable_t win_;
 static xcb_gcontext_t gc_;
 static xcb_key_symbols_t *syms_;
 static uint8_t done_;
+static uint8_t warp_ = 1;
 
 static char search_buf_[UCHAR_MAX];
 static uint8_t search_idx_ = PROMPT_LEN; /* '> ' */
@@ -246,8 +247,11 @@ static void swap_cols(struct row *row, uint8_t dst, uint8_t src)
 
 static void warp_pointer(int16_t x, int16_t y)
 {
-	xcb_warp_pointer(dpy_, XCB_NONE, win_, 0, 0, 0, 0, x, y);
-	xcb_flush(dpy_);
+	if (warp_) {
+		xcb_warp_pointer(dpy_, XCB_NONE, win_, 0, 0, 0, 0, x, y);
+		xcb_flush(dpy_);
+		warp_ = 0;
+	}
 }
 
 static void draw_row(struct row *row, uint8_t idx, uint8_t focus)
@@ -599,6 +603,7 @@ static void key_press(xcb_key_press_event_t *e)
 		draw_row(selrow_, selidx_, 0);
 		selidx_--;
 		selrow_ = view_[selidx_];
+		warp_ = 1;
 		draw_row(selrow_, selidx_, 1);
 	} else if (sym == XK_Down) {
 		uint8_t rem = (selidx_ + rows_rem_) == rows_per_page_ - 1;
@@ -617,6 +622,7 @@ static void key_press(xcb_key_press_event_t *e)
 		draw_row(selrow_, selidx_, 0);
 		selidx_++;
 		selrow_ = view_[selidx_];
+		warp_ = 1;
 		draw_row(selrow_, selidx_, 1);
 	} else if (sym == XK_Right) {
 		struct column *col = &selrow_->cols[0];
@@ -641,8 +647,10 @@ static void key_press(xcb_key_press_event_t *e)
 
 		done_ = 1;
 	} else {
-		if ((sym = get_keysyms(e->detail)))
+		if ((sym = get_keysyms(e->detail))) {
+			warp_ = 1;
 			find_row(sym);
+		}
 	}
 
 	follow_ = 0;
@@ -1016,7 +1024,7 @@ err:
 
 static void help(const char *name)
 {
-	dd("Usage: %s [options] <file>\n"
+	printf("Usage: %s [options] <file>\n"
 	   "\nOptions:\n"
 	   "  -h, --help                   print this message\n"
 	   "  -c, --cols <width>           menu width in characters\n"
