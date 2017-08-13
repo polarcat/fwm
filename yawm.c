@@ -3140,13 +3140,15 @@ static int tag_pointed(struct tag *tag, int16_t x, int16_t y)
 
 static void motion_retag(int16_t x, int16_t y)
 {
-	struct client *cli = motion_cli;
+	struct client *cli;
 	struct list_head *cur;
-	struct tag *tag = NULL;
+	struct tag *tag;
 
-	if (!cli)
+	if (!motion_cli)
 		return;
 
+	tag = NULL;
+	cli = motion_cli;
 	motion_cli = NULL;
 
 	list_walk(cur, &curscr->tags) {
@@ -4307,7 +4309,7 @@ static void handle_user_request(int fd)
 
 #undef match
 
-#define pointer_inside(scr, area, ex)\
+#define area(scr, area, ex)\
 	(ex >= scr->items[area].x &&\
 	 ex <= scr->items[area + 1].x)
 
@@ -4319,7 +4321,7 @@ static void handle_user_request(int fd)
 	for (i = 0; i < PANEL_AREA_MAX; i++) {\
 		ii("%d: %d <= %d <= %d (w = %d)\n", i, scr->items[i].x, ex,\
 		   scr->items[i + 1].x, scr->items[i].w);\
-		if pointer_inside(scr, i, ex)\
+		if area(scr, i, ex)\
 			ii("inside element %d\n", i);\
 	}\
 }
@@ -4394,20 +4396,19 @@ static void panel_button_press(xcb_button_press_event_t *e)
 {
 	motion_cli = NULL;
 	curscr = coord2scr(e->root_x, e->root_y);
-
 	dd("screen %d, press at %d,%d", curscr->id, e->event_x, e->event_y);
-
 	dump_coords(curscr, e->event_x);
-	if pointer_inside(curscr, PANEL_AREA_TAGS, e->event_x) {
+
+	if area(curscr, PANEL_AREA_TAGS, e->event_x) {
 		dd("panel press time %u", e->time);
 		tag_time = e->time;
 		select_tag(curscr, e->event_x, e->event_y);
 		xcb_flush(dpy);
-	} else if pointer_inside(curscr, PANEL_AREA_TITLE, e->event_x) {
+	} else if area(curscr, PANEL_AREA_TITLE, e->event_x) {
 		ii("title\n");
 		curscr->flags |= SCR_FLG_SWITCH_WINDOW_NOWARP;
 		switch_window(curscr, DIR_NEXT);
-	} else if pointer_inside(curscr, PANEL_AREA_DOCK, e->event_x) {
+	} else if area(curscr, PANEL_AREA_DOCK, e->event_x) {
 		ii("dock\n");
 	}
 }
@@ -4424,14 +4425,14 @@ static void handle_button_release(xcb_button_release_event_t *e)
 	curscr = coord2scr(e->root_x, e->root_y);
 
 	if (curscr->panel.win == e->event || curscr->panel.win == e->child) {
-		if pointer_inside(curscr, PANEL_AREA_TAGS, e->event_x) {
+		if area(curscr, PANEL_AREA_TAGS, e->event_x) {
 			dd("panel release time %u", e->time - tag_time);
 			if (e->time - tag_time > TAG_LONG_PRESS)
 				ii("panel long press\n");
 			motion_retag(e->event_x, e->event_y);
-		} else if pointer_inside(curscr, PANEL_AREA_MENU, e->event_x) {
+		} else if area(curscr, PANEL_AREA_MENU, e->event_x) {
 			show_menu();
-		} else if pointer_inside(curscr, PANEL_AREA_DIV, e->event_x) {
+		} else if area(curscr, PANEL_AREA_DIV, e->event_x) {
 			show_toolbar(NULL);
 			hide_toolbox();
 		}
@@ -4536,8 +4537,6 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 
 	te("XCB_MOTION_NOTIFY: root %+d%+d, event 0x%x %+d%+d, child 0x%x\n",
 	   e->root_x, e->root_y, e->event, e->event_x, e->event_y, e->child);
-
-	te("panel 0x%x\n", curscr->panel.win);
 
 	if (e->event == toolbar.panel.win) {
 		focus_toolbar_item(e->event_x, e->event_y);
