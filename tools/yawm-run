@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. ~/.yawm/colors/menu-colors
+
 ifs_=$IFS
 tmp_=$HOME/.yawm/tmp
 out_=$tmp_/bin
@@ -14,8 +16,8 @@ for dir in $PATH; do
 	done
 done
 
-IFS='	'
-menu -n yawm-run -b -d -a $out_ | while read cmd path extra; do
+IFS=$ifs_
+menu -n yawm-run -b $colors_ -d -a $out_ | while read cmd path extra; do
 	if [ -z "$extra" ]; then
 		exec $cmd &
 	else

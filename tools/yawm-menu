@@ -1,31 +1,24 @@
 #!/bin/sh
 
-read c2 < $HOME/.yawm/colors/textfg_active
-read c3 < $HOME/.yawm/colors/textbg_active
+. ~/.yawm/colors/menu-colors
 
 tmp_=$HOME/.yawm/tmp
 out_=$tmp_/menu
-#colors_="-0 0x303030 -1 0xc0c0c0 -2 0x303030 -3 0x808080"
-colors_="-0 0x404040 -1 0xd0d0d0 -2 $c2 -3 $c3"
 
-mkdir -p $tmp_
-
-#if [ ! -f $out_ ]; then
-#	printf "\a\t\n" > $out_
-	printf "\a  \t\n" > $out_
-	printf "\a  \trun...\n" >> $out_
-	printf "\a  \tterminal\n" >> $out_
-	printf "\a  \tfirefox\n" >> $out_
-	printf "\a  \tchrome\n" >> $out_
-#	printf "\a  \tlinks\n" >> $out_
-	printf "\a  \tclipboard\n" >> $out_
-	printf "\a  \tapplications\n" >> $out_
-	printf "\a  \twindows\n" >> $out_
-	printf "\a  \tshortcuts\n" >> $out_
-	printf "\a  \tgrid\n" >> $out_
-	printf "\a  \ttag editor\n" >> $out_
-	printf "\a  \texit\n" >> $out_
-#fi
+#printf "\a\t\n" > $out_
+printf "\a  \t\n" > $out_
+printf "\a  \trun...\n" >> $out_
+printf "\a  \tterminal\n" >> $out_
+printf "\a  \tfirefox\n" >> $out_
+printf "\a  \tchrome\n" >> $out_
+#printf "\a  \tlinks\n" >> $out_
+printf "\a  \tclipboard\n" >> $out_
+printf "\a  \tapplications\n" >> $out_
+printf "\a  \twindows\n" >> $out_
+printf "\a  \tshortcuts\n" >> $out_
+printf "\a  \tgrid\n" >> $out_
+printf "\a  \ttag editor\n" >> $out_
+printf "\a  \texit\n" >> $out_
 
 menu -n yawm-menu -b $colors_ -c 30 -d $out_ |
 while read icon item; do

@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. ~/.yawm/colors/menu-colors
+
 ifs_=$IFS
 dir_=$HOME/.yawm/keys
 tmp_=$HOME/.yawm/tmp
@@ -27,7 +29,7 @@ done >> $out_
 
 getval_() { echo $2 | tr '[:lower:]' '[:upper:]'; }
 
-menu -n yawm-keys -b -d $out_ | while read key info; do
+menu -n yawm-keys -b $colors_ -d $out_ | while read key info; do
 	case $key in
 	mod_f*)
 		IFS='_'; val=$(getval_ $key); IFS=$ifs_

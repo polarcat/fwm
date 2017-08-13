@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. ~/.yawm/colors/menu-colors
+
 ctl_=$HOME/.yawm/.control$DISPLAY
 tmp_=$HOME/.yawm/tmp
 seq_=$tmp_/.seq
@@ -108,7 +110,7 @@ if [ $tag_ -lt 0 ]; then
 	exit 1
 fi
 
-menu -n yawm-tagmenu -b -a -c $width_ -d $out_ |
+menu -n yawm-tagmenu -b $colors_ -a -c $width_ -d $out_ |
 while read icon item param cmd arg; do
 	case $item in
 	"left"*) echo "move left";;

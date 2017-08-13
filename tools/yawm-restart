@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. ~/.yawm/colors/menu-colors
+
 tmp_=$HOME/.yawm/tmp
 out_=$tmp_/restart
 
@@ -10,7 +12,7 @@ if [ ! -f $out_ ]; then
 	printf "Leave desktop session\t\a \n" >> $out_
 fi
 
-menu -n yawm-screens -c 24 -d $out_ | while read info icon; do
+menu -n yawm-screens $colors_ -c 24 -d $out_ | while read info icon; do
 	case $info in
 	Restart*) return 1;;
 	Leave*) return 0;;

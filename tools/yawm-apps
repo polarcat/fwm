@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. ~/.yawm/colors/menu-colors
+
 ifs_=$IFS
 dir_=/usr/share
 tmp_=$HOME/.yawm/tmp
@@ -52,7 +54,7 @@ find $dir_ -type f -name "*.desktop" | while read file; do
 	fi
 done
 
-res=$(menu -n yawm-apps -b -d $out_)
+res=$(menu -n yawm-apps -b $colors_ -d $out_)
 
 runcmd_() { exec $1; }
 

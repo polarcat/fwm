@@ -1,9 +1,13 @@
 #!/bin/sh
 
+. ~/.yawm/colors/menu-colors
+
 ctl_=$HOME/.yawm/.control$DISPLAY
 scr_=$HOME/.yawm/tmp/screens
 
-menu -n yawm-screens -b -c 25 -d $scr_ |
+echo list-screens > $ctl_
+
+menu -n yawm-screens -b $colors_ -c 25 -d $scr_ |
 while read scr line; do
 	echo "focus-screen $scr" > $ctl_
 	exit 0
