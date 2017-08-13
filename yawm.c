@@ -814,7 +814,7 @@ static void store_client(struct client *cli, uint8_t clean)
 
 	if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
 		clean = 1;
-	} else if (cli->flags & CLI_FLG_POPUP) {
+	} else if (cli->flags & (CLI_FLG_POPUP | CLI_FLG_IGNORED)) {
 		return;
 	}
 
@@ -2802,28 +2802,16 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
-	enum winstatus status = window_status(win);
-
-	if (status == WIN_STATUS_UNKNOWN) {
-		if (scan) { /* ignore window and save it for next wm session */
-			ww("ignore unknown window 0x%x\n", win);
-			xcb_change_property(dpy, XCB_PROP_MODE_APPEND,
-					    rootscr->root, a_client_list,
-					    XCB_ATOM_WINDOW, 32, 1, &win);
-		} else {
-			ww("destroy unknown window 0x%x\n", win);
-			xcb_unmap_window_checked(dpy, win);
-			xcb_destroy_window_checked(dpy, win);
-		}
-
-		xcb_flush(dpy);
-		return NULL;
-	}
 
 	if (win == rootscr->root || win == toolbar.panel.win)
 		return NULL;
 
 	flags = 0;
+
+	if (window_status(win) == WIN_STATUS_UNKNOWN) {
+		ww("ignore unknown window 0x%x\n", win);
+		flags |= CLI_FLG_IGNORED;
+	}
 
 	if (window_special(win, "dock", sizeof("dock")))
 		flags |= CLI_FLG_DOCK;
