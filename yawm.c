@@ -4594,21 +4594,21 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	}
 
 	curscr = coord2scr(e->root_x, e->root_y);
+
 	if (!curscr)
 		return;
 
 	trace_screen_metrics(curscr);
-	if (curscr && curscr->panel.win == e->child) {
+	cli = win2cli(e->child); /* window is being moved so search in global list */
+
+	if (cli && cli->flags & (CLI_FLG_DOCK | CLI_FLG_TRAY | CLI_FLG_IGNORED)) {
+		ww("win 0x%x is not moveable\n", cli->win);
+		return;
+	} else if (curscr && curscr->panel.win == e->child) {
 		/* panel window is a child in motion with modifier key */
 		handle_panel_motion(e->event_x, e->event_y);
 		return;
-	} else if (!e->child) {
-		return;
-	}
-
-	/* window is being moved so search in global list */
-	cli = win2cli(e->child);
-	if (!cli) {
+	} else if (!e->child || !cli) {
 		ww("win 0x%x is not managed\n", e->child);
 		return;
 	}
