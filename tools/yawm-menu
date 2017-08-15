@@ -12,6 +12,7 @@ printf "\a  \tterminal\n" >> $out_
 printf "\a  \tfirefox\n" >> $out_
 printf "\a  \tchrome\n" >> $out_
 #printf "\a  \tlinks\n" >> $out_
+printf "\a  \tfiles\n" >> $out_
 printf "\a  \tclipboard\n" >> $out_
 printf "\a  \tapplications\n" >> $out_
 printf "\a  \twindows\n" >> $out_
@@ -28,6 +29,7 @@ while read icon item; do
 	"terminal"*) exec xterm &;;
 	"firefox"*) exec firefox;;
 	"chrome"*) exec chromium-browser;;
+	"files"*) exec pcmanfm;;
 	"clipboard"*) exec yawm-clipboard;;
 	"applications"*) exec yawm-apps &;;
 	"windows"*) exec yawm-clients &;;
