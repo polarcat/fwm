@@ -286,8 +286,6 @@ struct client {
 	struct list_head list; /* global list */
 	int16_t x, y;
 	uint16_t w, h;
-	int16_t prev_x, prev_y;
-	uint16_t prev_w, prev_h;
 	uint8_t div; /* for position calculation */
 	xcb_window_t win;
 	pid_t pid;
@@ -2237,21 +2235,7 @@ static void place_window(void *ptr)
 	switch (pos) {
 	case WIN_POS_FILL:
 		tt("WIN_POS_FILL\n");
-		if (cli->flags & CLI_FLG_FULLSCREEN) {
-			cli->flags &= ~CLI_FLG_FULLSCREEN;
-			x = cli->prev_x;
-			y = cli->prev_y;
-			w = cli->prev_w;
-			h = cli->prev_h;
-			break;
-		}
-
-		cli->prev_x = cli->x;
-		cli->prev_y = cli->y;
-		cli->prev_w = cli->w;
-		cli->prev_h = cli->h;
 		cli->flags |= CLI_FLG_FULLSCREEN;
-
 		x = curscr->x;
 		y = curscr->top;
 		w = curscr->w - 2 * BORDER_WIDTH;
@@ -2259,21 +2243,7 @@ static void place_window(void *ptr)
 		curscr->tag->anchor = NULL;
 		break;
 	case WIN_POS_CENTER:
-		if (cli->flags & CLI_FLG_CENTER) {
-			cli->flags &= ~CLI_FLG_CENTER;
-			x = cli->prev_x;
-			y = cli->prev_y;
-			w = cli->prev_w;
-			h = cli->prev_h;
-			break;
-		}
-
-		cli->prev_x = cli->x;
-		cli->prev_y = cli->y;
-		cli->prev_w = cli->w;
-		cli->prev_h = cli->h;
 		cli->flags |= CLI_FLG_CENTER;
-
 		x = curscr->x + curscr->w / 2 - curscr->w / 4;
 		y = curscr->top + curscr->h / 2 - curscr->h / 4;
 		window_halfwh(&w, &h);
