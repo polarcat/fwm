@@ -2,6 +2,7 @@
 
 . ~/.yawm/colors/menu-colors
 
+ctl_=$HOME/.yawm/.control$DISPLAY
 tmp_=$HOME/.yawm/tmp
 out_=$tmp_/menu
 
@@ -34,7 +35,7 @@ while read icon item; do
 	"applications"*) exec yawm-apps &;;
 	"windows"*) exec yawm-clients &;;
 	"shortcuts"*) exec yawm-keys &;;
-	"grid"*) xdotool key Alt+F3;;
+	"grid"*) printf "make-grid" > $ctl_;;
 	"tag editor"*) yawm-tagmenu &;;
 	"exit"*) killall yawm;;
 	esac
