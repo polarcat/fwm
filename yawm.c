@@ -4264,6 +4264,13 @@ static void handle_user_request(int fd)
 		errno = 0;
 		if (arg)
 			focus_window_req(strtol(arg, NULL, 16));
+	} else if (match(name.str, "make-grid")) {
+		struct arg arg = {
+			.x = curscr->x,
+			.y = curscr->top,
+			.data = 0,
+		};
+		make_grid(&arg);
 	} else if (match(name.str, "reload-colors")) {
 		struct list_head *cur;
 		init_colors();
