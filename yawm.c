@@ -2069,11 +2069,15 @@ static void make_grid(void *ptr)
 		struct client *cli = list2client(cur);
 		if (curscr->tag->anchor == cli)
 			continue;
+		else if (cli->win & (CLI_FLG_IGNORED | CLI_FLG_POPUP))
+			continue;
 		else if (window_status(cli->win) == WIN_STATUS_VISIBLE)
 			n++;
 	}
 
 	if (n == 0) {
+		return;
+	} else if (n == 1) {
 		return;
 	} else if (!cell_size(n, &cw, &ch)) {
 		return;
@@ -2105,6 +2109,8 @@ static void make_grid(void *ptr)
 		struct client *cli = list2client(cur);
 
 		if (curscr->tag->anchor == cli)
+			continue;
+		else if (cli->win & (CLI_FLG_IGNORED | CLI_FLG_POPUP))
 			continue;
 		if (window_status(cli->win) != WIN_STATUS_VISIBLE)
 			continue;
@@ -4684,6 +4690,7 @@ static void handle_key_press(xcb_key_press_event_t *e)
 				.x = e->root_x,
 				.y = e->root_y,
 				.kmap = kmap,
+				.data = 0,
 			};
 			kmap->action(&arg);
 			return;
