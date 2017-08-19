@@ -348,45 +348,45 @@ struct keymap {
 
 /* built-in default actions */
 static struct keymap kmap_def[] = {
-	{ MOD, XK_Tab, 0, "mod_tab", "_next_window",
+	{ MOD, XK_Tab, 0, "mod_tab", "next window",
 	  next_window, },
-	{ MOD, XK_BackSpace, 0, "mod_backspace", "_prev_window",
+	{ MOD, XK_BackSpace, 0, "mod_backspace", "prev window",
 	  prev_window, },
-	{ MOD, XK_Return, 0, "mod_return", "_raise_client",
+	{ MOD, XK_Return, 0, "mod_return", "raise client",
 	  raise_client, },
-	{ MOD, XK_Home, 0, "mod_home", "_retag_next",
+	{ MOD, XK_Home, 0, "mod_home", "retag next",
 	  retag_client, DIR_NEXT, },
-	{ MOD, XK_End, 0, "mod_end", "_retag_prev",
+	{ MOD, XK_End, 0, "mod_end", "retag prev",
 	  retag_client, DIR_PREV, },
-	{ MOD, XK_Page_Up, 0, "mod_pageup", "_tag_next",
+	{ MOD, XK_Page_Up, 0, "mod_pageup", "next tag",
 	  walk_tags, DIR_NEXT, },
-	{ MOD, XK_Page_Down, 0, "mod_pagedown", "_tag_prev",
+	{ MOD, XK_Page_Down, 0, "mod_pagedown", "prev tag",
 	  walk_tags, DIR_PREV, },
-	{ SHIFT, XK_F5, 0, "shift_f5", "_top_left",
+	{ SHIFT, XK_F5, 0, "shift_f5", "top-left",
 	  place_window, WIN_POS_TOP_LEFT, },
-	{ SHIFT, XK_F6, 0, "shift_f6", "_top_right",
+	{ SHIFT, XK_F6, 0, "shift_f6", "top-right",
 	  place_window, WIN_POS_TOP_RIGHT, },
-	{ SHIFT, XK_F7, 0, "shift_f7", "_bottom_left",
+	{ SHIFT, XK_F7, 0, "shift_f7", "bottom-left",
 	  place_window, WIN_POS_BOTTOM_LEFT, },
-	{ SHIFT, XK_F8, 0, "shift_f8", "_bottom_right",
+	{ SHIFT, XK_F8, 0, "shift_f8", "bottom-right",
 	  place_window, WIN_POS_BOTTOM_RIGHT, },
-	{ SHIFT, XK_F10, 0, "shift_f10", "_center",
+	{ SHIFT, XK_F10, 0, "shift_f10", "center",
 	  place_window, WIN_POS_CENTER, },
-	{ MOD, XK_F5, 0, "mod_f5", "_left_fill",
+	{ MOD, XK_F5, 0, "mod_f5", "fill left",
 	  place_window, WIN_POS_LEFT_FILL, },
-	{ MOD, XK_F6, 0, "mod_f6", "_right_fill",
+	{ MOD, XK_F6, 0, "mod_f6", "fill right",
 	  place_window, WIN_POS_RIGHT_FILL, },
-	{ MOD, XK_F7, 0, "mod_f7", "_top_fill",
+	{ MOD, XK_F7, 0, "mod_f7", "fill top",
 	  place_window, WIN_POS_TOP_FILL, },
-	{ MOD, XK_F8, 0, "mod_f8", "_bottom_fill",
+	{ MOD, XK_F8, 0, "mod_f8", "fill bottom",
 	  place_window, WIN_POS_BOTTOM_FILL, },
-	{ MOD, XK_F9, 0, "mod_f9", "_full_screen",
+	{ MOD, XK_F9, 0, "mod_f9", "full screen",
 	  place_window, WIN_POS_FILL, },
-	{ MOD, XK_F3, 0, "mod_f3", "_make_grid",
+	{ MOD, XK_F3, 0, "mod_f3", "make grid",
 	  make_grid, },
-	{ MOD, XK_F4, 0, "mod_f4", "_toggle_toolbar",
+	{ MOD, XK_F4, 0, "mod_f4", "toggle toolbar",
 	  toggle_toolbar, },
-	{ MOD, XK_F2, 0, "mod_f2", "_flag_window",
+	{ MOD, XK_F2, 0, "mod_f2", "flag window",
 	  flag_window, },
 };
 
@@ -2345,6 +2345,7 @@ static void place_window(void *ptr)
 	if (cli != toolbar.cli)
 		center_pointer(cli);
 
+	store_client(cli, 0);
 	hide_toolbox();
 	xcb_flush(dpy);
 	return;
@@ -4339,6 +4340,7 @@ static void toolbar_button_press(struct arg *arg)
 	} else if (focused_item->str == (const char *) BTN_EXPAND) {
 		arg->data = WIN_POS_FILL;
 		place_window((void *) arg);
+		hide_toolbar();
 	} else if (focused_item->str == (const char *) BTN_FLAG) {
 		curscr = coord2scr(arg->x, arg->y);
 		if (!curscr->tag->anchor || curscr->tag->anchor != toolbar.cli) {
@@ -4592,7 +4594,8 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 		handle_panel_motion(e->event_x, e->event_y);
 		return;
 	} else if (!e->child || !cli) {
-		ww("win 0x%x is not managed\n", e->child);
+		if (e->child)
+			ww("win 0x%x is not managed\n", e->child);
 		return;
 	}
 
@@ -5268,7 +5271,7 @@ static void init_keys_def(void)
 	strlen_t tmp;
 	uint8_t i;
 	char path[baselen + sizeof("/keys/") + UCHAR_MAX];
-	int fd;
+	FILE *f;
 	xcb_key_symbols_t *syms;
 
 	list_init(&keymap);
@@ -5301,9 +5304,12 @@ static void init_keys_def(void)
 			actname_max = tmp;
 
 		sprintf(path, "%s/keys/%s", basedir, kmap->keyname);
-		fd = open(path, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
-		write(fd, kmap->actname, strlen(kmap->actname));
-		close(fd);
+
+		if ((f = fopen(path, "w"))) {
+			ii("write '%s'\n", kmap->actname);
+			fprintf(f, "%s", kmap->actname);
+			fclose(f);
+		}
 	}
 
 	actname_max++;
