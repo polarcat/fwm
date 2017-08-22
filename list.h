@@ -31,16 +31,18 @@ static inline int list_empty(struct list_head *head)
 
 static inline void list_add(struct list_head *head, struct list_head *item)
 {
-	item->next = head;
 	item->prev = head->prev;
 	head->prev->next = item;
 	head->prev = item;
+	item->next = head;
 }
 
 static inline void list_del(struct list_head *item)
 {
-	item->prev->next = item->next;
-	item->next->prev = item->prev;
+	if (item->next) {
+		item->prev->next = item->next;
+		item->next->prev = item->prev;
+	}
 }
 
 static inline struct list_head *list_next(struct list_head *item,
@@ -69,20 +71,20 @@ static inline struct list_head *list_prev(struct list_head *item,
 		return item;
 }
 
-#define container_of(ptr, type, member) __extension__ ({ \
-	const __typeof__(((type *) 0)->member) * __mptr = (ptr); \
+#define container_of(ptr, type, member) __extension__ ({\
+	const __typeof__(((type *) 0)->member) * __mptr = (ptr);\
 	(type *) ((char *) __mptr - offsetof(type, member)); })
 
 #define list_entry(ptr, type, member) container_of(ptr, type, member)
 
-#define list_walk(curr, head) \
-	for (curr = (head)->next; curr != (head); curr = curr->next)
+#define list_walk(cur, head)\
+	for (cur = (head)->next; cur != (head); cur = cur->next)
 
-#define list_back(curr, head) \
-	for (curr = (head)->prev; curr != (head); curr = curr->prev)
+#define list_back(cur, head)\
+	for (cur = (head)->prev; cur != (head); cur = cur->prev)
 
-#define list_walk_safe(curr, temp, head) \
-	for (curr = (head)->next, temp = curr->next; curr != (head); \
-		curr = temp, temp = curr->next)
+#define list_walk_safe(cur, temp, head)\
+	for (cur = (head)->next, temp = cur->next; cur != (head);\
+	     cur = temp, temp = cur->next)
 
 #endif /* __LIST_H__ */

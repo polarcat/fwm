@@ -13,9 +13,18 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <inttypes.h>
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
+
+#ifndef PRIu64
+#define PRIu64 "llu"
+#endif
+
+#ifndef PRIi64
+#define PRIi64 "lld"
 #endif
 
 #define unused(arg) __attribute__((unused)) arg
