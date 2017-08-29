@@ -565,6 +565,8 @@ static struct client *front_client(struct tag *tag)
 		return NULL;
 	else if (tag->front)
 		return tag->front;
+	else if (tag->visited)
+		return tag->visited;
 	else if (list_single(&tag->clients))
 		return list2cli(tag->clients.next);
 
@@ -2689,8 +2691,15 @@ static void del_window(xcb_window_t win)
 
 	if (toolbar.cli && toolbar.cli->win == win)
 		hide_toolbar();
+
 	if (toolbox.cli && toolbox.cli->win == win)
 		hide_toolbox();
+
+	if (curscr->tag->front && curscr->tag->front->win == win)
+		curscr->tag->front = NULL;
+
+	if (curscr->tag->visited && curscr->tag->visited->win == win)
+		curscr->tag->visited = NULL;
 
 	scr = curscr;
 	cli = win2cli(win);
