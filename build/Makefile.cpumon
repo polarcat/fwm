@@ -7,4 +7,4 @@ ldflags += -lm -lxcb
 $(out): FORCE
 	$(cc) -o bin/$(out) $(src) $(ldflags)
 
-include Makefile.common
+include $(common)

@@ -1,3 +1,4 @@
+common = build/Makefile.common
 cc = $(CROSS_COMPILE)gcc
 cflags = -Wall -Wunused-function
 cflags += $(CFLAGS)
@@ -7,7 +8,7 @@ xftldflags = $(shell pkg-config --libs xft)
 
 export
 
-makecmd = make -f Makefile.$@
+makecmd = make -f build/Makefile.$@
 
 ifneq (,$(findstring clean,$(MAKECMDGOALS)))
 makecmd += clean

@@ -9,4 +9,4 @@ ldflags += -lX11 -lX11-xcb $(xftldflags)
 $(out): FORCE
 	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
-include Makefile.common
+include $(common)

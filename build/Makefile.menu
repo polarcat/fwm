@@ -9,4 +9,4 @@ ldflags += -lxkbcommon -lxkbcommon-x11
 $(out): FORCE
 	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
-include Makefile.common
+include $(common)
