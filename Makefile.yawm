@@ -1,5 +1,5 @@
 out = yawm
-src = yawm.c
+src = src/yawm.c
 cflags += $(xftcflags)
 ldflags += -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms
 ldflags += -lX11 -lX11-xcb $(xftldflags)
@@ -7,6 +7,6 @@ ldflags += -lX11 -lX11-xcb $(xftldflags)
 .PHONY: FORCE clean
 
 $(out): FORCE
-	$(cc) -o $(out) $(src) $(cflags) $(ldflags)
+	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
 include Makefile.common

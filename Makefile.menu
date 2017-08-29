@@ -1,5 +1,5 @@
 out = menu
-src = menu.c
+src = src/menu.c
 cflags = $(xftcflags)
 ldflags = $(xftldflags) -lxcb -lX11 -lX11-xcb -lxcb-keysyms
 ldflags += -lxkbcommon -lxkbcommon-x11
@@ -7,6 +7,6 @@ ldflags += -lxkbcommon -lxkbcommon-x11
 .PHONY: FORCE clean
 
 $(out): FORCE
-	$(cc) -o $(out) $(src) $(cflags) $(ldflags)
+	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
 include Makefile.common

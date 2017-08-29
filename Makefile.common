@@ -3,8 +3,8 @@ bin = $(HOME)/bin
 install:
 	-mkdir -p $(bin)
 	-unlink $(bin)/$(out)
-	-cp -v $(out) $(bin)/$(out)
+	-cp -v bin/$(out) $(bin)/$(out)
 	-chmod 755 $(bin)/$(out)
 
 clean:
-	-rm -f $(out)
+	-rm -f bin/$(out)

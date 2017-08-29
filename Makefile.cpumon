@@ -1,10 +1,10 @@
 out = cpumon
-src = cpumon.c
+src = src/cpumon.c
 ldflags += -lm -lxcb
 
 .PHONY: FORCE clean
 
 $(out): FORCE
-	$(cc) -o $(out) $(src) $(ldflags)
+	$(cc) -o bin/$(out) $(src) $(ldflags)
 
 include Makefile.common
