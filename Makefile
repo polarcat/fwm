@@ -1,69 +1,35 @@
 cc = $(CROSS_COMPILE)gcc
-
 cflags = -Wall -Wunused-function
 cflags += $(CFLAGS)
-
+ldflags = $(LDFLAGS)
 xftcflags = $(shell pkg-config --cflags xft)
 xftldflags = $(shell pkg-config --libs xft)
 
-wmout = yawm
-wmsrc = yawm.c
-wmcflags = $(cflags) $(xftcflags) $(CFLAGS)
-wmldflags = -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms
-wmldflags += -lX11 -lX11-xcb $(xftldflags)
+export
 
-$(wmout):
-	$(cc) -o $(wmout) $(wmsrc) $(wmcflags) $(wmldflags)
-	@echo "(==) $(wmout) done"
+makecmd = make -f Makefile.$@
 
-clean-$(wmout):
-	-rm -f $(wmout)
+ifneq (,$(findstring clean,$(MAKECMDGOALS)))
+makecmd += clean
+else ifneq (,$(findstring install,$(MAKECMDGOALS)))
+makecmd += install
+else
+makecmd += $@
+endif
 
-install-$(wmout):
-	-mkdir -p $(HOME)/bin
-	-unlink $(HOME)/bin/$(wmout)
-	-cp -v $(wmout) $(HOME)/bin/$(wmout)
-	-chmod 755 $(HOME)/bin/$(wmout)
+.PHONY: FORCE all clean install
 
-clockout = clock
-clocksrc = clock.c
-clockcflags = $(xftcflags) $(cflags)
-clockldflags = $(xftldflags) -lxcb -lX11 -lX11-xcb
+all:
+	@printf "\nUsage: make [clean|install] <yawm|menu|clock|cpumon>\n\n"
 
-$(clockout):
-	$(cc) -o $(clockout) $(clocksrc) $(clockcflags) $(clockldflags)
+yawm: FORCE
+	$(makecmd)
 
-clean-$(clockout):
-	-rm -f $(clockout)
+menu: FORCE
+	$(makecmd)
 
-install-$(clockout):
-	-mkdir -p $(HOME)/bin
-	-unlink $(HOME)/bin/$(clockout)
-	-cp -v $(clockout) $(HOME)/bin/$(clockout)
-	-chmod 755 $(HOME)/bin/$(clockout)
+clock: FORCE
+	$(makecmd)
 
-menuout = menu
-menusrc = menu.c
-menucflags = $(xftcflags) $(cflags)
-menuldflags = $(xftldflags) -lxcb -lX11 -lX11-xcb -lxcb-keysyms
-menuldflags += -lxkbcommon -lxkbcommon-x11
-
-$(menuout):
-	$(cc) -o $(menuout) $(menusrc) $(menucflags) $(menuldflags)
-
-clean-$(menuout):
-	-rm -f $(menuout)
-
-install-$(menuout):
-	-mkdir -p $(HOME)/bin
-	-unlink $(HOME)/bin/$(menuout)
-	-cp -v $(menuout) $(HOME)/bin/$(menuout)
-	-chmod 755 $(HOME)/bin/$(menuout)
-
-clean:
-	-rm -f $(wmout) $(clockout)
-
-distclean: clean
-
-.PHONY: all clean distclean
-all: $(wmout) $(clockout)
+cpumon: FORCE
+	$(makecmd)
