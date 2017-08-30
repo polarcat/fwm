@@ -1149,6 +1149,8 @@ static void show_toolbox(struct client *cli)
 	uint32_t val[2];
 	uint32_t mask;
 	struct list_head *cur;
+	XftChar8 *str;
+	uint16_t len;
 
 	if (!cli || (cli && cli->flags & (CLI_FLG_POPUP | CLI_FLG_EXCLUSIVE)))
 		return;
@@ -1183,8 +1185,15 @@ static void show_toolbox(struct client *cli)
 	struct color *fg = color2ptr(NOTICE_FG);
 	uint16_t x = (toolbox.size - FONT2_SIZE) / 2;
 
-	XftDrawStringUtf8(toolbox.draw, fg->val, font2, x, text_yoffs,
-			 (XftChar8 *) BTN_TOOLS, slen(BTN_TOOLS));
+	if (curscr->tag->anchor == cli) {
+		str = (XftChar8 *) BTN_FLAG;
+		len = slen(BTN_FLAG);
+	} else {
+		str = (XftChar8 *) BTN_TOOLS;
+		len = slen(BTN_TOOLS);
+	}
+
+	XftDrawStringUtf8(toolbox.draw, fg->val, font2, x, text_yoffs, str, len);
 	XSync(xdpy, 0);
 	toolbox.cli = cli;
 	toolbox.visible = 1;
@@ -1329,7 +1338,7 @@ static void close_window(xcb_window_t win)
 	uint8_t i;
 	struct timespec ts = { 0, 10000000 };
 	pid_t pid = 0;
-	struct client *cli = win2cli(win);
+	struct client *cli;
 	xcb_client_message_event_t e = { 0 };
 
 	/* try to close gracefully */
@@ -1345,7 +1354,7 @@ static void close_window(xcb_window_t win)
 			       (const char *) &e);
 	xcb_flush(dpy);
 
-	if (!cli)
+	if (!(cli = win2cli(win)))
 		goto out;
 
 	cli->busy++; /* give client a chance to exit gracefully */
@@ -2140,27 +2149,27 @@ static void flag_window(struct arg *arg)
 {
 	struct toolbar_item *cur;
 	struct toolbar_item *end;
-	struct client *cli;
 
-	cli = curscr->tag->anchor;
+	if (curscr->tag->anchor)
+		border_color(curscr->tag->anchor->win, active_bg);
 
 	if (arg->cli == curscr->tag->anchor) {
 		curscr->tag->anchor = NULL;
 	} else {
 		curscr->tag->anchor = pointer2cli();
 		curscr->tag->anchor->div = 1;
-		arg->cli = curscr->tag->anchor;
-		arg->data = WIN_POS_LEFT_FILL;
+
+		if ((arg->cli = curscr->tag->anchor)) {
+			arg->cli->pos = WIN_POS_LEFT_FILL;
+			border_color(arg->cli->win, notice_bg);
+		}
+
 		arg->kmap = NULL;
 		place_window(arg);
 	}
 
-	if (curscr->tag->anchor)
-		border_color(curscr->tag->anchor->win, notice_bg);
-	else if (cli)
-		border_color(cli->win, active_bg);
-
 	xcb_flush(dpy);
+	show_toolbox(arg->cli);
 
 	if (!toolbar.cli)
 		return;
@@ -2238,6 +2247,7 @@ static void place_window(struct arg *arg)
 		curscr->tag->anchor = NULL;
 		break;
 	case WIN_POS_CENTER:
+		curscr->tag->anchor = NULL;
 		arg->cli->flags |= CLI_FLG_CENTER;
 		x = curscr->x + curscr->w / 2 - curscr->w / 4;
 		y = curscr->top + curscr->h / 2 - curscr->h / 4;
@@ -2702,8 +2712,8 @@ static void del_window(xcb_window_t win)
 		curscr->tag->visited = NULL;
 
 	scr = curscr;
-	cli = win2cli(win);
-	if (!cli) {
+
+	if (!(cli = win2cli(win))) {
 		ii("unmanaged win 0x%x\n", win);
 		xcb_unmap_subwindows_checked(dpy, win);
 		goto flush;
@@ -3024,11 +3034,13 @@ static void hide_leader(xcb_window_t win)
 
 	if (leader != XCB_WINDOW_NONE) {
 		struct client *cli = win2cli(leader);
+
 		if (cli) {
 			list_del(&cli->head);
 			list_del(&cli->list);
 			free(cli);
 		}
+
 		xcb_unmap_window_checked(dpy, leader);
 	}
 }
@@ -4350,11 +4362,14 @@ static void toolbar_button_press(void)
 		place_window(&arg);
 		hide_toolbar();
 	} else if (focused_item->str == (const char *) BTN_FLAG) {
-		if (!curscr->tag->anchor || curscr->tag->anchor != toolbar.cli) {
+		if (toolbar.cli &&
+		    (!curscr->tag->anchor ||
+		    curscr->tag->anchor != toolbar.cli)) {
 			curscr->tag->anchor = toolbar.cli;
 			curscr->tag->anchor->div = 1;
 			focused_item->flags |= ITEM_FLG_LOCKED;
-			arg.data = WIN_POS_LEFT_FILL;
+			arg.cli = curscr->tag->anchor;
+			arg.cli->pos = WIN_POS_LEFT_FILL;
 			place_window(&arg);
 		} else {
 			curscr->tag->anchor = NULL;
@@ -4462,8 +4477,7 @@ static void handle_button_press(xcb_button_press_event_t *e)
 			toolbar_button_press();
 			return;
 		} else {
-			struct client *cli = win2cli(e->child);
-			if (cli)
+			if ((cli = win2cli(e->child)))
 				center_pointer(cli);
 		}
 		break;
@@ -4812,12 +4826,12 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 
 static void handle_leave_notify(xcb_leave_notify_event_t *e)
 {
-	struct client *cli = win2cli(e->event);
+	struct client *cli;
 
 	if (e->event == toolbox.win)
 		return;
 
-	if (cli && cli->flags & CLI_FLG_POPUP) {
+	if ((cli = win2cli(e->event)) && cli->flags & CLI_FLG_POPUP) {
 		close_client(cli);
 		focus_root_ = 1;
 	}
@@ -4918,10 +4932,8 @@ static void tray_add(xcb_window_t win)
 
 	ii("%s: win 0x%x\n", __func__, win);
 
-	cli = win2cli(win);
-	if (!cli) {
-		cli = add_window(win, 1, 0);
-		if (!cli) {
+	if (!(cli = win2cli(win))) {
+		if (!(cli = add_window(win, 1, 0))) {
 			ee("add_window(0x%x) failed\n", win);
 			return;
 		}
@@ -4945,14 +4957,16 @@ static void handle_client_message(xcb_client_message_event_t *e)
 
 	if (e->type == a_net_wm_state &&  e->format == 32 &&
 	    e->data.data32[1] == a_maximize_win) {
-		arg.data = WIN_POS_FILL;
-		arg.cli = win2cli(e->window);
-		place_window(&arg);
+		if ((arg.cli = win2cli(e->window))) {
+			arg.cli->pos = WIN_POS_FILL;
+			place_window(&arg);
+		}
 	} else if (e->type == a_net_wm_state &&  e->format == 32 &&
 		   e->data.data32[1] == a_fullscreen) {
-		arg.data = WIN_POS_FILL;
-		arg.cli = win2cli(e->window);
-		place_window(&arg);
+		if ((arg.cli = win2cli(e->window))) {
+			arg.cli->pos = WIN_POS_FILL;
+			place_window(&arg);
+		}
 	} else if (e->type == a_net_wm_state &&  e->format == 32 &&
 		   e->data.data32[1] == a_hidden) {
 		dd("_NET_WM_STATE_HIDDEN from win 0x%x", e->window);
@@ -4964,10 +4978,12 @@ static void handle_client_message(xcb_client_message_event_t *e)
 		   e->data.data32[1] == SYSTEM_TRAY_REQUEST_DOCK) {
 		tray_add(e->data.data32[2]);
 	} else if (e->type == a_active_win && e->format == 32) {
-		struct client *cli = win2cli(e->window);
-		if (!cli || (cli->flags & CLI_FLG_DOCK))
+		arg.cli = win2cli(e->window);
+
+		if (!arg.cli || (arg.cli->flags & CLI_FLG_DOCK))
 			return;
-		focus_tag(cli->scr, cli->tag);
+
+		focus_tag(arg.cli->scr, arg.cli->tag);
 		raise_window(e->window);
 		xcb_flush(dpy);
 	}
