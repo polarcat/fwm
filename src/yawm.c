@@ -2060,6 +2060,7 @@ static void recalc_space(struct screen *scr, enum winpos pos)
 
 static void make_grid(struct arg *arg)
 {
+	struct tag *tag = curscr->tag;
 	struct list_head *cur;
 	uint16_t i;
 	uint16_t n = 0;
@@ -2067,10 +2068,10 @@ static void make_grid(struct arg *arg)
 	int16_t x, y;
 	uint64_t ts;
 
-	list_walk(cur, &curscr->tag->clients) {
+	list_walk(cur, &tag->clients) {
 		struct client *cli = list2cli(cur);
 
-		if (curscr->tag->anchor == cli)
+		if (tag->anchor == cli)
 			continue;
 		else if (cli->win & (CLI_FLG_IGNORED | CLI_FLG_POPUP))
 			continue;
@@ -2080,32 +2081,46 @@ static void make_grid(struct arg *arg)
 
 	if (n == 0) {
 		return;
-	} else if (n == 1) {
+	} else if (n == 1 && !tag->anchor) {
 		return;
-	} else if (!cell_size(n, &cw, &ch)) {
-		return;
+	} else if (n == 1 && tag->anchor) {
+		tag->grid2v = (tag->anchor->h > tag->anchor->w);
+
+		if (tag->grid2v) { /* vertical split */
+			tag->space.w = curscr->w - tag->anchor->w;
+			tag->space.w -= 2 * BORDER_WIDTH;
+			cw = tag->space.w;
+			ch = tag->space.h;
+		} else { /* horizontal split */
+			tag->space.h = curscr->h - tag->anchor->h;
+			tag->space.h -= 2 * BORDER_WIDTH;
+			cw = tag->space.w;
+			ch = tag->space.h;
+		}
 	} else if (n == 2) {
 		if (!arg->data) { /* only toggle via shortcut */
-			if (curscr->tag->grid2v)
-				curscr->tag->grid2v = 0;
+			if (tag->grid2v)
+				tag->grid2v = 0;
 			else
-				curscr->tag->grid2v = 1;
+				tag->grid2v = 1;
 		}
 
-		if (curscr->tag->grid2v) { /* vertical split */
-			cw = curscr->tag->space.w / 2;
-			ch = curscr->tag->space.h;
+		if (tag->grid2v) { /* vertical split */
+			cw = tag->space.w / 2;
+			ch = tag->space.h;
 		} else { /* horizontal split */
-			cw = curscr->tag->space.w;
-			ch = curscr->tag->space.h / 2;
+			cw = tag->space.w;
+			ch = tag->space.h / 2;
 		}
+	} else if (!cell_size(n, &cw, &ch)) {
+		return;
 	}
 
 	ii("%d cells size of (%u,%u)\n", n, cw, ch);
 	i = x = y = 0;
 	ts = 0;
 
-	list_walk(cur, &curscr->tag->clients) {
+	list_walk(cur, &tag->clients) {
 		int16_t yy;
 		int16_t xx;
 		uint16_t hh;
@@ -2119,32 +2134,32 @@ static void make_grid(struct arg *arg)
 			ts = cli->ts;
 		}
 
-		if (curscr->tag->anchor == cli)
+		if (tag->anchor == cli)
 			continue;
 		else if (cli->win & (CLI_FLG_IGNORED | CLI_FLG_POPUP))
 			continue;
 		if (window_status(cli->win) != WIN_STATUS_VISIBLE)
 			continue;
 
-		xx = curscr->tag->space.x + x;
-		ww = (curscr->tag->space.x + curscr->tag->space.w) - (xx + cw);
+		xx = tag->space.x + x;
+		ww = (tag->space.x + tag->space.w) - (xx + cw);
 		(ww > 2 * BORDER_WIDTH) ? (ww = cw) : (ww += cw);
 		ww -= 2 * BORDER_WIDTH - WINDOW_PAD;
 
-		yy = curscr->tag->space.y + y;
-		hh = (curscr->tag->space.y + curscr->tag->space.h) - (yy + ch);
+		yy = tag->space.y + y;
+		hh = (tag->space.y + tag->space.h) - (yy + ch);
 		(hh > 2 * BORDER_WIDTH) ? (hh = ch) : (hh += ch);
 		hh -= 2 * BORDER_WIDTH - WINDOW_PAD;
 
-		if (++i >= n) { /* last window occupies remaining space */
-			ww = curscr->tag->space.w - 2 * BORDER_WIDTH;
-			ww -= xx - curscr->tag->space.x;
+		if (++i >= n && n != 2) { /* last window occupies remaining space */
+			ww = tag->space.w - 2 * BORDER_WIDTH;
+			ww -= xx - tag->space.x;
 		}
 
 		client_moveresize(cli, xx, yy, ww, hh);
 		x += cw;
 
-		if (x > curscr->tag->space.w - cw) {
+		if (x > tag->space.w - cw) {
 			x = 0;
 			y += ch;
 		}
