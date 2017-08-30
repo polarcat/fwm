@@ -1144,6 +1144,17 @@ static void hide_toolbox()
 		xcb_unmap_window(dpy, toolbox.win);
 }
 
+static void move_toolbox(struct client *cli)
+{
+	uint32_t val[2];
+	uint32_t mask;
+
+	val[0] = (cli->x + cli->w) - toolbox.size;
+	val[1] = (cli->y + cli->h) - toolbox.size;
+	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+	xcb_configure_window_checked(dpy, toolbox.win, mask, val);
+}
+
 static void show_toolbox(struct client *cli)
 {
 	uint32_t val[2];
@@ -2328,6 +2339,7 @@ static void place_window(struct arg *arg)
 		border_color(arg->cli->win, alert_bg);
 
 	client_moveresize(arg->cli, x, y, w, h);
+	move_toolbox(arg->cli);
 
 	if (curscr->tag->anchor == arg->cli) {
 		recalc_space(curscr, pos);
@@ -2339,7 +2351,6 @@ static void place_window(struct arg *arg)
 		center_pointer(arg->cli);
 
 	store_client(arg->cli, 0);
-	hide_toolbox();
 	xcb_flush(dpy);
 	return;
 }
