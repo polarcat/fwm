@@ -4330,23 +4330,23 @@ static void toolbar_button_press(void)
 		if (toolbar.cli)
 			close_window(toolbar.cli->win);
 	} else if (focused_item->str == (const char *) BTN_LEFT) {
-		arg.data = WIN_POS_LEFT_FILL;
+		arg.cli->pos = WIN_POS_LEFT_FILL;
 		place_window(&arg);
 	} else if (focused_item->str == (const char *) BTN_RIGHT) {
-		arg.data = WIN_POS_RIGHT_FILL;
+		arg.cli->pos = WIN_POS_RIGHT_FILL;
 		place_window(&arg);
 	} else if (focused_item->str == (const char *) BTN_TOP) {
-		arg.data = WIN_POS_TOP_FILL;
+		arg.cli->pos = WIN_POS_TOP_FILL;
 		place_window(&arg);
 	} else if (focused_item->str == (const char *) BTN_BOTTOM) {
-		arg.data = WIN_POS_BOTTOM_FILL;
+		arg.cli->pos = WIN_POS_BOTTOM_FILL;
 		place_window(&arg);
 	} else if (focused_item->str == (const char *) BTN_CENTER) {
-		arg.data = WIN_POS_CENTER;
+		arg.cli->pos = WIN_POS_CENTER;
 		place_window(&arg);
 		hide_toolbar();
 	} else if (focused_item->str == (const char *) BTN_EXPAND) {
-		arg.data = WIN_POS_FILL;
+		arg.cli->pos = WIN_POS_FILL;
 		place_window(&arg);
 		hide_toolbar();
 	} else if (focused_item->str == (const char *) BTN_FLAG) {
