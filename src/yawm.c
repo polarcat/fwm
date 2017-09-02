@@ -1087,6 +1087,89 @@ static void raise_window(xcb_window_t win)
 	xcb_configure_window_checked(dpy, win, mask, val);
 }
 
+static void print_menu(struct screen *scr)
+{
+	uint16_t x, w;
+
+	x = scr->items[PANEL_AREA_MENU].x;
+	w = scr->items[PANEL_AREA_MENU].w;
+
+	draw_panel_text(&scr->panel, color2ptr(NORMAL_FG),
+			color2ptr(NORMAL_BG), x, w, menu_icon, menu_icon_len,
+			menu_font, ITEM_H_MARGIN);
+}
+
+static void print_tag(struct screen *scr, struct tag *tag, uint8_t flag)
+{
+	struct color *fg;
+	struct color *bg;
+
+	if (flag == ITEM_FLG_ACTIVE) {
+		fg = color2ptr(ACTIVE_FG);
+		bg = color2ptr(ACTIVE_BG);
+		tag->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_NORMAL);
+	} else if (flag == ITEM_FLG_FOCUSED) {
+		fg = color2ptr(NOTICE_FG);
+		bg = color2ptr(NOTICE_BG);
+		tag->flags &= ~(ITEM_FLG_ACTIVE | ITEM_FLG_NORMAL);
+	} else {
+		fg = color2ptr(NORMAL_FG);
+		bg = color2ptr(NORMAL_BG);
+		tag->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_ACTIVE);
+	}
+
+	tag->flags |= flag;
+	draw_panel_text(&scr->panel, fg, bg, tag->x, tag->w, tag->name,
+			tag->nlen, font1, ITEM_H_MARGIN);
+}
+
+static void print_div(struct screen *scr)
+{
+	uint16_t x, w;
+
+	x = scr->items[PANEL_AREA_DIV].x;
+	w = scr->items[PANEL_AREA_DIV].w;
+
+	draw_panel_text(&scr->panel, color2ptr(NORMAL_FG),
+			color2ptr(NORMAL_BG), x, w, DIV_ICON,
+			sizeof(DIV_ICON) - 1, font1, ITEM_H_MARGIN);
+}
+
+static void raise_panel(struct screen *scr)
+{
+	struct list_head *cur;
+
+	if (scr && scr->panel.win) {
+		raise_window(scr->panel.win);
+
+		list_walk(cur, &scr->dock)
+			raise_window((list2cli(cur))->win);
+	}
+}
+
+static void redraw_panel(struct screen *scr, struct client *cli, uint8_t raise)
+{
+	struct list_head *cur;
+
+	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG), scr->x,
+		  0, scr->w, panel_height);
+
+	print_menu(scr);
+
+	list_walk(cur, &scr->tags) {
+		struct tag *tag = list2tag(cur);
+		print_tag(scr, tag, tag->flags);
+	}
+
+	print_div(scr);
+
+	if (cli)
+		print_title(scr, cli->win);
+
+	if (raise)
+		raise_panel(scr);
+}
+
 static void focus_root(void)
 {
 	toolbox.cli = NULL;
@@ -1155,39 +1238,94 @@ static void move_toolbox(struct client *cli)
 	xcb_configure_window_checked(dpy, toolbox.win, mask, val);
 }
 
+static int toolbox_obscured(struct client *cli, int16_t x, int16_t y)
+{
+	struct list_head *cur;
+	uint16_t d = toolbox.size - 2 * BORDER_WIDTH;
+
+	list_walk(cur, &curscr->tag->clients) {
+		struct client *it = list2cli(cur);
+		int16_t xx;
+		int16_t yy;
+		uint16_t ww;
+		uint16_t hh;
+
+		if (it == cli)
+			continue;
+
+		(it->x < 0) ? (xx = curscr->x) : (xx = it->x);
+		(it->y < 0) ? (yy = curscr->y) : (yy = it->y);
+
+		ww = xx + it->w;
+		hh = yy + it->h;
+
+		if (cli->ts < it->ts &&
+		    x >= xx && x + d <= ww && y >= yy && y + d <= hh) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+static int find_toolbox(struct client *cli, uint32_t *xy)
+{
+	int16_t xx = curscr->x;
+	uint16_t ww = curscr->x + curscr->w;
+	int16_t yy = curscr->y;
+	uint16_t hh = curscr->y + curscr->h;
+	uint16_t d = toolbox.size - 2 * BORDER_WIDTH;
+
+	if (cli->x + cli->w >= xx && cli->x + cli->w <= ww &&
+		   cli->y >= yy && cli->y <= hh &&
+		   !toolbox_obscured(cli, cli->x + cli->w - d, cli->y)) {
+		xy[0] = cli->x + cli->w - d - 2 * BORDER_WIDTH;
+		xy[1] = cli->y + 2 * BORDER_WIDTH;
+		dd("TOP RIGHT is OK win 0x%x\n", cli->win);
+	} else if (cli->x >= xx && cli->x <= ww &&
+	    cli->y >= yy && cli->y <= hh &&
+	    !toolbox_obscured(cli, cli->x, cli->y)) {
+		xy[0] = cli->x + 2 * BORDER_WIDTH;
+		xy[1] = cli->y + 2 * BORDER_WIDTH;
+		dd("TOP LEFT is OK win 0x%x\n", cli->win);
+	} else if (cli->x + cli->w >= xx && cli->x + cli->w <= ww &&
+		   cli->y + cli->h >= yy && cli->y + cli->h <= hh &&
+		   !toolbox_obscured(cli, cli->x + cli->w - d,
+				     cli->y + cli->h - d)) {
+		xy[0] = cli->x + cli->w - d - 2 * BORDER_WIDTH;
+		xy[1] = cli->y + cli->h - d - 2 * BORDER_WIDTH;
+		dd("BOT RIGHT is OK win 0x%x\n", cli->win);
+	} else if (cli->x >= xx && cli->x <= ww &&
+		   cli->y + cli->h >= yy && cli->y + cli->h <= hh &&
+		   !toolbox_obscured(cli, cli->x, cli->y + cli->h - d)) {
+		xy[0] = cli->x + 2 * BORDER_WIDTH;
+		xy[1] = cli->y + cli->h - d - 2 * BORDER_WIDTH;
+		dd("BOT LEFT is OK win 0x%x\n", cli->win);
+	} else {
+		ww("window 0x%x is out of view\n", cli->win);
+		return 0;
+	}
+
+	return 1;
+}
+
 static void show_toolbox(struct client *cli)
 {
 	uint32_t val[2];
 	uint32_t mask;
-	struct list_head *cur;
 	XftChar8 *str;
 	uint16_t len;
 
 	if (!cli || (cli && cli->flags & (CLI_FLG_POPUP | CLI_FLG_EXCLUSIVE)))
 		return;
 
-	list_walk(cur, &curscr->tag->clients) {
-		struct client *it = list2cli(cur);
-		uint16_t x = cli->x + cli->w - toolbox.size - 2 * BORDER_WIDTH;
-		uint16_t y = cli->y + cli->h - toolbox.size - 2 * BORDER_WIDTH;
-
-		if (cli->ts < it->ts &&
-		    x > it->x && y > it->y &&
-		    x < it->x + it->w && y < it->y + it->h) { /* right-bottom corner is obscured */
-			hide_toolbox();
-			return;
-		}
+	if (!find_toolbox(cli, val)) {
+		hide_toolbox();
+		return;
 	}
 
 	raise_window(toolbox.win);
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
-#if 0
-	val[0] = cli->x + 2 * BORDER_WIDTH;
-	val[1] = cli->y + 2 * BORDER_WIDTH;
-#else
-	val[0] = (cli->x + cli->w) - toolbox.size;
-	val[1] = (cli->y + cli->h) - toolbox.size;
-#endif
 	xcb_configure_window(dpy, toolbox.win, mask, val);
 	xcb_map_window(dpy, toolbox.win);
 	fill_rect(toolbox.win, toolbox.gc, color2ptr(NOTICE_BG), 0, 0,
@@ -2413,45 +2551,6 @@ static void raise_client(struct arg *arg)
 		show_toolbox(arg->cli);
 }
 
-static void panel_raise(struct screen *scr)
-{
-	if (scr && scr->panel.win) {
-		raise_window(scr->panel.win);
-		struct list_head *cur;
-		list_walk(cur, &scr->dock) {
-			struct client *cli = list2cli(cur);
-			raise_window(cli->win);
-		}
-	}
-}
-
-static void print_tag(struct screen *scr, struct tag *tag, uint8_t flag)
-{
-	struct color *fg;
-	struct color *bg;
-
-	if (tag->flags & flag)
-		return;
-
-	if (flag == ITEM_FLG_ACTIVE) {
-		fg = color2ptr(ACTIVE_FG);
-		bg = color2ptr(ACTIVE_BG);
-		tag->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_NORMAL);
-	} else if (flag == ITEM_FLG_FOCUSED) {
-		fg = color2ptr(NOTICE_FG);
-		bg = color2ptr(NOTICE_BG);
-		tag->flags &= ~(ITEM_FLG_ACTIVE | ITEM_FLG_NORMAL);
-	} else {
-		fg = color2ptr(NORMAL_FG);
-		bg = color2ptr(NORMAL_BG);
-		tag->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_ACTIVE);
-	}
-
-	tag->flags |= flag;
-	draw_panel_text(&scr->panel, fg, bg, tag->x, tag->w, tag->name,
-			tag->nlen, font1, ITEM_H_MARGIN);
-}
-
 static void show_windows(struct tag *tag, uint8_t focus)
 {
 	struct arg arg;
@@ -3113,30 +3212,6 @@ static void scan_clients(void)
 	xcb_flush(dpy);
 }
 
-static void print_menu(struct screen *scr)
-{
-	uint16_t x, w;
-
-	x = scr->items[PANEL_AREA_MENU].x;
-	w = scr->items[PANEL_AREA_MENU].w;
-
-	draw_panel_text(&scr->panel, color2ptr(NORMAL_FG),
-			color2ptr(NORMAL_BG), x, w, menu_icon, menu_icon_len,
-			menu_font, ITEM_H_MARGIN);
-}
-
-static void print_div(struct screen *scr)
-{
-	uint16_t x, w;
-
-	x = scr->items[PANEL_AREA_DIV].x;
-	w = scr->items[PANEL_AREA_DIV].w;
-
-	draw_panel_text(&scr->panel, color2ptr(NORMAL_FG),
-			color2ptr(NORMAL_BG), x, w, DIV_ICON,
-			sizeof(DIV_ICON) - 1, font1, ITEM_H_MARGIN);
-}
-
 static int tag_pointed(struct tag *tag, int16_t x, int16_t y)
 {
 	if (tag && 0 <= y && y <= curscr->panel.y + panel_height &&
@@ -3409,35 +3484,7 @@ out:
 	return pos;
 }
 
-static void redraw_panel_items(struct screen *scr)
-{
-	struct list_head *cur;
-
-	/* clean panel */
-	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG), scr->x,
-		  0, scr->w, panel_height);
-
-	print_menu(scr);
-
-	list_walk(cur, &scr->tags) {
-		uint8_t flg;
-		struct tag *tag = list2tag(cur);
-
-		tag->flags = 0; /* reset tag */
-
-		if (scr->tag == tag)
-			flg = ITEM_FLG_ACTIVE;
-		else
-			flg = ITEM_FLG_NORMAL;
-
-		print_tag(scr, tag, flg);
-	}
-
-	print_div(scr);
-	print_title(scr, XCB_WINDOW_NONE);
-}
-
-static void update_panel_items(struct screen *scr)
+static void reinit_panel(struct screen *scr)
 {
 	int16_t x = 0;
 	uint16_t h, w;
@@ -3478,7 +3525,7 @@ static void refresh_panel(uint8_t id)
 
 		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
 		hide_windows(scr->tag);
-		update_panel_items(scr);
+		reinit_panel(scr);
 		focus_tag(scr, list2tag(scr->tags.next));
 		break;
 	}
@@ -3758,7 +3805,7 @@ static void move_panel(struct screen *scr)
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	mask |= XCB_CONFIG_WINDOW_WIDTH;
 	xcb_configure_window(dpy, scr->panel.win, mask, val);
-	update_panel_items(scr);
+	redraw_panel(scr, NULL, 1);
 	xcb_flush(dpy);
 }
 
@@ -3993,7 +4040,7 @@ static void init_outputs(void)
 	/* force refresh all panels */
 	list_walk(cur, &screens) {
 		scr = list2screen(cur);
-		update_panel_items(scr);
+		reinit_panel(scr);
 	}
 
 	trace_screens();
@@ -4320,11 +4367,11 @@ static void handle_user_request(int fd)
 		make_grid(&arg);
 	} else if (match(name.str, "reload-colors")) {
 		struct list_head *cur;
+
 		init_colors();
+
 		list_walk(cur, &screens) {
-			struct screen *scr = list2screen(cur);
-			panel_raise(scr);
-			redraw_panel_items(scr);
+			redraw_panel(list2screen(cur), NULL, 1);
 		}
 	}
 
@@ -4531,7 +4578,7 @@ static void handle_button_press(xcb_button_press_event_t *e)
 		curscr->tag->front = cli;
 	}
 
-	panel_raise(curscr);
+	raise_panel(curscr);
 
 	/* subscribe to motion events */
 
@@ -4755,35 +4802,23 @@ static void handle_key_press(xcb_key_press_event_t *e)
 static void handle_visibility(xcb_window_t win)
 {
 	struct list_head *cur;
-	uint8_t panel;
 
-	if (win == toolbar.panel.win)
+	if (win == toolbar.panel.win) {
 		draw_toolbar();
+	} else if (win == toolbox.win) {
+		struct arg arg = { .cli = front_client(curscr->tag), };
+		show_toolbar(&arg);
+	} else {
+		list_walk(cur, &screens) {
+			struct screen *scr = list2screen(cur);
 
-	/* Check if this is a panel that needs some refreshment. */
-	panel = 0;
-	list_walk(cur, &screens) {
-		struct screen *scr = list2screen(cur);
-		if (scr->panel.win == win) {
-			panel = 1;
-			break;
+			if (scr->panel.win == win) {
+				redraw_panel(scr, front_client(curscr->tag), 0);
+				xcb_flush(dpy);
+				return;
+			}
 		}
 	}
-
-	if (!panel)
-		return;
-
-	/* One of the panels needs to be refreshed; however under certain
-	 * conditions in multiscreen mode all of them might need to undergo
-	 * the same treatment...
-	 */
-	list_walk(cur, &screens) {
-		struct screen *scr = list2screen(cur);
-		panel_raise(scr);
-		redraw_panel_items(scr);
-	}
-
-	xcb_flush(dpy);
 }
 
 static void handle_unmap_notify(xcb_unmap_notify_event_t *e)
@@ -4847,6 +4882,7 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 		resort_client(cli);
 	}
 
+	redraw_panel(cli->scr, cli, 1);
 	xcb_flush(dpy);
 }
 
@@ -4897,10 +4933,9 @@ static void handle_property_notify(xcb_property_notify_event_t *e)
 			   e->window, e->time, e->state);
 	} else if (e->atom == a_has_vt) {
 		struct list_head *cur;
+
 		list_walk(cur, &screens) {
-			struct screen *scr = list2screen(cur);
-			panel_raise(scr);
-			redraw_panel_items(scr);
+			redraw_panel(list2screen(cur), NULL, 1);
 		}
 
 		xcb_flush(dpy);
@@ -4945,7 +4980,7 @@ static void handle_configure_notify(xcb_configure_notify_event_t *e)
 	if (e->event == rootscr->root && e->window == rootscr->root) {
 		struct screen *scr = pointer2scr();
 		if (scr) /* update because screen geo could change */
-			update_panel_items(scr);
+			reinit_panel(scr);
 	} else if (e->window != rootscr->root && e->border_width) {
 		border_width(e->window, BORDER_WIDTH);
 		xcb_flush(dpy);
