@@ -4052,7 +4052,7 @@ static void init_outputs(void)
 {
 	struct stat st;
 	struct screen *scr;
-	struct list_head *cur, *tmp;
+	struct list_head *cur;
 	xcb_randr_get_screen_resources_current_cookie_t c;
 	xcb_randr_get_screen_resources_current_reply_t *r;
 	xcb_randr_output_t *out;
@@ -4081,7 +4081,7 @@ static void init_outputs(void)
 	}
 
 	/* reset geometry of previously found screens */
-	list_walk_safe(cur, tmp, &screens) {
+	list_walk(cur, &screens) {
 		scr = list2screen(cur);
 		scr->x = scr->y = scr->w = scr->h = 0;
 	}
