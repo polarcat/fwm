@@ -459,6 +459,7 @@ static uint8_t menu_icon_len = sizeof(MENU_ICON_DEF) - 1;
 static uint16_t panel_height;
 static uint8_t panel_top;
 static xcb_timestamp_t tag_time;
+static xcb_timestamp_t toolbox_time;
 
 /* globals */
 
@@ -500,6 +501,7 @@ static uint8_t baselen;
 static char *basedir;
 static char *homedir;
 static struct toolbar_item *focused_item;
+static uint8_t toolbar_pressed;
 
 static uint8_t randrbase;
 
@@ -761,6 +763,15 @@ static void resort_client(struct client *cli)
 
 	list_del(&cli->head);
 	list_add(&cli->tag->clients, &cli->head);
+}
+
+static void init_motion(xcb_window_t win)
+{
+	xcb_grab_pointer(dpy, 0, rootscr->root,
+			 XCB_EVENT_MASK_POINTER_MOTION |
+			 XCB_EVENT_MASK_BUTTON_RELEASE,
+			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
+			 win, XCB_NONE, XCB_CURRENT_TIME);
 }
 
 static void warp_pointer(xcb_window_t win, int16_t x, int16_t y)
@@ -1309,12 +1320,24 @@ static int find_toolbox(struct client *cli, uint32_t *xy)
 	return 1;
 }
 
+static void draw_toolbox(const char *str, uint8_t len)
+{
+	struct color *fg = color2ptr(NOTICE_FG);
+	uint16_t x = (toolbox.size - FONT2_SIZE) / 2;
+
+	fill_rect(toolbox.win, toolbox.gc, color2ptr(NOTICE_BG), 0, 0,
+		  toolbox.size, toolbox.size);
+	XftDrawStringUtf8(toolbox.draw, fg->val, font2, x, text_yoffs,
+			  (XftChar8 *) str, len);
+	XSync(xdpy, 0);
+}
+
 static void show_toolbox(struct client *cli)
 {
 	uint32_t val[2];
 	uint32_t mask;
-	XftChar8 *str;
-	uint16_t len;
+	const char *str;
+	uint8_t len;
 
 	if (!cli || (cli && cli->flags & (CLI_FLG_POPUP | CLI_FLG_EXCLUSIVE)))
 		return;
@@ -1328,22 +1351,19 @@ static void show_toolbox(struct client *cli)
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	xcb_configure_window(dpy, toolbox.win, mask, val);
 	xcb_map_window(dpy, toolbox.win);
-	fill_rect(toolbox.win, toolbox.gc, color2ptr(NOTICE_BG), 0, 0,
-		  toolbox.size, toolbox.size);
 
-	struct color *fg = color2ptr(NOTICE_FG);
-	uint16_t x = (toolbox.size - FONT2_SIZE) / 2;
-
-	if (curscr->tag->anchor == cli) {
-		str = (XftChar8 *) BTN_FLAG;
+	if (motion_cli && (motion_cli->flags & CLI_FLG_MOVE)) {
+		str = BTN_MOVE;
+		len = slen(BTN_MOVE);
+	} else if (curscr->tag->anchor == cli) {
+		str = BTN_FLAG;
 		len = slen(BTN_FLAG);
 	} else {
-		str = (XftChar8 *) BTN_TOOLS;
+		str = BTN_TOOLS;
 		len = slen(BTN_TOOLS);
 	}
 
-	XftDrawStringUtf8(toolbox.draw, fg->val, font2, x, text_yoffs, str, len);
-	XSync(xdpy, 0);
+	draw_toolbox(str, len);
 	toolbox.cli = cli;
 	toolbox.visible = 1;
 }
@@ -1358,6 +1378,7 @@ static void init_toolbox(void)
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
 	val[0] = color2int(NOTICE_BG);
 	val[1] = XCB_EVENT_MASK_BUTTON_PRESS;
+	val[1] |= XCB_EVENT_MASK_BUTTON_RELEASE;
 	val[1] |= XCB_EVENT_MASK_LEAVE_WINDOW;
 
 	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, toolbox.win,
@@ -4452,17 +4473,12 @@ static void toolbar_button_press(void)
 
 		hide_toolbar();
 	} else if (focused_item->str == (const char *) BTN_MOVE) {
+		toolbar_pressed = 1; /* client window handles button release */
 		arg.cli->flags |= CLI_FLG_MOVE;
 		hide_toolbar();
 		center_pointer(arg.cli);
-
-		/* subscribe to motion events */
-
-		xcb_grab_pointer(dpy, 0, rootscr->root,
-				 XCB_EVENT_MASK_POINTER_MOTION |
-				 XCB_EVENT_MASK_BUTTON_RELEASE,
-				 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
-				 arg.cli->win, XCB_NONE, XCB_CURRENT_TIME);
+		init_motion(arg.cli->win);
+		raise_panel(curscr);
 		xcb_flush(dpy);
 	} else {
 		hide_toolbar();
@@ -4493,7 +4509,33 @@ static void panel_button_press(xcb_button_press_event_t *e)
 
 static void handle_button_release(xcb_button_release_event_t *e)
 {
-	struct client *cli = win2cli(e->child);
+	struct client *cli;
+
+	if (toolbar_pressed) {
+		toolbar_pressed = 0; /* release toolbar press */
+		return;
+	} else if (e->event == rootscr->root && motion_cli &&
+		   e->child == motion_cli->win) {
+			motion_cli->flags &= ~CLI_FLG_MOVE;
+	} else if (e->event == toolbox.win || e->child == toolbox.win) {
+		if (e->time - toolbox_time < TAG_LONG_PRESS) {
+			struct arg arg = { .cli = toolbox.cli, };
+			show_toolbar(&arg);
+		} else {
+			struct arg arg = { .cli = toolbox.cli, .kmap = NULL, };
+			arg.cli->flags |= CLI_FLG_MOVE;
+			motion_cli = toolbox.cli;
+			hide_toolbar();
+			raise_client(&arg);
+			center_pointer(arg.cli);
+			init_motion(arg.cli->win);
+			xcb_flush(dpy);
+		}
+
+		return;
+	}
+
+	cli = win2cli(e->child);
 
 	if (cli && cli->flags & CLI_FLG_MOVE) {
 		cli->flags &= ~CLI_FLG_MOVE;
@@ -4533,8 +4575,8 @@ static void handle_button_press(xcb_button_press_event_t *e)
 
 	if (toolbox.win &&
 	    (toolbox.win == e->event || toolbox.win == e->child)) {
-		struct arg arg = { .cli = toolbox.cli, };
-		show_toolbar(&arg);
+		ii("toolbox press time %u\n", e->time);
+		toolbox_time = e->time;
 		return;
 	}
 
@@ -4701,7 +4743,11 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 		motion_init_y = cli->y;
 
 	hide_toolbox();
-	motion_cli = cli;
+
+	if (motion_cli && !(motion_cli->flags & CLI_FLG_MOVE))
+		motion_cli = NULL;
+	else
+		motion_cli = cli;
 
 	cli->x = e->root_x - cli->w / 2 - BORDER_WIDTH;
 	cli->y = e->root_y - cli->h / 2 - BORDER_WIDTH;
