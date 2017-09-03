@@ -172,6 +172,8 @@ struct panel {
 //#define BTN_PIN ""
 #define BTN_FLAG ""
 #define BTN_TOOLS ""
+//#define BTN_PLACE "" /* fa-paperclip [&#xf0c6;] */
+#define BTN_PLACE "" /* fa-plus [&#xf067;] */
 
 struct toolbar_item {
 	const char *str;
@@ -1330,6 +1332,48 @@ static void draw_toolbox(const char *str, uint8_t len)
 	XftDrawStringUtf8(toolbox.draw, fg->val, font2, x, text_yoffs,
 			  (XftChar8 *) str, len);
 	XSync(xdpy, 0);
+}
+
+static void show_hintbox(uint8_t pos)
+{
+	uint32_t val[2];
+	uint32_t mask;
+
+	if (pos == WIN_POS_TOP_LEFT) {
+		val[0] = curscr->x;
+		val[1] = curscr->top;
+	} else if (pos == WIN_POS_BOTTOM_LEFT) {
+		val[0] = curscr->x;
+		val[1] = curscr->top + curscr->h - toolbox.size;
+	} else if (pos == WIN_POS_TOP_RIGHT) {
+		val[0] = curscr->x + curscr->w - toolbox.size;
+		val[1] = curscr->top;
+	} else if (pos == WIN_POS_BOTTOM_RIGHT) {
+		val[0] = curscr->x + curscr->w - toolbox.size;
+		val[1] = curscr->top + curscr->h - toolbox.size;
+	} else if (pos == WIN_POS_TOP_FILL) {
+		val[0] = curscr->x + curscr->w / 2 - toolbox.size / 2;
+		val[1] = curscr->top;
+	} else if (pos == WIN_POS_BOTTOM_FILL) {
+		val[0] = curscr->x + curscr->w / 2 - toolbox.size / 2;
+		val[1] = curscr->top + curscr->h - toolbox.size;
+	} else if (pos == WIN_POS_LEFT_FILL) {
+		val[0] = curscr->x;
+		val[1] = curscr->top + curscr->h / 2 - toolbox.size / 2;
+	} else if (pos == WIN_POS_RIGHT_FILL) {
+		val[0] = curscr->x + curscr->w - toolbox.size;
+		val[1] = curscr->top + curscr->h / 2 - toolbox.size / 2;
+	} else {
+		return;
+	}
+
+	raise_window(toolbox.win);
+	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+	xcb_configure_window(dpy, toolbox.win, mask, val);
+	xcb_map_window(dpy, toolbox.win);
+	draw_toolbox(BTN_PLACE, slen(BTN_PLACE));
+	toolbox.cli = NULL;
+	toolbox.visible = 1;
 }
 
 static void show_toolbox(struct client *cli)
@@ -4521,7 +4565,7 @@ static void handle_button_release(xcb_button_release_event_t *e)
 		if (e->time - toolbox_time < TAG_LONG_PRESS) {
 			struct arg arg = { .cli = toolbox.cli, };
 			show_toolbar(&arg);
-		} else {
+		} else if (toolbox.cli) {
 			struct arg arg = { .cli = toolbox.cli, .kmap = NULL, };
 			arg.cli->flags |= CLI_FLG_MOVE;
 			motion_cli = toolbox.cli;
@@ -4694,8 +4738,6 @@ static void motion_place(struct client *cli, int16_t x, int16_t y)
 	border_color(cli->win, color);
 }
 
-static uint16_t pointer_x;
-
 static void handle_motion_notify(xcb_motion_notify_event_t *e)
 {
 	uint16_t mask;
@@ -4707,7 +4749,8 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 
 	if (e->event == toolbar.panel.win) {
 		focus_toolbar_item(e->event_x, e->event_y);
-		pointer_x = e->event_x;
+		return;
+	} else if (e->child == toolbox.win) {
 		return;
 	}
 
@@ -4769,6 +4812,8 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 		resort_client(cli);
 		store_client(cli, 0);
 	}
+
+	show_hintbox(cli->pos);
 }
 
 static void toolbar_key_press(xcb_key_press_event_t *e)
