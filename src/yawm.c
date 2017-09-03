@@ -4955,8 +4955,12 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	if (curscr->tag->front)
 		unfocus_window(curscr->tag->front->win);
 
-	if (!(cli = pointer2cli()))
-		cli = win2cli(e->event);
+	if (!(cli = pointer2cli())) {
+		if (!(cli = win2cli(e->event))) {
+			ww("enter unmanaged window 0x%x\n", e->event);
+			return;
+		}
+	}
 
 	if (e->mode == MOD)
 		raise_window(e->event);
