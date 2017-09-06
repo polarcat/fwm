@@ -798,6 +798,8 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 	char path[sizeof("0xffffffffffffffff")];
 	uint8_t buf[2];
 
+	*scr = NULL;
+	*tag = NULL;
 	snprintf(path, sizeof(path), ".session/0x%x", win);
 
 	if (!(f = fopen(path, "r"))) {
@@ -3259,6 +3261,8 @@ static void scan_clients(void)
 			continue;
 		else if (wins[i] == toolbox.win)
 			continue;
+		else if (wins[i] == toolbar.panel.win)
+			continue;
 
 		add_window(wins[i], 0, 1);
 		/* gotta do this otherwise empty windows are being shown
@@ -3385,7 +3389,7 @@ static void select_tag(struct screen *scr, int16_t x, int16_t y)
 	xcb_set_input_focus(dpy, XCB_NONE, scr->panel.win, XCB_CURRENT_TIME);
 }
 
-static struct tag *tag_get(struct screen *scr, const char *name, uint8_t id)
+static struct tag *get_tag(struct screen *scr, const char *name, uint8_t id)
 {
 	struct list_head *cur;
 	struct tag *tag;
@@ -3435,14 +3439,14 @@ static struct tag *tag_get(struct screen *scr, const char *name, uint8_t id)
 	return tag;
 }
 
-static int tag_add(struct screen *scr, const char *name, uint8_t id,
+static int add_tag(struct screen *scr, const char *name, uint8_t id,
 		   uint16_t pos)
 {
 	uint8_t flg;
 	struct tag *tag;
 	uint16_t h;
 
-	tag = tag_get(scr, name, id);
+	tag = get_tag(scr, name, id);
 	if (!tag)
 		return 0;
 
@@ -3505,8 +3509,22 @@ static int init_tags(struct screen *scr)
 	int fd;
 	struct stat st;
 	uint8_t delete;
+	struct list_head *cur;
+	struct list_head *tmp;
+
+	list_walk_safe(cur, tmp, &scr->tags) { /* reset tag list */
+		struct tag *tag = list2tag(cur);
+		list_del(&tag->head);
+		free(tag->name);
+		free(tag);
+	}
+
+	list_init(&scr->tags);
+	list_init(&scr->dock);
+	list_init(&clients);
 
 	pos = scr->items[PANEL_AREA_TAGS].x;
+
 	if (!basedir) {
 		ww("base directory is not set\n");
 		goto out;
@@ -3538,13 +3556,13 @@ static int init_tags(struct screen *scr)
 			name[strlen(name) - 1] = '\0';
 
 		tt("screen %d tag %d name %s\n", scr->id, i, name);
-		pos = tag_add(scr, name, i,  pos);
+		pos = add_tag(scr, name, i,  pos);
 		memset(name, 0, TAG_NAME_MAX);
 	}
 
 out:
 	if (pos == scr->items[PANEL_AREA_TAGS].x) /* add default tag */
-		pos = tag_add(scr, "*", 0, pos);
+		pos = add_tag(scr, "*", 0, pos);
 
 	return pos;
 }
@@ -3591,7 +3609,7 @@ static void refresh_panel(uint8_t id)
 		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
 		hide_windows(scr->tag);
 		reinit_panel(scr);
-		focus_tag(scr, list2tag(scr->tags.next));
+		scan_clients();
 		break;
 	}
 }
