@@ -1324,6 +1324,12 @@ static int find_toolbox(struct client *cli, uint32_t *xy)
 	return 1;
 }
 
+static void draw_hintbox(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
+{
+	fill_rect(toolbox.win, toolbox.gc, color2ptr(NORMAL_BG), x + 1, y + 1,
+		  w - 2 , h - 2);
+}
+
 static void draw_toolbox(const char *str, uint8_t len)
 {
 	struct color *fg = color2ptr(NOTICE_FG);
@@ -1336,44 +1342,70 @@ static void draw_toolbox(const char *str, uint8_t len)
 	XSync(xdpy, 0);
 }
 
+static uint8_t hintbox_pos_;
+
 static void show_hintbox(uint8_t pos)
 {
 	uint32_t val[2];
-	uint32_t mask;
+	uint16_t x, y, w, h;
 
 	if (pos == WIN_POS_TOP_LEFT) {
 		val[0] = curscr->x;
 		val[1] = curscr->top;
+		x = y = 0;
+		w = h = toolbox.size / 2;
 	} else if (pos == WIN_POS_BOTTOM_LEFT) {
-		val[0] = curscr->x;
-		val[1] = curscr->top + curscr->h - toolbox.size;
+		val[0] = curscr->x + BORDER_WIDTH;
+		val[1] = curscr->top + curscr->h - toolbox.size - 2 * BORDER_WIDTH;
+		x = 0;
+		y = w = h = toolbox.size / 2;
 	} else if (pos == WIN_POS_TOP_RIGHT) {
 		val[0] = curscr->x + curscr->w - toolbox.size;
 		val[1] = curscr->top;
+		x = w = h = toolbox.size / 2;
+		y = 0;
 	} else if (pos == WIN_POS_BOTTOM_RIGHT) {
-		val[0] = curscr->x + curscr->w - toolbox.size;
-		val[1] = curscr->top + curscr->h - toolbox.size;
+		val[0] = curscr->x + curscr->w - toolbox.size - BORDER_WIDTH;
+		val[1] = curscr->top + curscr->h - toolbox.size - 2 * BORDER_WIDTH;
+		x = y = w = h = toolbox.size / 2;
 	} else if (pos == WIN_POS_TOP_FILL) {
 		val[0] = curscr->x + curscr->w / 2 - toolbox.size / 2;
 		val[1] = curscr->top;
+		x = y = 0;
+		w = toolbox.size;
+		h = toolbox.size / 2;
 	} else if (pos == WIN_POS_BOTTOM_FILL) {
 		val[0] = curscr->x + curscr->w / 2 - toolbox.size / 2;
 		val[1] = curscr->top + curscr->h - toolbox.size;
+		x = 0;
+		y = h = toolbox.size / 2;
+		w = toolbox.size;
 	} else if (pos == WIN_POS_LEFT_FILL) {
 		val[0] = curscr->x;
 		val[1] = curscr->top + curscr->h / 2 - toolbox.size / 2;
+		x = y = 0;
+		w = toolbox.size / 2;
+		h = toolbox.size;
 	} else if (pos == WIN_POS_RIGHT_FILL) {
 		val[0] = curscr->x + curscr->w - toolbox.size;
 		val[1] = curscr->top + curscr->h / 2 - toolbox.size / 2;
+		x = w = toolbox.size / 2;
+		y = 0;
+		h = toolbox.size;
 	} else {
+		hintbox_pos_ = 0;
 		return;
 	}
 
+	if (hintbox_pos_ != pos) {
+		uint32_t mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+		xcb_configure_window(dpy, toolbox.win, mask, val);
+		xcb_map_window(dpy, toolbox.win);
+		draw_hintbox(x, y, w, h);
+	}
+
 	raise_window(toolbox.win);
-	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
-	xcb_configure_window(dpy, toolbox.win, mask, val);
-	xcb_map_window(dpy, toolbox.win);
-	draw_toolbox(BTN_PLACE, slen(BTN_PLACE));
+	hintbox_pos_ = pos;
 	toolbox.cli = NULL;
 	toolbox.visible = 1;
 }
@@ -4802,7 +4834,8 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	if (!motion_init_y)
 		motion_init_y = cli->y;
 
-	hide_toolbox();
+	if (!hintbox_pos_)
+		hide_toolbox();
 
 	if (motion_cli && !(motion_cli->flags & CLI_FLG_MOVE))
 		motion_cli = NULL;
@@ -4816,7 +4849,6 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	val[0] = cli->x;
 	val[1] = cli->y;
 	xcb_configure_window_checked(dpy, cli->win, mask, val);
-	xcb_flush(dpy);
 	timestamp(cli);
 
 	if (cli->scr != curscr && !(cli->flags & CLI_FLG_DOCK)) { /* retag */
@@ -4831,6 +4863,7 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	}
 
 	show_hintbox(cli->pos);
+	xcb_flush(dpy);
 }
 
 static void toolbar_key_press(xcb_key_press_event_t *e)
@@ -4913,9 +4946,6 @@ static void handle_visibility(xcb_window_t win)
 
 	if (win == toolbar.panel.win) {
 		draw_toolbar();
-	} else if (win == toolbox.win) {
-		struct arg arg = { .cli = front_client(curscr->tag), };
-		show_toolbar(&arg);
 	} else {
 		list_walk(cur, &screens) {
 			struct screen *scr = list2screen(cur);
