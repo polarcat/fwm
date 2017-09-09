@@ -88,10 +88,6 @@ typedef uint8_t strlen_t;
 
 #define TAG_NAME_MAX 32
 
-#define MOUSE_BTN_LEFT 1
-#define MOUSE_BTN_MID 2
-#define MOUSE_BTN_RIGHT 3
-
 #define DIV_ICON "::"
 
 #define ALT XCB_MOD_MASK_1

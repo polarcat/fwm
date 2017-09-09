@@ -34,4 +34,10 @@
 #define YAWM_CTRL ".control"
 #endif
 
+#define MOUSE_BTN_LEFT 1
+#define MOUSE_BTN_MID 2
+#define MOUSE_BTN_RIGHT 3
+#define MOUSE_BTN_FWD 4
+#define MOUSE_BTN_BACK 5
+
 #endif /* YAWM_H */
