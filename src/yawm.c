@@ -2386,8 +2386,7 @@ static void flag_window(struct arg *arg)
 
 	if (arg->cli == curscr->tag->anchor) {
 		curscr->tag->anchor = NULL;
-	} else {
-		curscr->tag->anchor = pointer2cli();
+	} else if ((curscr->tag->anchor = pointer2cli())) {
 		curscr->tag->anchor->div = 1;
 
 		if ((arg->cli = curscr->tag->anchor)) {
