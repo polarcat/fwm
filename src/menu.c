@@ -514,6 +514,44 @@ static void get_keysym(xcb_keycode_t code)
 }
 #endif
 
+static void line_up(void)
+{
+	if (selidx_ == 0 && page_idx_ == 0) {
+		return;
+	} else if (selidx_ == 0 && page_idx_ > 0) {
+		page_up();
+		return;
+	}
+
+	draw_row(selrow_, selidx_, 0);
+	selidx_--;
+	selrow_ = view_[selidx_];
+	warp_ = 1;
+	draw_row(selrow_, selidx_, 1);
+}
+
+static void line_down(void)
+{
+	uint8_t rem = (selidx_ + rows_rem_) == rows_per_page_ - 1;
+
+	if (page_idx_ == pages_num_ - 1 && rem) {
+		return; /* last not full page */
+	} else if (selidx_ == rows_per_page_ && page_idx_ == pages_num_) {
+		return; /* last page */
+	} else if (selidx_ == rows_per_page_ && !pages_num_) {
+		return; /* single page */
+	} else if (selidx_ == rows_per_page_ - 1) {
+		page_down();
+		return;
+	}
+
+	draw_row(selrow_, selidx_, 0);
+	selidx_++;
+	selrow_ = view_[selidx_];
+	warp_ = 1;
+	draw_row(selrow_, selidx_, 1);
+}
+
 static xcb_keysym_t get_keysyms(xcb_keycode_t code)
 {
 	const xkb_keysym_t *syms;
@@ -593,37 +631,9 @@ static void key_press(xcb_key_press_event_t *e)
 	} else if (sym == XK_Prior && pages_num_ > 1 && page_idx_ > 1) {
 		page_up();
 	} else if (sym == XK_Up) {
-		if (selidx_ == 0 && page_idx_ == 0) {
-			return;
-		} else if (selidx_ == 0 && page_idx_ > 0) {
-			page_up();
-			return;
-		}
-
-		draw_row(selrow_, selidx_, 0);
-		selidx_--;
-		selrow_ = view_[selidx_];
-		warp_ = 1;
-		draw_row(selrow_, selidx_, 1);
+		line_up();
 	} else if (sym == XK_Down) {
-		uint8_t rem = (selidx_ + rows_rem_) == rows_per_page_ - 1;
-
-		if (page_idx_ == pages_num_ - 1 && rem) {
-			return; /* last not full page */
-		} else if (selidx_ == rows_per_page_ && page_idx_ == pages_num_) {
-			return; /* last page */
-		} else if (selidx_ == rows_per_page_ && !pages_num_) {
-			return; /* single page */
-		} else if (selidx_ == rows_per_page_ - 1) {
-			page_down();
-			return;
-		}
-
-		draw_row(selrow_, selidx_, 0);
-		selidx_++;
-		selrow_ = view_[selidx_];
-		warp_ = 1;
-		draw_row(selrow_, selidx_, 1);
+		line_down();
 	} else if (sym == XK_Right) {
 		struct column *col = &selrow_->cols[0];
 		search_idx_ = sizeof(search_buf_) - PROMPT_LEN - 2;
@@ -1173,6 +1183,27 @@ static void wait(void)
 }
 #endif
 
+static void button_press(xcb_button_press_event_t *e)
+{
+	switch (e->detail) {
+	case MOUSE_BTN_LEFT: /* fall through */
+	case MOUSE_BTN_MID: /* fall through */
+	case MOUSE_BTN_RIGHT:
+		*(selrow_->str + selrow_->len) = '\0';
+		printf("%s\n", selrow_->str);
+		done_ = 1;
+		break;
+	case MOUSE_BTN_FWD:
+		line_up();
+		break;
+	case MOUSE_BTN_BACK:
+		line_down();
+		break;
+	default:
+		break;
+	}
+}
+
 static uint8_t events(uint8_t wait)
 {
 	xcb_generic_event_t *e;
@@ -1228,10 +1259,7 @@ static uint8_t events(uint8_t wait)
 		break;
 	case XCB_BUTTON_PRESS:
 		dd("XCB_BUTTON_PRESS\n");
-		char *str = selrow_->str;
-		*(str + selrow_->len) = '\0';
-		printf("%s\n", str);
-		done_ = 1;
+		button_press((xcb_button_press_event_t *) e);
 		break;
 	case XCB_MOTION_NOTIFY:
 		follow_pointer((xcb_motion_notify_event_t *) e);
