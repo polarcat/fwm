@@ -32,6 +32,7 @@ mod_v:center:yawm-clipboard
 :center:yawm-suspend
 :dock:yawm-clock
 ::yawm-restart
+::yawm-cpumon
 "
 
 case $1 in
