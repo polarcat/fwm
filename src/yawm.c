@@ -40,6 +40,10 @@
 
 /* defines */
 
+#ifndef MAX_PATH
+#define MAX_PATH 255
+#endif
+
 #ifndef TAG_LONG_PRESS
 #define TAG_LONG_PRESS  300 /* ms */
 #endif
@@ -251,6 +255,7 @@ struct screen { /* per output abstraction */
 struct list_head screens;
 struct screen *curscr;
 struct screen *defscr;
+struct screen *dockscr;
 static xcb_screen_t *rootscr; /* root window details */
 static struct toolbar toolbar; /* window toolbar */
 static uint8_t focus_root_;
@@ -1966,19 +1971,48 @@ static uint8_t tray_window(xcb_window_t win)
  *
  *    /<basedir>/<sub-dirs>/{<winclass1>,<winclassN>}
  *
- *    sub-dirs: {dock,center,top-left,top-right,bottom-left,bottom-right}
+ *    sub-dirs: {center,top-left,top-right,bottom-left,bottom-right}
+ *
+ * 3) dock windows:
+ *
+ *    /<basedir>/screens/<screen>/dock/{<winclass1>,<winclassN>}
  *
  */
+
+static uint8_t dock_window(char *path, const char *name, uint8_t len)
+{
+	struct list_head *cur;
+	struct stat st = {0};
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		uint8_t n = snprintf(path, MAX_PATH, "%s/screens/%u/dock/",
+				     basedir, scr->id);
+
+		if ((MAX_PATH - n) < len)
+			continue;
+
+		strncat(&path[n], name, len);
+
+		if (name[0] && stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+			dockscr = scr;
+			return 1;
+		}
+	}
+
+	dockscr = NULL;
+	return 0;
+}
 
 static uint32_t window_special(xcb_window_t win, const char *dir, uint8_t len)
 {
 	struct sprop class;
-	char *path;
+	char path[MAX_PATH];
 	struct stat st;
 	uint32_t crc;
 	xcb_atom_t atom;
-	int count;
-	int pathlen;
+	uint8_t count;
+	uint8_t found;
 
 	if (!basedir)
 		return 0;
@@ -1987,31 +2021,38 @@ static uint32_t window_special(xcb_window_t win, const char *dir, uint8_t len)
 	count = 0;
 more:
 	get_sprop(&class, win, atom, UCHAR_MAX);
+
 	if (!class.ptr) {
 		ww("unable to detect window class\n");
 		return 0;
 	}
 
 	crc = 0;
-	pathlen = baselen + len + class.len + 1;
-	path = calloc(1, pathlen);
-	if (!path)
-		goto out;
+	memset(path, 0, sizeof(path));
 
-	snprintf(path, pathlen, "%s/%s/%s", basedir, dir, class.str);
-	if (class.str[0] && stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+	if (dir[0] == 'd' && dir[1] == 'o' && dir[2] == 'c' && dir[3] == 'k') {
+		found = dock_window(path, class.str, class.len);
+	} else {
+		uint8_t n = snprintf(path, MAX_PATH, "%s/%s/", basedir, dir);
+
+		if ((MAX_PATH - n) < len) {
+			found = 0;
+		} else {
+			strncat(&path[n], class.str, class.len);
+			found = (class.str[0] && (stat(path, &st) == 0) && S_ISREG(st.st_mode));
+		}
+	}
+
+	if (found) {
 		crc = crc32(class.str, class.len);
-		tt("special win 0x%x, path %s, crc 0x%x\n", win, path, crc);
+		dd("special win 0x%x, path %s, crc 0x%x\n", win, path, crc);
 	} else if (++count < 2) {
 		free(class.ptr);
-		free(path);
 		atom = XCB_ATOM_WM_NAME;
 		goto more;
 	}
 
-out:
 	free(class.ptr);
-	free(path);
 	return crc;
 }
 
@@ -2834,7 +2875,7 @@ static struct tag *configured_tag(xcb_window_t win)
 	return NULL;
 }
 
-static void dock_arrange(struct screen *scr)
+static void arrange_dock(struct screen *scr)
 {
 	struct list_head *cur, *tmp;
 	int16_t x, y;
@@ -2847,12 +2888,14 @@ static void dock_arrange(struct screen *scr)
 
 	list_walk_safe(cur, tmp, &scr->dock) {
 		struct client *cli = list2cli(cur);
+
 		if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
 			list_del(&cli->head);
 			list_del(&cli->list);
 			free(cli);
 			continue;
 		}
+
 		x -= (cli->w + ITEM_H_MARGIN + 2 * BORDER_WIDTH);
 		client_moveresize(cli, x, y, cli->w, cli->h);
 	}
@@ -2863,18 +2906,21 @@ static void dock_arrange(struct screen *scr)
 	print_title(scr, XCB_WINDOW_NONE);
 }
 
-static void dock_del(struct client *cli)
+static void del_dock(struct client *cli)
 {
 	list_del(&cli->head);
 	list_del(&cli->list);
-	dock_arrange(cli->scr);
+	arrange_dock(cli->scr);
 	free(cli);
 }
 
-static void dock_add(struct client *cli, uint8_t bw)
+static void add_dock(struct client *cli, uint8_t bw)
 {
 	uint16_t h;
 	struct list_head *head;
+
+	if (dockscr)
+		cli->scr = dockscr;
 
 	if (cli->flags & CLI_FLG_TRAY)
 		head = &cli->scr->dock;
@@ -2907,7 +2953,7 @@ static void dock_add(struct client *cli, uint8_t bw)
 		cli->flags |= CLI_FLG_BORDER;
 	}
 
-	dock_arrange(cli->scr);
+	arrange_dock(cli->scr);
 	raise_window(cli->win);
 	xcb_map_window(dpy, cli->win);
 	xcb_flush(dpy);
@@ -2939,7 +2985,7 @@ static void del_window(xcb_window_t win)
 	}
 
 	if (cli->flags & CLI_FLG_DOCK) {
-		dock_del(cli);
+		del_dock(cli);
 		goto out;
 	}
 
@@ -3170,7 +3216,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	} else if (cli->flags & CLI_FLG_TRAY || cli->flags & CLI_FLG_DOCK) {
 		cli->w = g->width;
 		cli->h = g->height;
-		dock_add(cli, g->border_width);
+		add_dock(cli, g->border_width);
 		goto out;
 	} else if (!scan) {
 		g->x += scr->x;
@@ -3621,7 +3667,7 @@ static void reinit_panel(struct screen *scr)
 
 	scr->items[PANEL_AREA_TITLE].x = scr->items[PANEL_AREA_DIV].w;
 
-	dock_arrange(scr);
+	arrange_dock(scr);
 }
 
 static void refresh_panel(uint8_t id)
