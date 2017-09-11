@@ -19,6 +19,8 @@ parse() { key_="$1"; pos_="$2"; shift 2; cmd_="$@"; }
 # tools: <key>:<position>:<cmd>
 
 cp -v tools/menu-colors $base_/colors
+cp -v tools/yawm-menu $base_/panel/menu
+chmod 0755 $base_/panel/menu
 
 tools_="
 mod_e:center:yawm-tagmenu
