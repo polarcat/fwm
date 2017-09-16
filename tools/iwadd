@@ -1,0 +1,19 @@
+#!/bin/sh
+
+cd /etc/wpa_supplicant
+mkdir -p configs
+
+read -t 1 ssid key
+
+if [ -z "$ssid" -o -z "$key" ]; then
+	echo "bad ssid or key"
+	exit 1
+fi
+
+if ! wpa_passphrase "$ssid" "$key" > configs/$ssid; then
+	cat configs/$ssid
+	exit 1
+fi
+
+chmod 0600 configs/$ssid
+echo "ok"

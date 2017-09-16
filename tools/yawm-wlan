@@ -1,0 +1,207 @@
+#!/bin/sh
+
+. ~/.yawm/colors/menu-colors
+
+colors0="-0 $norfg -1 $norbg -2 $norfg -3 $norbg"
+
+mainmenu_=$0
+etc_=/etc/wpa_supplicant
+tmp_=/tmp/$USER/wlan
+out_=$tmp_/menu
+
+mkdir -p $tmp_
+
+run() { $@ >/dev/null 2>&1; }
+
+setup()
+{
+	printf "\a\t$1\n" > $out_
+
+	menu -n yawm-menu -b $colors_ -a -d $out_ |
+	while read icon ssid key; do
+		if [ -z "$key" ]; then
+			break
+		fi
+
+		echo "$1 $key" | sudo iwadd | while read error; do
+			err=1
+
+			case $error in
+			"ok") err=0;;
+			*) printf "\a\t$error\n" > $out_;;
+			esac
+
+			if [ $err -ne 0 ]; then
+				run menu -n yawm-menu $colors0 -d $out_
+			fi
+
+			break
+		done
+	done
+
+	$mainmenu_
+}
+
+add()
+{
+	printf "\a\tscanning...\n" > $out_
+	run menu -n yawm-menu $colors0 -d $out_ &
+
+	run sudo iwlist wlan0 scan
+	run sudo wpa_cli scan
+
+	printf "\a\t\n" > $out_
+
+	sudo wpa_cli scan_results | while read bssid freq sig flags ssid; do
+		case $bssid in
+		OK|Selected|bssid) continue;;
+		esac
+
+		if [ $sig -gt -50 ]; then
+			lvl="    " # excellent
+		elif [ $sig -le -50 -a $sig -ge -60 ]; then
+			lvl="    " # good
+		elif [ $sig -lt -60 -a $sig -ge -70 ]; then
+			lvl="    " # fair
+		else
+			lvl="    " # weak
+		fi
+
+		if [ -z "$ssid" ]; then
+			ssid="??"
+		fi
+
+		printf "\a$lvl\t$ssid\n" >> $out_
+	done
+
+	menu -n yawm-menu -b $colors_ -a -d $out_ |
+	while read bar0 bar1 bar2 bar4 bar5 ssid input; do
+		if [ -n "$ssid" ]; then
+			setup $ssid
+		fi
+
+		break
+	done
+
+	$mainmenu_
+}
+
+connected()
+{
+	printf "\a\tnot connected\n" > $out_
+
+	ifconfig $2 | while read inet addr rest; do
+		case $addr in
+		"addr:"[0-9]*)
+			printf "\a\tconnected to $1 $addr\n" > $out_
+			break
+			;;
+		esac
+	done
+
+	if ! ping -c 1 google.com >/dev/null 2>&1; then
+		printf "\a\tno internet connection\n" >> $out_
+	fi
+
+	run menu -n yawm-menu $colors0 -d $out_
+}
+
+connect()
+{
+	printf "\a\tconnecting to $ssid ...\n" > $out_
+	run menu -n yawm-menu $colors0 -d $out_ &
+
+	sudo iwup $1 | while read status message; do
+		if [ -z "$message" ]; then
+			printf "\a\t$1: unknown status\n" > $out_
+			run menu -n yawm-menu $colors0 -d $out_
+			break
+		fi
+
+		err=1
+
+		case $status in
+		"ok") err=0;;
+		*) printf "\a\t$status $message\n" > $out_;;
+		esac
+
+		if [ $err -ne 0 ]; then
+			run menu -n yawm-menu $colors0 -d $out_
+			$mainmenu_
+		else
+			connected $1 $message
+		fi
+
+		break
+	done
+}
+
+manage()
+{
+	local cur=$etc_/current.conf
+	local ico=''
+
+	if [ "$1" = "del" ]; then
+		ico=""
+	else
+		ico=""
+	fi
+
+	printf "\a\t\n" > $out_
+
+	ls -1 $etc_/configs/ | while read config; do
+		printf "\a$ico\t$config\n" >> $out_
+	done
+
+	menu -n yawm-menu -b $colors_ -d $out_ |
+	while read icon ssid; do
+		if [ -z "$ssid" ]; then
+			break
+		elif [ "$1" = "del" ]; then
+			sudo iwdel $ssid
+		else
+			connect $ssid
+		fi
+
+		break
+	done
+}
+
+devstat()
+{
+	printf "" > $out_
+
+	iwconfig $1 | while read dev line; do
+		case $dev in
+		$1) printf "\t$dev\t  $line\n" >> $out_;;
+		*) printf "\t\t  $line\n" >> $out_;;
+		esac
+	done
+
+	run menu -n yawm-menu $colors0 $out_
+}
+
+status()
+{
+	iwconfig 2>/dev/null | while read line; do
+		case $line in
+		*IEEE*ESSID*) devstat $line;;
+		esac
+	done
+}
+
+printf "\a\t\n" > $out_
+printf "\a\tconnect\n" >> $out_
+printf "\a\tadd\n" >> $out_
+printf "\a\tforget\n" >> $out_
+printf "\a\tstatus\n" >> $out_
+
+menu -n yawm-menu -b $colors_ -a -d $out_ |
+while read icon item cmd arg; do
+	case $item in
+	"connect") manage;;
+	"add") add;;
+	"forget") manage del;;
+	"status") status;;
+	esac
+done

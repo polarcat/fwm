@@ -1,0 +1,71 @@
+#!/bin/sh
+
+etc_=/etc/wpa_supplicant
+var_=/var/run/wpa_supplicant
+sys_=/sys/class/net
+dev_=''
+ifs_=$IFS
+
+help()
+{
+	echo "Usage: $(basename $0) <ssid>"
+}
+
+getdev()
+{
+	while [ $# -gt 1 ]; do
+		shift 1
+	done
+	dev_=$1
+}
+
+error()
+{
+	while read line; do
+		case $line in
+		*"error"*|*"Error"*|*"ERROR"*|*"fail"*|*"Fail"*|*"FAIL"*)
+			echo "$line"
+			return 1
+			;;
+		esac
+	done
+	return 0
+}
+
+if [ $# -eq 0 ]; then
+	help
+	exit 0
+fi
+
+for dir in $sys_/*; do
+	if [ -d $dir/wireless ]; then
+		IFS='/'; getdev $dir; IFS=$ifs_
+		break
+	fi
+done
+
+if [ -z "$dev_" ]; then
+	echo "wireless interface not found"
+	exit 1
+fi
+
+cd $etc_
+echo "ctrl_interface=DIR=$var_ GROUP=root" > current.conf
+cat configs/$1 >> current.conf
+ln -sf current.conf wpa_supplicant.conf
+ifdown $dev_
+
+/etc/init.d/wpa_supplicant restart 2>&1 | error
+
+if [ $? -ne 0 ]; then
+	# reset config
+	echo "ctrl_interface=DIR=$var_ GROUP=root" > current.conf
+	/etc/init.d/wpa_supplicant restart 2>&1 | error
+	exit 1
+fi
+
+ifup $dev_ 2>&1 | error
+
+if [ $? -eq 0 ]; then
+	echo "ok $dev_"
+fi

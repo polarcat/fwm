@@ -1,0 +1,8 @@
+#!/bin/sh
+
+cd /etc/wpa_supplicant
+
+if [ -n "$1" ]; then
+	rm -f configs/$1
+fi
+
