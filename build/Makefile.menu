@@ -1,6 +1,6 @@
 out = menu
 src = src/menu.c
-cflags = $(xftcflags)
+cflags += $(xftcflags)
 ldflags = $(xftldflags) -lxcb -lX11 -lX11-xcb -lxcb-keysyms
 ldflags += -lxkbcommon -lxkbcommon-x11
 
