@@ -58,7 +58,7 @@ static int16_t found_idx_;
 static uint16_t page_w_;
 static uint16_t page_h_;
 
-static uint8_t row_len_ = 80; /* characters */
+static uint8_t row_len_; /* characters */
 static uint8_t rows_per_page_ = 25;
 static uint8_t pages_num_;
 static uint8_t rows_rem_;
@@ -79,7 +79,6 @@ static uint32_t selfg_ = 0xe0e0e0;
 static uint32_t selbg_ = 0x303030;
 static XftFont *font1_;
 static XftFont *font2_;
-static XftFont *font_; /* current font */
 static XftDraw *draw_;
 static XftColor selfg_xft_;
 static XftColor fg_xft_;
@@ -105,6 +104,7 @@ static int16_t text_y_;
 struct column {
 	char *str;
 	uint8_t len;
+	XftFont *font;
 };
 
 struct row {
@@ -138,11 +138,12 @@ static uint8_t follow_;
 static const char *path_;
 static const char *name_ = "menu";
 
-static void text_size(const char *text, int len, uint16_t *w, uint16_t *h)
+static void text_size(XftFont *font, const char *text, int len, uint16_t *w,
+		      uint16_t *h)
 {
 	XGlyphInfo ext;
 
-	XftTextExtentsUtf8(xdpy_, font_, (XftChar8 *) text, len, &ext);
+	XftTextExtentsUtf8(xdpy_, font, (XftChar8 *) text, len, &ext);
 	ext.width % 2 ? (*w = ext.width + 1) : (*w = ext.width);
 	ext.height % 2 ? (*h = ext.height + 1) : (*h = ext.height);
 }
@@ -172,8 +173,8 @@ static int16_t draw_rect(uint8_t idx, uint8_t focus)
 	return y;
 }
 
-static int16_t draw_col(int16_t x, int16_t y, const char *str, uint8_t len,
-			uint8_t focus)
+static int16_t draw_col(XftFont *font, int16_t x, int16_t y, const char *str,
+			uint8_t len, uint8_t focus)
 {
 	XftColor *fg;
 	uint16_t w;
@@ -182,19 +183,15 @@ static int16_t draw_col(int16_t x, int16_t y, const char *str, uint8_t len,
 	if (!str || !len)
 		return 0;
 
-	if (*str == '\a' && font2_) {
-		font_ = font2_;
+	if (*str == '\a') {
 		str++;
 		len--;
 	}
 
 	focus ? (fg = &selfg_xft_) : (fg = &fg_xft_);
-
-	XftDrawStringUtf8(draw_, fg, font_, x, y, (XftChar8 *) str, len);
+	XftDrawStringUtf8(draw_, fg, font, x, y, (XftChar8 *) str, len);
 	XSync(xdpy_, 0);
-
-	text_size(str, len, &w, &h);
-	font_ = font1_; /* restore default */
+	text_size(font, str, len, &w, &h);
 
 	return x + w + x_pad_;
 }
@@ -214,7 +211,7 @@ static void draw_search_bar(void)
 	search_buf_[1] = ' ';
 	search_buf_[search_idx_] = '_';
 
-	XftDrawStringUtf8(draw_, fg, font_, x, y, (XftChar8 *) str, len);
+	XftDrawStringUtf8(draw_, fg, font1_, x, y, (XftChar8 *) str, len);
 	XSync(xdpy_, 0);
 }
 
@@ -266,13 +263,17 @@ static void draw_row(struct row *row, uint8_t idx, uint8_t focus)
 	uint8_t len;
 
 	col->str = start;
+	col->font = font1_;
 
 	while (ptr < end) {
-		if (*ptr == '\t' || *ptr == '\n') {
+		if (*ptr == '\a') {
+			col->font = font2_;
+		} else if (*ptr == '\t' || *ptr == '\n') {
 			col->len = ptr - start;
 			col++;
 			start = ptr + 1;
 			col->str = start;
+			col->font = font1_;
 		}
 
 		ptr++;
@@ -291,14 +292,15 @@ static void draw_row(struct row *row, uint8_t idx, uint8_t focus)
 		uint16_t w;
 		uint16_t h;
 
-		text_size(row->cols[i].str, row->cols[i].len, &w, &h);
+		col = &row->cols[i];
+		text_size(col->font, col->str, col->len, &w, &h);
 
 		if (w > cols_px_[i])
 			len = cols_len_[i];
 		else
-			len = row->cols[i].len;
+			len = col->len;
 
-		draw_col(x, y, row->cols[i].str, len, focus);
+		draw_col(col->font, x, y, col->str, len, focus);
 		x += cols_px_[i];
 	}
 
@@ -724,23 +726,6 @@ static void grab_pointer(void)
 	return;
 }
 
-static void adjust_width(char *row, uint8_t len)
-{
-	uint16_t w;
-	uint16_t h;
-	uint8_t i;
-	uint8_t acc = 0;
-
-	for (i = 0; i < cols_per_row_ - 1; i++) {
-		acc += cols_len_[i];
-	}
-
-	acc = row_len_ - acc;
-	text_size(row, acc, &w, &h);
-	cols_len_[i] = acc;
-	cols_px_[i] = w;
-}
-
 static XftFont *load_font(char *info, float defsize)
 {
 	XftFont *font;
@@ -788,11 +773,13 @@ static int init_rows(void)
 	uint16_t w;
 	uint16_t h;
 	uint8_t row_max_len;
+	uint8_t icon;
+	XftFont *font;
 
 	x_pad_ = font1_size_ - 2;
 	y_pad_ = x_pad_;
-	row_h_ = font_->ascent + font_->descent + 2 * FONT_H_MARGIN;
-	text_y_ = font_->ascent + FONT_H_MARGIN;
+	row_h_ = font1_->ascent + font1_->descent + 2 * FONT_H_MARGIN;
+	text_y_ = font1_->ascent + FONT_H_MARGIN;
 	ptr = data_;
 
 	while (ptr < end) { /* calc number of items in row */
@@ -847,10 +834,29 @@ static int init_rows(void)
 	pages_[0].rowptr = data_;
 	pages_[0].rowidx = 0;
 
+	icon = 0;
+	font = font1_;
+
 	while (ptr < end) { /* get everything done in one pass */
-		if (*ptr == '\t' || *ptr == '\n') {
-			cols_len_[i] = ptr - col_start;
-			text_size(col_start, cols_len_[i], &w, &h);
+		if (*ptr == '\a') {
+			icon = 1;
+		} else if (*ptr == '\t' || *ptr == '\n') {
+			if (!icon) {
+				font = font1_;
+			} else {
+				font = font2_;
+				col_start++;
+				icon = 0;
+			}
+
+			cols_len_[i] = ptr - col_start + 1;
+			text_size(font, col_start, cols_len_[i], &w, &h);
+
+#ifdef DEBUG
+			char tmp[256] = {0};
+			snprintf(tmp, cols_len_[i], "%s", col_start);
+			dd("size: %ux%u str: %s\n", w, h, tmp);
+#endif
 
 			if (w > cols_px_[i])
 				cols_px_[i] = w;
@@ -898,7 +904,14 @@ static int init_rows(void)
 
 	pages_[UCHAR_MAX].rowptr = end;
 	pages_[UCHAR_MAX].rowidx = 0;
-	adjust_width(longest_row, row_max_len);
+
+#ifdef DEBUG
+	char tmp[256] = {0};
+	snprintf(tmp, sizeof(tmp), "%s", longest_row);
+	dd("longstr: '%s'\n", tmp);
+#endif
+
+	dd("x pad: %u row len: %u str: '%s'\n", x_pad_, row_len_, longest_row);
 
 	if (!rows_num_) {
 		if (cols_per_row_) {
@@ -955,8 +968,14 @@ static int init_rows(void)
 		page_w_ += cols_px_[i];
 	}
 
+	if (row_len_ > row_max_len) {
+		uint16_t diff = page_w_ - cols_px_[i - 1];
+		page_w_ += (row_len_ - row_max_len) * font1_size_; /* using default font */
+		cols_px_[i - 1] = page_w_ - diff;
+	}
+
 	dd("text y: %u row width %u pages num %u\n", text_y_, page_w_,
-		pages_num_);
+	   pages_num_);
 
 	return 0;
 }
@@ -1303,8 +1322,6 @@ int main(int argc, char *argv[])
 		return 255;
 	}
 
-	font_ = font1_; /* default */
-
 	if (!(font2_ = load_font(font2_name_, font2_size_))) {
 		ee("XftFontOpen(%s) failed\n", font2_name_);
 		/* ignore error */
@@ -1312,8 +1329,8 @@ int main(int argc, char *argv[])
 	}
 
 	dd("font: ascent %d descent %d height %d max width %d\n",
-	       font_->ascent, font_->descent, font_->height,
-	       font_->max_advance_width);
+	       font1_->ascent, font1_->descent, font1_->height,
+	       font1_->max_advance_width);
 
 	ref.alpha = 0xffff;
 	ref.red = (fg_ & 0xff0000) >> 8;
