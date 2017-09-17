@@ -7,7 +7,7 @@ scr_=$HOME/.yawm/tmp/screens
 
 echo list-screens > $ctl_
 
-menu -n yawm-screens -b $colors_ -c 25 -d $scr_ |
+menu -n yawm-screens -b $colors_ -d $scr_ |
 while read scr line; do
 	echo "focus-screen $scr" > $ctl_
 	exit 0

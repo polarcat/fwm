@@ -4,16 +4,31 @@
 
 tmp_=$HOME/.yawm/tmp
 out_=$tmp_/suspend
+log_=$tmp_/suspend.log
 
 mkdir -p $tmp_
 
+suspend()
+{
+	pidof xscreensaver
+
+	if [ $? -ne 0 ]; then
+		exec xscreensaver -no-splash &
+	fi
+
+#	xdotool key Alt+Control+F1
+	xscreensaver-command --lock
+#	sleep 2
+	sudo pm-suspend >$log_ 2>&1
+}
+
 if [ ! -f $out_ ]; then
-	printf "Suspend system\t\a \n" > $out_
+	printf "Suspend system\t\a\n" > $out_
 	printf "Cancel\t\n" >> $out_
 fi
 
-menu -n yawm-suspend $colors_ -c 9 -d $out_ | while read info icon; do
+menu -n yawm-suspend $colors_ -d $out_ | while read info icon; do
 	case $info in
-	Suspend*) return 1;;
+	Suspend*) suspend; return 1;;
 	esac
 done

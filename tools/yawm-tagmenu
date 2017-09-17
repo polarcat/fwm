@@ -6,7 +6,6 @@ ctl_=$HOME/.yawm/.control$DISPLAY
 tmp_=$HOME/.yawm/tmp
 seq_=$tmp_/.seq
 out_=$tmp_/tagmenu
-width_=35
 maxtags_=255
 scr_=0
 tag_=-1
@@ -39,15 +38,15 @@ while read scr tag name geo wcnt cur; do
 done < $tmp_/tags
 
 printf "\a\t\n" > $out_
-#printf "\a  \tleft\n" >> $out_
-#printf "\a  \tright\n" >> $out_
-printf "\a  \tcreate <name>\n" >> $out_
+#printf "\a\tleft\n" >> $out_
+#printf "\a\tright\n" >> $out_
+printf "\a\tcreate <name>\n" >> $out_
 
 if [ $wcnt_ -eq 0 ]; then
-	printf "\a  \tdelete [$name_]\n" >> $out_
+	printf "\a\tdelete [$name_]\n" >> $out_
 fi
 
-printf "\a  \trename <newname>\n" >> $out_
+printf "\a\trename <newname>\n" >> $out_
 
 create()
 {
@@ -110,7 +109,7 @@ if [ $tag_ -lt 0 ]; then
 	exit 1
 fi
 
-menu -n yawm-tagmenu -b $colors_ -a -c $width_ -d $out_ |
+menu -n yawm-tagmenu -b $colors_ -a -d $out_ |
 while read icon item param cmd arg; do
 	case $item in
 	"left"*) echo "move left";;

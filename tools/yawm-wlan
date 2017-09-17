@@ -144,7 +144,7 @@ manage()
 	if [ "$1" = "del" ]; then
 		ico=""
 	else
-		ico=""
+		ico=""
 	fi
 
 	printf "\a\t\n" > $out_
@@ -191,10 +191,10 @@ status()
 }
 
 printf "\a\t\n" > $out_
-printf "\a\tconnect\n" >> $out_
+printf "\a\tconnect\n" >> $out_
 printf "\a\tadd\n" >> $out_
 printf "\a\tforget\n" >> $out_
-printf "\a\tstatus\n" >> $out_
+printf "\a\tstatus\n" >> $out_
 
 menu -n yawm-menu -b $colors_ -a -d $out_ |
 while read icon item cmd arg; do
