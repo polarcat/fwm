@@ -1261,6 +1261,10 @@ static uint8_t events(uint8_t wait)
 		dd("XCB_DESTROY_NOTIFY\n");
 		done_ = 1;
 		break;
+	case XCB_ENTER_NOTIFY:
+		dd("XCB_ENTER_NOTIFY\n");
+		grab_pointer();
+		break;
 	case XCB_LEAVE_NOTIFY:
 		dd("XCB_LEAVE_NOTIFY\n");
 		done_ = 1;
@@ -1387,6 +1391,7 @@ int main(int argc, char *argv[])
 	val[1] |= XCB_EVENT_MASK_BUTTON_PRESS;
 	val[1] |= XCB_EVENT_MASK_POINTER_MOTION;
 	val[1] |= XCB_EVENT_MASK_LEAVE_WINDOW;
+	val[1] |= XCB_EVENT_MASK_ENTER_WINDOW;
 
 	uint16_t tmp;
 	search_bar_ ? (tmp = row_h_) : (tmp = 0);
