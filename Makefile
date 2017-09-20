@@ -34,3 +34,6 @@ clock: FORCE
 
 cpumon: FORCE
 	$(makecmd)
+
+dock: FORCE
+	$(makecmd)
