@@ -178,6 +178,13 @@ devstat()
 		esac
 	done
 
+	ifconfig $1 | while read dev line; do
+		case $dev in
+		$1) printf "\t$dev\t  $line\n" >> $out_;;
+		*) printf "\t\t  $line\n" >> $out_;;
+		esac
+	done
+
 	run menu -n yawm-menu $colors0 $out_
 }
 

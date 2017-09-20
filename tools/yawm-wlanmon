@@ -1,0 +1,72 @@
+#!/bin/sh
+
+. ~/.yawm/colors/menu-colors
+
+ifstatus()
+{
+	ifconfig $1 | while read line; do
+		case $line in
+		*inet*addr:[0-9]*) return 1;;
+		esac
+	done
+}
+
+status()
+{
+	iwconfig 2>/dev/null | while read line; do
+		case $line in
+		*IEEE*ESSID:off/any) return 0;;
+		*IEEE*ESSID*) ifstatus $line; return $?;;
+		esac
+	done
+}
+
+stop()
+{
+	ps -opid,args | while read pid cmd; do
+		case $cmd in
+		*dock*-c*yawm-wlan*) kill $pid;;
+		esac
+	done
+}
+
+term()
+{
+	stop
+	exit 0
+}
+
+restart()
+{
+	stop
+	exec dock -i "" -bg $norbg -fg $1 -c yawm-wlancfg &
+}
+
+trap term SIGINT SIGTERM
+status
+oldstat=$?
+newstat=0
+dimfg=0x404040
+
+if [ $oldstat -eq 1 ]; then
+	restart $norfg
+elif [ $oldstat -eq 0 ]; then
+	restart $dimfg
+fi
+
+while :; do
+	status
+	newstat=$?
+
+	if [ $newstat -eq $oldstat ]; then
+		sleep 2
+		continue
+	elif [ $newstat -eq 1 ]; then
+		restart $norfg
+	elif [ $newstat -eq 0 ]; then
+		restart $dimfg
+	fi
+
+	oldstat=$newstat
+	sleep 2
+done

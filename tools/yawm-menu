@@ -42,7 +42,7 @@ while read icon item; do
 	"shortcuts"*) exec yawm-keys &;;
 	"grid"*) printf "make-grid" > $ctl_;;
 	"tag editor"*) yawm-tagmenu &;;
-	"wifi"*) yawm-wlan &;;
+	"wifi"*) yawm-wlancfg &;;
 	"suspend"*) yawm-suspend &;;
 	"exit"*) killall yawm;;
 	esac

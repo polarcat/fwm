@@ -32,10 +32,11 @@ mod_p:center:yawm-apps
 mod_r:center:yawm-run
 mod_v:center:yawm-clipboard
 :center:yawm-suspend
-:center:yawm-wlan
+:center:yawm-wlancfg
 :center:yawm-restart
 :dock:yawm-clock
 :dock:yawm-cpumon
+:dock:yawm-wlanmon
 "
 
 case $1 in
