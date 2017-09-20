@@ -582,12 +582,14 @@ static struct client *front_client(struct tag *tag)
 	struct list_head *cur__;\
 	struct client *front__ = front_client(tag);\
 	ii("tag %s, clients %p | %s\n", tag->name, &tag->clients, __func__);\
-	list_walk(cur__, &tag->clients) {\
-		struct client *tmp__ = list2cli(cur__);\
-		if (tmp__ == front__)\
-			ii("  cli %p win 0x%x *\n", tmp__, tmp__->win);\
-		else\
-			ii("  cli %p win 0x%x\n", tmp__, tmp__->win);\
+	if (front__) {\
+		list_walk(cur__, &tag->clients) {\
+			struct client *tmp__ = list2cli(cur__);\
+			if (tmp__ == front__)\
+				ii("  cli %p win 0x%x *\n", tmp__, tmp__->win);\
+			else\
+				ii("  cli %p win 0x%x\n", tmp__, tmp__->win);\
+		}\
 	}\
 }
 
