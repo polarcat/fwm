@@ -1255,10 +1255,12 @@ static uint8_t events(uint8_t wait)
 		break;
 	case XCB_UNMAP_NOTIFY:
 		dd("XCB_UNMAP_NOTIFY\n");
+		xcb_ungrab_pointer(dpy_, XCB_CURRENT_TIME);
 		done_ = 1;
 		break;
 	case XCB_DESTROY_NOTIFY:
 		dd("XCB_DESTROY_NOTIFY\n");
+		xcb_ungrab_pointer(dpy_, XCB_CURRENT_TIME);
 		done_ = 1;
 		break;
 	case XCB_ENTER_NOTIFY:
@@ -1267,6 +1269,7 @@ static uint8_t events(uint8_t wait)
 		break;
 	case XCB_LEAVE_NOTIFY:
 		dd("XCB_LEAVE_NOTIFY\n");
+		xcb_ungrab_pointer(dpy_, XCB_CURRENT_TIME);
 		done_ = 1;
 		break;
 	case XCB_EXPOSE:
