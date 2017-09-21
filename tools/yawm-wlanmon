@@ -21,28 +21,29 @@ status()
 	done
 }
 
-stop()
+stopdock()
 {
 	ps -opid,args | while read pid cmd; do
 		case $cmd in
-		*dock*-c*yawm-wlan*) kill $pid;;
+		*dock*-c*yawm-wlancfg*) kill $pid >/dev/null 2>&1;;
 		esac
 	done
 }
 
-term()
-{
-	stop
-	exit 0
-}
+signal() { stopdock; exit 0; }
+restart() { stopdock; dock -i "" -bg $norbg -fg $1 -c yawm-wlancfg; }
+cleanup() { kill -9 $1 >/dev/null 2>&1; }
 
-restart()
-{
-	stop
-	exec dock -i "" -bg $norbg -fg $1 -c yawm-wlancfg &
-}
+pid_=$$
 
-trap term SIGINT SIGTERM
+ps -opid,args | while read line; do
+	case $line in
+	$pid_*) continue;;
+	*yawm-wlanmon*bin*sh*) cleanup $line;;
+	esac
+done
+
+trap signal SIGINT SIGTERM SIGKILL
 status
 oldstat=$?
 newstat=0
