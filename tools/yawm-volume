@@ -76,8 +76,8 @@ printf "\a\tmax\n" >> $out_
 IFS=$ifs_
 menu -n yawm-menu -b $colors_ -a -d $out_ |
 while read icon item arg; do
-	case $arg in
-	[0-9]*) volume "$arg" "$cid_";;
+	case $icon in
+	"") volume "$item" "$cid_"; yawm-mixer; exit 0;;
 	esac
 
 	case $item in
@@ -85,6 +85,6 @@ while read icon item arg; do
 	low) volume "$((max_ / 3))" "$cid_"; yawm-mixer low;;
 	med) volume "$((max_ / 2))" "$cid_"; yawm-mixer med;;
 	max) volume "$max_" "$cid_"; yawm-mixer max;;
-	*) volume "$item" "$cid_"; yawm-mixer;;
+	*) volume "$arg" "$cid_"; yawm-mixer;;
 	esac
 done
