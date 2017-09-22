@@ -14,7 +14,7 @@ mkdir -p $tmp_
 
 setmax() { max_=$1; }
 setcur() { cur_=$2; }
-volume() { amixer cset "$2" "$1,$1" >/dev/null; exit 0; }
+volume() { amixer cset "$2" "$1,$1" >/dev/null; }
 
 default()
 {
@@ -81,10 +81,10 @@ while read icon item arg; do
 	esac
 
 	case $item in
-	mute) volume 0 "$cid_";;
-	low) volume "$((max_ / 3))" "$cid_";;
-	med) volume "$((max_ / 2))" "$cid_";;
-	max) volume "$max_" "$cid_";;
-	*) volume "$item" "$cid_";;
+	mute) volume 0 "$cid_"; yawm-mixer mute;;
+	low) volume "$((max_ / 3))" "$cid_"; yawm-mixer low;;
+	med) volume "$((max_ / 2))" "$cid_"; yawm-mixer med;;
+	max) volume "$max_" "$cid_"; yawm-mixer max;;
+	*) volume "$item" "$cid_"; yawm-mixer;;
 	esac
 done
