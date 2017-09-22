@@ -170,11 +170,15 @@ int main(int argc, char *argv[])
 	XRenderColor ref;
 	XGlyphInfo ext;
 	const char *arg;
+	const char *name;
+	uint8_t name_len;
 
 	if (argc < 2) {
 		help(argv[0]);
 		exit(0);
 	}
+
+	name = "dock";
 
 	while (argc > 1) {
 		arg = argv[--argc];
@@ -188,6 +192,8 @@ int main(int argc, char *argv[])
 			bg_ = strtol(argv[argc + 1], NULL, 16);
 		} else if (opt(arg, "-fg", "--fgcolor")) {
 			fg_ = strtol(argv[argc + 1], NULL, 16);
+		} else if (opt(arg, "-n", "--name")) {
+			name = argv[argc + 1];
 		}
 	}
 
@@ -260,13 +266,15 @@ int main(int argc, char *argv[])
 			  0, 0, w_, h_, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			  scr->root_visual, mask, val);
 
+	name_len = strlen(name);
+
         xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
 			    XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
-                            sizeof("dock") - 1, "dock");
+                            name_len, name);
 
         xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
 			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
-                            sizeof("dock") - 1, "dock");
+			    name_len, name);
 
 	xcb_map_window(dpy_, win_);
 	xcb_flush(dpy_);
