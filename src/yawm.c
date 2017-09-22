@@ -86,6 +86,8 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_FULLSCREEN (1 << 10)
 #define CLI_FLG_POPUP (1 << 11)
 #define CLI_FLG_IGNORED (1 << 12)
+#define CLI_FLG_LDOCK (1 << 13)
+#define CLI_FLG_RDOCK (1 << 14)
 
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
@@ -1963,23 +1965,32 @@ static uint8_t tray_window(xcb_window_t win)
 	return ret;
 }
 
-/* Specially treated window
- *
- * 1) only single instance of given window will be allowed:
- *
- *    /<basedir>/exclusive/{<winclass1>,<winclassN>}
- *
- * 2) force window location:
- *
- *    /<basedir>/<sub-dirs>/{<winclass1>,<winclassN>}
- *
- *    sub-dirs: {center,top-left,top-right,bottom-left,bottom-right}
- *
- * 3) dock windows:
- *
- *    /<basedir>/screens/<screen>/dock/{<winclass1>,<winclassN>}
- *
- */
+static uint8_t dock_anchor(const char *name, uint8_t len, uint8_t scrid)
+{
+	char dir[MAX_PATH];
+	char link[MAX_PATH] = {0};
+
+	snprintf(dir, MAX_PATH, "%s/screens/%u/dock/", basedir, scrid);
+
+	if (chdir(dir) < 0)
+		return 0;
+
+	if (readlink("left", link, sizeof(link) - 1) < 0)
+		return 0;
+
+	if (strncmp(link, name, len) == 0)
+		return 1;
+
+	if (readlink("right", link, sizeof(link) - 1) < 0)
+		return 0;
+
+	if (strncmp(link, name, len) == 0)
+		return 2;
+
+	return 0;
+}
+
+/* return 2 if window is leftmost-dock and 3 if rightmost-dock */
 
 static uint8_t dock_window(char *path, const char *name, uint8_t len)
 {
@@ -1997,8 +2008,11 @@ static uint8_t dock_window(char *path, const char *name, uint8_t len)
 		strncat(&path[n], name, len);
 
 		if (name[0] && stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+			uint8_t ret = 1;
 			dockscr = scr;
-			return 1;
+			ret += dock_anchor(name, len, scr->id);
+			chdir(basedir); /* return to base */
+			return ret;
 		}
 	}
 
@@ -2006,15 +2020,33 @@ static uint8_t dock_window(char *path, const char *name, uint8_t len)
 	return 0;
 }
 
-static uint32_t window_special(xcb_window_t win, const char *dir, uint8_t len)
+/* special windows
+ *
+ * 1) only single instance of given window will be allowed:
+ *
+ *    /<basedir>/exclusive/{<winclass1>,<winclassN>}
+ *
+ * 2) force window location:
+ *
+ *    /<basedir>/<sub-dirs>/{<winclass1>,<winclassN>}
+ *
+ *    sub-dirs: {center,top-left,top-right,bottom-left,bottom-right}
+ *
+ * 3) dock windows:
+ *
+ *    /<basedir>/screens/<screen>/dock/{<winclass1>,<winclassN>}
+ *
+ */
+
+static uint8_t specialcrc(xcb_window_t win, const char *dir, uint8_t len,
+			  uint32_t *crc)
 {
 	struct sprop class;
 	char path[MAX_PATH];
 	struct stat st;
-	uint32_t crc;
 	xcb_atom_t atom;
 	uint8_t count;
-	uint8_t found;
+	uint8_t ret;
 
 	if (!basedir)
 		return 0;
@@ -2029,25 +2061,28 @@ more:
 		return 0;
 	}
 
-	crc = 0;
 	memset(path, 0, sizeof(path));
 
 	if (dir[0] == 'd' && dir[1] == 'o' && dir[2] == 'c' && dir[3] == 'k') {
-		found = dock_window(path, class.str, class.len);
+		ret = dock_window(path, class.str, class.len);
 	} else {
 		uint8_t n = snprintf(path, MAX_PATH, "%s/%s/", basedir, dir);
 
 		if ((MAX_PATH - n) < len) {
-			found = 0;
+			ret = 0;
 		} else {
 			strncat(&path[n], class.str, class.len);
-			found = (class.str[0] && (stat(path, &st) == 0) && S_ISREG(st.st_mode));
+			ret = (class.str[0] && (stat(path, &st) == 0) &&
+			       S_ISREG(st.st_mode));
 		}
 	}
 
-	if (found) {
-		crc = crc32(class.str, class.len);
-		dd("special win 0x%x, path %s, crc 0x%x\n", win, path, crc);
+	if (ret) {
+		if (crc) {
+			*crc = crc32(class.str, class.len);
+			dd("special win 0x%x, path %s, crc 0x%x\n", win, path,
+			   *crc);
+		}
 	} else if (++count < 2) {
 		free(class.ptr);
 		atom = XCB_ATOM_WM_NAME;
@@ -2055,7 +2090,12 @@ more:
 	}
 
 	free(class.ptr);
-	return crc;
+	return ret;
+}
+
+static uint8_t special(xcb_window_t win, const char *dir, uint8_t len)
+{
+	return specialcrc(win, dir, len, NULL);
 }
 
 static int panel_window(xcb_window_t win)
@@ -2881,6 +2921,8 @@ static void arrange_dock(struct screen *scr)
 {
 	struct list_head *cur, *tmp;
 	int16_t x, y;
+	struct client *ldock = NULL;
+	struct client *rdock = NULL;
 
 	scr->items[PANEL_AREA_DOCK].x = scr->x + scr->w;
 	scr->items[PANEL_AREA_DOCK].w = 0;
@@ -2888,7 +2930,7 @@ static void arrange_dock(struct screen *scr)
 	x = scr->items[PANEL_AREA_DOCK].x;
 	y = scr->panel.y + ITEM_V_MARGIN;
 
-	list_walk_safe(cur, tmp, &scr->dock) {
+	list_walk_safe(cur, tmp, &scr->dock) { /* find l and r docks */
 		struct client *cli = list2cli(cur);
 
 		if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
@@ -2897,6 +2939,25 @@ static void arrange_dock(struct screen *scr)
 			free(cli);
 			continue;
 		}
+
+		if (cli->flags & CLI_FLG_LDOCK)
+			ldock = cli;
+		else if (cli->flags & CLI_FLG_RDOCK)
+			rdock = cli;
+	}
+
+	if (ldock) {
+		list_del(&ldock->head);
+		list_add(&scr->dock, &ldock->head);
+	}
+
+	if (rdock) {
+		list_del(&rdock->head);
+		list_top(&scr->dock, &rdock->head);
+	}
+
+	list_walk(cur, &scr->dock) {
+		struct client *cli = list2cli(cur);
 
 		x -= (cli->w + ITEM_H_MARGIN + 2 * BORDER_WIDTH);
 		client_moveresize(cli, x, y, cli->w, cli->h);
@@ -3012,7 +3073,7 @@ static uint32_t window_exclusive(xcb_window_t win)
 	struct client *cli;
 	struct list_head *cur, *tmp;
 
-	crc = window_special(win, "exclusive", sizeof("exclusive"));
+	specialcrc(win, "exclusive", sizeof("exclusive"), &crc);
 
 	list_walk_safe(cur, tmp, &clients) {
 		cli = glob2client(cur);
@@ -3041,6 +3102,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	struct client *cli;
 	uint32_t val[1];
 	uint32_t crc;
+	uint8_t dock;
 	xcb_window_t leader;
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
@@ -3056,25 +3118,30 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		flags |= CLI_FLG_IGNORED;
 	}
 
-	if (window_special(win, "dock", sizeof("dock")))
+	if ((dock = special(win, "dock", sizeof("dock"))))
 		flags |= CLI_FLG_DOCK;
-	else if (window_special(win, "center", sizeof("center")))
+	else if (special(win, "center", sizeof("center")))
 		flags |= CLI_FLG_CENTER;
-	else if (window_special(win, "top-left", sizeof("top-left")))
+	else if (special(win, "top-left", sizeof("top-left")))
 		flags |= CLI_FLG_TOPLEFT;
-	else if (window_special(win, "top-right", sizeof("top-right")))
+	else if (special(win, "top-right", sizeof("top-right")))
 		flags |= CLI_FLG_TOPRIGHT;
-	else if (window_special(win, "bottom-left", sizeof("bottom-left")))
+	else if (special(win, "bottom-left", sizeof("bottom-left")))
 		flags |= CLI_FLG_BOTLEFT;
-	else if (window_special(win, "bottom-right", sizeof("bottom-right")))
+	else if (special(win, "bottom-right", sizeof("bottom-right")))
 		flags |= CLI_FLG_BOTRIGHT;
+
+	if (dock == 2)
+		flags |= CLI_FLG_LDOCK;
+	else if (dock == 3)
+		flags |= CLI_FLG_RDOCK;
 
 	if (tray_window(win) || tray) {
 		ii("win 0x%x provides embed info\n", win);
 		flags |= CLI_FLG_TRAY;
 	}
 
-	if (window_special(win, "popup", sizeof("popup"))) {
+	if (special(win, "popup", sizeof("popup"))) {
 		flags &= ~(CLI_FLG_DOCK | CLI_FLG_TRAY);
 		flags |= CLI_FLG_POPUP;
 	}
