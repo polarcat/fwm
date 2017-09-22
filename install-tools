@@ -34,9 +34,11 @@ mod_v:center:yawm-clipboard
 :center:yawm-suspend
 :center:yawm-wlancfg
 :center:yawm-restart
+:center:yawm-volume
 :dock:yawm-clock
 :dock:yawm-cpumon
 :dock:yawm-wlanmon
+:dock:yawm-mixer
 "
 
 case $1 in

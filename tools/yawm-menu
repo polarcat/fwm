@@ -24,6 +24,7 @@ printf "\a\ttag editor\n" >> $out_
 #   fa-hotel (alias) [&#xf236;]
 #   fa-pause [&#xf04c;]
 printf "\a\twifi\n" >> $out_
+printf "\a\tsound\n" >> $out_
 printf "\a\tsuspend\n" >> $out_
 printf "\a\texit\n" >> $out_
 
@@ -43,6 +44,7 @@ while read icon item; do
 	"grid"*) printf "make-grid" > $ctl_;;
 	"tag editor"*) yawm-tagmenu &;;
 	"wifi"*) yawm-wlancfg &;;
+	"sound"*) yawm-volume &;;
 	"suspend"*) yawm-suspend &;;
 	"exit"*) killall yawm;;
 	esac
