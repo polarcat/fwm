@@ -31,8 +31,13 @@ stopdock()
 }
 
 signal() { stopdock; exit 0; }
-restart() { stopdock; dock -i "" -bg $norbg -fg $1 -c yawm-wlancfg; }
 cleanup() { kill -9 $1 >/dev/null 2>&1; }
+
+restart()
+{
+	stopdock
+	dock -n yawm-wlanmon -i "" -bg $norbg -fg $1 -c yawm-wlancfg
+}
 
 pid_=$$
 

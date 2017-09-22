@@ -16,4 +16,4 @@ max) fg=$norfg; icon="";;
 *) fg=0x808080; icon="";;
 esac
 
-dock -i $icon -bg $norbg -fg $fg -c yawm-volume &
+dock -n yawm-mixer -i $icon -bg $norbg -fg $fg -c yawm-volume &
