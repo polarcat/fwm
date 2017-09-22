@@ -9,11 +9,16 @@ ps -opid,args | while read pid cmd; do
 done
 
 case $1 in
-mute) fg=0x404040; icon="";;
-low) fg=$norfg; icon="";;
-med) fg=$norfg; icon="";;
-max) fg=$norfg; icon="";;
-*) fg=0x808080; icon="";;
+mute)
+	read fg < ~/.yawm/colors/normal-bg
+	fg=$(printf "0x%x" $((fg + 0x202020)))
+	;;
+low)
+	read fg < ~/.yawm/colors/normal-bg
+	fg=$(printf "0x%x" $((fg + 0x404040)))
+	;;
+max) read fg < ~/.yawm/colors/notice-bg;;
+*) read fg < ~/.yawm/colors/normal-fg;;
 esac
 
-dock -n yawm-mixer -i $icon -bg $norbg -fg $fg -c yawm-volume &
+dock -n yawm-mixer -i "" -bg $norbg -fg $fg -c yawm-volume &
