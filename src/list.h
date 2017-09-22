@@ -29,6 +29,14 @@ static inline int list_empty(struct list_head *head)
 	return (head->next == head);
 }
 
+static inline void list_top(struct list_head *head, struct list_head *item)
+{
+	item->next = head->next;
+	head->next->prev = item;
+	head->next = item;
+	item->prev = head;
+}
+
 static inline void list_add(struct list_head *head, struct list_head *item)
 {
 	item->prev = head->prev;
