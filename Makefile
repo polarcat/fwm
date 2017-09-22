@@ -21,7 +21,7 @@ endif
 .PHONY: FORCE all clean install
 
 all:
-	@printf "\nUsage: make [clean|install] <yawm|menu|clock|cpumon>\n\n"
+	@printf "\nUsage: make [clean|install] <yawm|menu|clock|cpumon|dock>\n\n"
 
 yawm: FORCE
 	$(makecmd)

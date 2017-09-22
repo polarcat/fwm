@@ -1,6 +1,6 @@
 bin = $(HOME)/bin
 
-install:
+install: FORCE
 	-mkdir -p $(bin)
 	-unlink $(bin)/$(out)
 	-cp -v bin/$(out) $(bin)/$(out)
