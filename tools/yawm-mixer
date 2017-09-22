@@ -1,0 +1,19 @@
+#!/bin/sh
+
+. ~/.yawm/colors/menu-colors
+
+ps -opid,args | while read pid cmd; do
+	case $cmd in
+	*dock*-c*yawm-volume*) kill $pid >/dev/null 2>&1; break;;
+	esac
+done
+
+case $1 in
+mute) fg=0x404040; icon="";;
+low) fg=$norfg; icon="";;
+med) fg=$norfg; icon="";;
+max) fg=$norfg; icon="";;
+*) fg=0x808080; icon="";;
+esac
+
+dock -i $icon -bg $norbg -fg $fg -c yawm-volume &
