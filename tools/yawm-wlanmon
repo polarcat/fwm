@@ -25,7 +25,7 @@ stopdock()
 {
 	ps -opid,args | while read pid cmd; do
 		case $cmd in
-		*dock*-c*yawm-wlancfg*) kill $pid >/dev/null 2>&1;;
+		*dock*-c*yawm-wlancfg*) kill $pid >/dev/null 2>&1; break;;
 		esac
 	done
 }
