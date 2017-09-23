@@ -51,28 +51,30 @@ static uint16_t h_;
 static void draw(void)
 {
 	xcb_rectangle_t rect = { 0, 0, w_, h_, };
+	XftChar8 *icon = (XftChar8 *) icon_;
 
 	xcb_change_gc(dpy_, gc_, XCB_GC_FOREGROUND, &bg_);
 	xcb_poly_fill_rectangle(dpy_, win_, gc_, 1, &rect);
-	XftDrawStringUtf8(draw_, &fgx_, font_, x_, y_, (XftChar8 *) icon_, len_);
+	XftDrawStringUtf8(draw_, &fgx_, font_, x_, y_, icon, len_);
 	XSync(xdpy_, 0);
 }
 
-static void exec(const char *cmd)
+static void *task(void *arg)
 {
-	const char *home;
+	system((const char *) arg);
+	dd("'%s' exited\n", (const char *) arg);
+	return NULL;
+}
 
-	if (fork() != 0)
-		return;
+static void spawn(const char *cmd)
+{
+	pthread_t t;
+	const char *home;
 
 	if ((home = getenv("HOME")))
 		chdir(home);
 
-	close(xcb_get_file_descriptor(dpy_));
-	close(ConnectionNumber(xdpy_));
-	setsid();
-	system(cmd);
-	exit(0);
+	pthread_create(&t, NULL, task, (void *) cmd);
 }
 
 static int events(void)
@@ -101,7 +103,7 @@ static int events(void)
 		break;
 	case XCB_BUTTON_PRESS:
 		if (cmd_)
-			exec(cmd_);
+			spawn(cmd_);
 		break;
 	}
 
@@ -248,12 +250,11 @@ int main(int argc, char *argv[])
 	}
 
 	XftTextExtentsUtf8(xdpy_, font_, (XftChar8 *) icon_, 1, &ext);
-	ext.width % 2 ? (w_ = ext.width + 1) : (w_ = ext.width);
-	ext.height % 2 ? (h_ = ext.height + 1) : (h_ = ext.height);
 
 	x_ = 2;
 	y_ = font_->ascent + font_->descent;
-	w_ = h_ = font_->ascent + font_->descent + 2 * x_;
+	w_ = font_->max_advance_width + 2 * x_;
+	h_ = font_->ascent + font_->descent + 2 * x_;
 
 	dd("win dim (%d,%d) text pos (%d,%d)\n", w_, h_, x_, y_);
 
