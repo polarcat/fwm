@@ -88,6 +88,7 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_IGNORED (1 << 12)
 #define CLI_FLG_LDOCK (1 << 13)
 #define CLI_FLG_RDOCK (1 << 14)
+#define CLI_FLG_LGRAV (1 << 15)
 
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
@@ -1967,26 +1968,45 @@ static uint8_t tray_window(xcb_window_t win)
 	return ret;
 }
 
-static uint8_t dock_anchor(const char *name, uint8_t len, uint8_t scrid)
+static uint8_t dock_grleft(const char *name, uint8_t len, uint8_t scrid)
+{
+	struct stat st = {0};
+	char path[MAX_PATH];
+	uint8_t n;
+
+	n = snprintf(path, MAX_PATH, "%s/screens/%u/dock/left-gravity/",
+		     homedir, scrid);
+
+	strncat(&path[n], name, len);
+	return (stat(path, &st) == 0 && S_ISREG(st.st_mode));
+}
+
+static uint8_t dock_gravity(const char *name, uint8_t len, uint8_t scrid)
 {
 	char link[MAX_PATH] = {0};
 
-	if (readlink("left", link, sizeof(link) - 1) < 0)
+	if (readlink("left-anchor", link, sizeof(link) - 1) < 0)
 		return 0;
 
 	if (strncmp(link, name, len) == 0)
 		return 1;
 
-	if (readlink("right", link, sizeof(link) - 1) < 0)
+	if (readlink("right-anchor", link, sizeof(link) - 1) < 0)
 		return 0;
 
 	if (strncmp(link, name, len) == 0)
 		return 2;
 
+	if (dock_grleft(name, len, scrid))
+		return 3;
+
 	return 0;
 }
 
-/* return 2 if window is leftmost-dock and 3 if rightmost-dock */
+/* @return 2 window is leftmost-dock
+ *         3 window is rightmost-dock
+ *	   4 window has left-side gravity
+ */
 
 static uint8_t dock_window(char *path, const char *name, uint8_t len)
 {
@@ -2009,7 +2029,7 @@ static uint8_t dock_window(char *path, const char *name, uint8_t len)
 			uint8_t ret = 1;
 
 			dockscr = scr;
-			ret += dock_anchor(name, len, scr->id);
+			ret += dock_gravity(name, len, scr->id);
 
 			if (userhome)
 				chdir(userhome);
@@ -2979,17 +2999,15 @@ static void del_dock(struct client *cli)
 static void add_dock(struct client *cli, uint8_t bw)
 {
 	uint16_t h;
-	struct list_head *head;
 
 	if (dockscr)
 		cli->scr = dockscr;
 
-	if (cli->flags & CLI_FLG_TRAY)
-		head = &cli->scr->dock;
+	if (cli->flags & CLI_FLG_LGRAV)
+		list_add(&cli->scr->dock, &cli->head);
 	else
-		head = cli->scr->dock.next;
+		list_top(&cli->scr->dock, &cli->head);
 
-	list_add(head, &cli->head);
 	list_add(&clients, &cli->list);
 
 	cli->flags |= CLI_FLG_DOCK;
@@ -3134,6 +3152,8 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		flags |= CLI_FLG_LDOCK;
 	else if (dock == 3)
 		flags |= CLI_FLG_RDOCK;
+	else if (dock == 4)
+		flags |= CLI_FLG_LGRAV;
 
 	if (tray_window(win) || tray) {
 		ii("win 0x%x provides embed info\n", win);
