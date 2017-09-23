@@ -1,7 +1,7 @@
 out = yawm
 src = src/yawm.c
 cflags += $(xftcflags)
-ldflags += -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms
+ldflags += -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms -lpthread
 ldflags += -lX11 -lX11-xcb $(xftldflags)
 
 .PHONY: FORCE clean

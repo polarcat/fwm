@@ -1,7 +1,7 @@
 out = dock
 src = src/dock.c
 cflags += $(xftcflags)
-ldflags += $(xftldflags) -lxcb -lX11 -lX11-xcb
+ldflags += $(xftldflags) -lxcb -lX11 -lX11-xcb -lpthread
 
 .PHONY: FORCE clean
 
