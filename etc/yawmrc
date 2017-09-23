@@ -1,0 +1,3 @@
+export YAWM_HOME=$HOME/.yawm
+export YAWM_LOG=$HOME/yawm${DISPLAY}.log
+export PATH=$PATH:$YAWM_HOME/bin

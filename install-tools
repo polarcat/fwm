@@ -1,9 +1,9 @@
 #!/bin/sh
 
 force_=0
-base_=$HOME/.yawm
-keys_=$base_/keys
-ctl_=$base_/.control$DISPLAY
+yawm_=$HOME/.yawm
+keys_=$yawm_/keys
+ctl_=$yawm_/.control$DISPLAY
 ifs_=$IFS
 
 help()
@@ -18,9 +18,11 @@ parse() { key_="$1"; pos_="$2"; shift 2; cmd_="$@"; }
 
 # tools: <key>:<position>:<cmd>
 
-cp -v tools/menu-colors $base_/colors
-cp -v tools/yawm-menu $base_/panel/menu
-chmod 0755 $base_/panel/menu
+cp -v tools/menu-colors $yawm_/colors
+cp -v tools/yawm-menu $yawm_/panel/menu
+chmod 0755 $yawm_/panel/menu
+
+dock_=screens/0/dock
 
 tools_="
 mod_e:center:yawm-tagmenu
@@ -35,10 +37,12 @@ mod_v:center:yawm-clipboard
 :center:yawm-wlancfg
 :center:yawm-restart
 :center:yawm-volume
-:dock:yawm-clock
-:dock:yawm-cpumon
-:dock:yawm-wlanmon
-:dock:yawm-mixer
+:center:yawm-batinfo
+:$dock_:yawm-clock
+:$dock_:yawm-cpumon
+:$dock_:yawm-wlanmon
+:$dock_:yawm-mixer
+:$dock_:yawm-batmon
 "
 
 case $1 in
@@ -46,7 +50,7 @@ case $1 in
 -f|--force) force_=1;;
 esac
 
-mkdir -p $HOME/bin
+mkdir -p $yawm_/bin
 mkdir -p $keys_
 
 for tool in $tools_; do
@@ -59,12 +63,12 @@ for tool in $tools_; do
 		continue
 	fi
 
-	cp -v tools/$cmd_ $HOME/bin/
-	chmod 0755 $HOME/bin/$cmd_
+	cp -v tools/$cmd_ $yawm_/bin/
+	chmod 0755 $yawm_/bin/$cmd_
 
 	if [ -n "$pos_" ]; then
-		mkdir -p $base_/$pos_
-		touch $base_/$pos_/$cmd_
+		mkdir -p $yawm_/$pos_
+		touch $yawm_/$pos_/$cmd_
 	fi
 
 	if [ -z "$key_" ]; then

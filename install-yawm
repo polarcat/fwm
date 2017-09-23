@@ -1,20 +1,25 @@
 #!/bin/sh
 
 pwd_=$PWD
-bin_=$HOME/bin
-base_=$HOME/.yawm
-keys_=$base_/keys
-panel_=$base_/panel
+yawm_=$HOME/.yawm
+bin_=$yawm_/bin
+keys_=$yawm_/keys
+panel_=$yawm_/panel
 
+mkdir -p $HOME/bin
 mkdir -p $bin_
 mkdir -p $keys_
 mkdir -p $panel_
 
-cp -v yawm $bin_
-cp -v menu $bin_
-cp -v clock $bin_
-cp -v etc/start-yawm $bin_
+cp -v bin/yawm $HOME/bin
+cp -v etc/start-yawm $HOME/bin
 cp -v etc/xinitrc $HOME/.xinitrc-yawm
+cp -v etc/yawmrc $HOME/.yawmrc
+
+cp -v bin/menu $bin_
+cp -v bin/clock $bin_
+cp -v bin/dock $bin_
+cp -v bin/cpumon $bin_
 cp -v tools/yawm-menu $panel_/menu
 
 cd $HOME
@@ -27,7 +32,7 @@ ln -sf .xinitrc-yawm .xinitrc
 
 # set defaults
 
-mkdir -p $base_/screens/0/tags/0
+mkdir -p $yawm_/screens/0/tags/0
 
 cd $keys_
 
