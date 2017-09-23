@@ -1,0 +1,20 @@
+#!/bin/sh
+
+. ~/.yawm/colors/menu-colors
+
+colors0="-0 $norfg -1 $norbg -2 $norfg -3 $norbg"
+
+ifs_=$IFS
+tmp_=$HOME/.yawm/tmp
+out_=$tmp_/menu
+
+printf "" > $out_
+
+while read line; do
+	split() { var=$1; val=$2; }
+	IFS='='; split $line
+	printf "$var\t$val\n" >> $out_
+done < /sys/class/power_supply/BAT0/uevent
+
+IFS=$ifs_
+exec menu -n yawm-menu $colors0 $out_ >/dev/null 2>&1
