@@ -502,9 +502,8 @@ static xcb_atom_t a_ping;
 
 static strlen_t actname_max = UCHAR_MAX - 1;
 
-static uint8_t baselen;
-static char *basedir;
-static char *homedir;
+static const char *homedir;
+static uint8_t homelen;
 static struct toolbar_item *focused_item;
 static uint8_t toolbar_pressed;
 
@@ -1745,19 +1744,22 @@ static void draw_toolbar(void)
 	xcb_flush(dpy);
 }
 
-static void exec(const char *cmd)
+static void *task(void *arg)
 {
-	if (fork() != 0)
-		return;
+	system((const char *) arg);
+	free(arg);
+	return NULL;
+}
 
-	if (homedir)
-		chdir(homedir);
+static void run(const char *cmd)
+{
+	const char *userhome = getenv("HOME");
+	pthread_t t;
 
-	close(xcb_get_file_descriptor(dpy));
-	close(ConnectionNumber(xdpy));
-	setsid();
-	system(cmd);
-	exit(0);
+	if (userhome)
+		chdir(userhome);
+
+	pthread_create(&t, NULL, task, (void *) cmd);
 }
 
 static void spawn_cleanup(int sig)
@@ -1770,38 +1772,38 @@ static void spawn_cleanup(int sig)
 
 static void spawn(struct arg *arg)
 {
-	uint16_t len = baselen + sizeof("/keys/") + UCHAR_MAX;
-	char path[len];
+	uint16_t len = homelen + sizeof("/keys/") + UCHAR_MAX;
+	char *cmd;
 
-	if (!basedir)
+	if (!(cmd = calloc(1, len)))
 		return;
 
-	snprintf(path, len, "%s/keys/%s", basedir, arg->kmap->keyname);
-	exec(path);
+	snprintf(cmd, len, "%s/keys/%s", homedir, arg->kmap->keyname);
+	run(cmd);
 }
 
 static void autostart(void)
 {
-	uint16_t len = baselen + sizeof("autostart");
-	char path[len];
+	uint16_t len = homelen + sizeof("/autostart");
+	char *cmd;
 
-	if (!basedir)
+	if (!(cmd = calloc(1, len)))
 		return;
 
-	snprintf(path, len, "%s/autostart", basedir);
-	exec(path);
+	snprintf(cmd, len, "%s/autostart", homedir);
+	run(cmd);
 }
 
 static void show_menu(void)
 {
-	uint16_t len = baselen + sizeof("/panel/menu");
-	char path[len];
+	uint16_t len = homelen + sizeof("/panel/menu");
+	char *cmd;
 
-	if (!basedir)
+	if (!(cmd = calloc(1, len)))
 		return;
 
-	snprintf(path, len, "%s/panel/menu", basedir);
-	exec(path);
+	snprintf(cmd, len, "%s/panel/menu", homedir);
+	run(cmd);
 }
 
 static void clean(void)
@@ -1967,13 +1969,7 @@ static uint8_t tray_window(xcb_window_t win)
 
 static uint8_t dock_anchor(const char *name, uint8_t len, uint8_t scrid)
 {
-	char dir[MAX_PATH];
 	char link[MAX_PATH] = {0};
-
-	snprintf(dir, MAX_PATH, "%s/screens/%u/dock/", basedir, scrid);
-
-	if (chdir(dir) < 0)
-		return 0;
 
 	if (readlink("left", link, sizeof(link) - 1) < 0)
 		return 0;
@@ -1996,25 +1992,34 @@ static uint8_t dock_window(char *path, const char *name, uint8_t len)
 {
 	struct list_head *cur;
 	struct stat st = {0};
+	const char *userhome = getenv("HOME");
 
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
 		uint8_t n = snprintf(path, MAX_PATH, "%s/screens/%u/dock/",
-				     basedir, scr->id);
+				     homedir, scr->id);
 
 		if ((MAX_PATH - n) < len)
 			continue;
 
+		chdir(path);
 		strncat(&path[n], name, len);
 
 		if (name[0] && stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
 			uint8_t ret = 1;
+
 			dockscr = scr;
 			ret += dock_anchor(name, len, scr->id);
-			chdir(basedir); /* return to base */
+
+			if (userhome)
+				chdir(userhome);
+
 			return ret;
 		}
 	}
+
+	if (userhome)
+		chdir(userhome);
 
 	dockscr = NULL;
 	return 0;
@@ -2024,17 +2029,17 @@ static uint8_t dock_window(char *path, const char *name, uint8_t len)
  *
  * 1) only single instance of given window will be allowed:
  *
- *    /<basedir>/exclusive/{<winclass1>,<winclassN>}
+ *    /<homedir>/exclusive/{<winclass1>,<winclassN>}
  *
  * 2) force window location:
  *
- *    /<basedir>/<sub-dirs>/{<winclass1>,<winclassN>}
+ *    /<homedir>/<sub-dirs>/{<winclass1>,<winclassN>}
  *
  *    sub-dirs: {center,top-left,top-right,bottom-left,bottom-right}
  *
  * 3) dock windows:
  *
- *    /<basedir>/screens/<screen>/dock/{<winclass1>,<winclassN>}
+ *    /<homedir>/screens/<screen>/dock/{<winclass1>,<winclassN>}
  *
  */
 
@@ -2047,9 +2052,6 @@ static uint8_t specialcrc(xcb_window_t win, const char *dir, uint8_t len,
 	xcb_atom_t atom;
 	uint8_t count;
 	uint8_t ret;
-
-	if (!basedir)
-		return 0;
 
 	atom = XCB_ATOM_WM_CLASS;
 	count = 0;
@@ -2066,7 +2068,7 @@ more:
 	if (dir[0] == 'd' && dir[1] == 'o' && dir[2] == 'c' && dir[3] == 'k') {
 		ret = dock_window(path, class.str, class.len);
 	} else {
-		uint8_t n = snprintf(path, MAX_PATH, "%s/%s/", basedir, dir);
+		uint8_t n = snprintf(path, MAX_PATH, "%s/%s/", homedir, dir);
 
 		if ((MAX_PATH - n) < len) {
 			ret = 0;
@@ -2868,9 +2870,6 @@ static struct tag *lookup_tag(struct screen *scr, xcb_window_t win)
 	struct list_head *cur;
 	struct tag *tag;
 
-	if (!basedir)
-		return NULL;
-
 	get_sprop(&class, win, XCB_ATOM_WM_CLASS, UCHAR_MAX);
 	if (!class.ptr) {
 		ww("unable to detect window class\n");
@@ -2880,7 +2879,7 @@ static struct tag *lookup_tag(struct screen *scr, xcb_window_t win)
 	ii("scr %d win 0x%x class '%s'\n", scr->id, win, class.str);
 
 	tag = NULL;
-	class.len += baselen + sizeof("screens/255/tags/255/");
+	class.len += homelen + sizeof("/screens/255/tags/255/");
 	path = calloc(1, class.len);
 
 	if (!path)
@@ -2888,7 +2887,7 @@ static struct tag *lookup_tag(struct screen *scr, xcb_window_t win)
 
 	list_walk(cur, &scr->tags) {
 		tag = list2tag(cur);
-		snprintf(path, class.len, "%s/screens/%d/tags/%d/%s", basedir,
+		snprintf(path, class.len, "%s/screens/%d/tags/%d/%s", homedir,
 			 scr->id, tag->id, class.str);
 
 		if (stat(path, &st) < 0)
@@ -3638,14 +3637,14 @@ static int tag_del(struct screen *scr, uint8_t id)
 /*
  * Tags dir structure:
  *
- * /<basedir>/screens/<screennumber>/tags/<tagnumber>/{.name,<winclass1>,<winclassN>}
+ * /<homedir>/screens/<screennumber>/tags/<tagnumber>/{.name,<winclass1>,<winclassN>}
  */
 
 static int init_tags(struct screen *scr)
 {
 	uint16_t pos;
 	uint8_t i;
-	strlen_t len = baselen + sizeof("screens/255/tags/255/.name");
+	strlen_t len = homelen + sizeof("/screens/255/tags/255/.name");
 	char path[len];
 	char name[TAG_NAME_MAX + 1] = "0";
 	int fd;
@@ -3667,15 +3666,10 @@ static int init_tags(struct screen *scr)
 
 	pos = scr->items[PANEL_AREA_TAGS].x;
 
-	if (!basedir) {
-		ww("base directory is not set\n");
-		goto out;
-	}
-
 	for (i = 0; i < UCHAR_MAX; i++ ) {
 		delete = 0;
 		st.st_mode = 0;
-		sprintf(path, "%s/screens/%d/tags/%d", basedir, scr->id, i);
+		sprintf(path, "%s/screens/%d/tags/%d", homedir, scr->id, i);
 
 		if (stat(path, &st) < 0)
 			delete = 1;
@@ -3685,7 +3679,7 @@ static int init_tags(struct screen *scr)
 		if (delete && tag_del(scr, i))
 			continue;
 
-		sprintf(path, "%s/screens/%d/tags/%d/.name", basedir, scr->id, i);
+		sprintf(path, "%s/screens/%d/tags/%d/.name", homedir, scr->id, i);
 		fd = open(path, O_RDONLY);
 		if (fd > 0) {
 			read(fd, name, sizeof(name) - 1);
@@ -3702,7 +3696,6 @@ static int init_tags(struct screen *scr)
 		memset(name, 0, TAG_NAME_MAX);
 	}
 
-out:
 	if (pos == scr->items[PANEL_AREA_TAGS].x) /* add default tag */
 		pos = add_tag(scr, "*", 0, pos);
 
@@ -3899,15 +3892,12 @@ static void init_toolbar_keys(xcb_key_symbols_t *syms)
 static void init_keys(void)
 {
 	int tmp;
-	uint16_t len = baselen + sizeof("/keys/") + UCHAR_MAX;
+	uint16_t len = homelen + sizeof("/keys/") + UCHAR_MAX;
 	char path[len], *ptr;
 	char buf[actname_max];
 	struct stat st;
 	xcb_key_symbols_t *syms;
 	uint8_t i;
-
-	if (!basedir)
-		return;
 
 	syms = xcb_key_symbols_alloc(dpy);
 	if (!syms) {
@@ -3915,7 +3905,7 @@ static void init_keys(void)
 		return;
 	}
 
-	snprintf(path, len, "%s/keys/", basedir);
+	snprintf(path, len, "%s/keys/", homedir);
 	tmp = strlen(path);
 	ptr = path + tmp;
 	len -= tmp;
@@ -4313,12 +4303,12 @@ static void load_color(const char *path, struct color *color)
 
 static void init_colors(void)
 {
-	uint16_t len = baselen + sizeof("/colors/") + UCHAR_MAX;
+	uint16_t len = homelen + sizeof("/colors/") + UCHAR_MAX;
 	char path[len];
 	struct color *ptr = defcolors;
 
 	while (ptr->fname) {
-		snprintf(path, len, "%s/colors/%s", basedir, ptr->fname);
+		snprintf(path, len, "%s/colors/%s", homedir, ptr->fname);
 		load_color(path, ptr++);
 	}
 }
@@ -4391,10 +4381,10 @@ static uint32_t clients_list_seq;
 
 static void update_seq()
 {
-	char path[baselen + sizeof("/tmp/.seq")];
+	char path[homelen + sizeof("/tmp/.seq")];
 	FILE *f;
 
-	sprintf(path, "%s/tmp/.seq", basedir); /* NOTE: path storage re-used */
+	sprintf(path, "%s/tmp/.seq", homedir); /* NOTE: path storage re-used */
 
 	if (!(f = fopen(path, "w+"))) {
 		ee("fopen(%s) failed, %s\n", path, strerror(errno));
@@ -4408,10 +4398,10 @@ static void update_seq()
 static void dump_tags(void)
 {
 	struct list_head *cur;
-	char path[baselen + sizeof("/tmp/tags")];
+	char path[homelen + sizeof("/tmp/tags")];
 	FILE *f;
 
-	sprintf(path, "%s/tmp/tags", basedir);
+	sprintf(path, "%s/tmp/tags", homedir);
 
 	if (!(f = fopen(path, "w+"))) {
 		ee("fopen(%s) failed, %s\n", path, strerror(errno));
@@ -4445,10 +4435,10 @@ static void dump_tags(void)
 static void dump_screens(void)
 {
 	struct list_head *cur;
-	char path[baselen + sizeof("/tmp/screens")];
+	char path[homelen + sizeof("/tmp/screens")];
 	FILE *f;
 
-	sprintf(path, "%s/tmp/screens", basedir);
+	sprintf(path, "%s/tmp/screens", homedir);
 
 	if (!(f = fopen(path, "w+"))) {
 		ee("fopen(%s) failed, %s\n", path, strerror(errno));
@@ -4471,11 +4461,11 @@ static void dump_screens(void)
 
 static void dump_clients(uint8_t all)
 {
-	char path[baselen + sizeof("/tmp/clients")];
+	char path[homelen + sizeof("/tmp/clients")];
 	struct list_head *cur;
 	FILE *f;
 
-	sprintf(path, "%s/tmp/clients", basedir);
+	sprintf(path, "%s/tmp/clients", homedir);
 
 	if (!(f = fopen(path, "w+"))) {
 		ee("fopen(%s) failed, %s\n", path, strerror(errno));
@@ -5615,7 +5605,7 @@ static void init_keys_def(void)
 {
 	strlen_t tmp;
 	uint8_t i;
-	char path[baselen + sizeof("/keys/") + UCHAR_MAX];
+	char path[homelen + sizeof("/keys/") + UCHAR_MAX];
 	FILE *f;
 	xcb_key_symbols_t *syms;
 
@@ -5641,14 +5631,11 @@ static void init_keys_def(void)
 		ii("map %s to %s\n", kmap->actname, kmap->keyname);
 		list_add(&keymap, &kmap->head);
 
-		if (!basedir)
-			continue;
-
 		tmp = strlen(kmap->actname);
 		if (tmp > actname_max)
 			actname_max = tmp;
 
-		sprintf(path, "%s/keys/%s", basedir, kmap->keyname);
+		sprintf(path, "%s/keys/%s", homedir, kmap->keyname);
 
 		if ((f = fopen(path, "w"))) {
 			ii("write '%s'\n", kmap->actname);
@@ -5727,77 +5714,32 @@ static void init_rootwin(void)
 	xcb_flush(dpy);
 }
 
-static int init_homedir(void)
+static void init_homedir(void)
 {
 	int mode = S_IRWXU;
 
-	homedir = getenv("YAWM_HOME");
-	if (!homedir) {
-		homedir = getenv("HOME");
-		if (!homedir)
-			return -1;
-	}
+	if (!(homedir = getenv("YAWM_HOME")))
+		homedir = ".";
 
-	baselen = strlen(homedir) + sizeof("/.yawm");
-	basedir = calloc(1, baselen);
-	if (!basedir) {
-		ee("calloc(%d) failed, use built-in config\n", baselen);
-		return -1;
-	}
+	homelen = strlen(homedir);
 
-	if (chdir(homedir) < 0) {
+	if (chdir(homedir) < 0)
 		ee("chdir(%s) failed\n", homedir);
-		goto homeless;
-	}
 
-	if (mkdir(".yawm", mode) < 0 && errno != EEXIST) {
-		ee("mkdir(%s/.yawm) failed\n", homedir);
-		goto err;
-	}
+	if (mkdir(".session", mode) < 0 && errno != EEXIST)
+		ee("mkdir(%s.session) failed\n", homedir);
 
-	snprintf(basedir, baselen, "%s/.yawm", homedir);
-	ii("basedir: %s\n", basedir);
+	if (mkdir("screens", mode) < 0 && errno != EEXIST)
+		ee("mkdir(%sscreens) failed\n", homedir);
 
-	if (chdir(basedir) < 0) { /* change to working directory */
-		ee("chdir(%s) failed\n", basedir);
-		goto err;
-	}
+	if (mkdir("panel", mode) < 0 && errno != EEXIST)
+		ee("mkdir(%spanel) failed\n", homedir);
 
-	if (mkdir(".session", mode) < 0 && errno != EEXIST) {
-		ee("mkdir(%s/.yawm/.session) failed\n", homedir);
-		goto err;
-	}
+	if (mkdir("keys", mode) < 0 && errno != EEXIST)
+		ee("mkdir(%skeys) failed\n", homedir);
 
-	if (mkdir("screens", mode) < 0 && errno != EEXIST) {
-		ee("mkdir(%s/.yawm/screens) failed\n", homedir);
-		goto err;
-	}
-
-	if (mkdir("panel", mode) < 0 && errno != EEXIST) {
-		ee("mkdir(%s/.yawm/panel) failed\n", homedir);
-		goto err;
-	}
-
-	if (mkdir("keys", mode) < 0 && errno != EEXIST) {
-		ee("mkdir(%s/.yawm/keys) failed\n", homedir);
-		goto err;
-	}
-
-	if (mkdir("colors", mode) < 0 && errno != EEXIST) {
-		ee("mkdir(%s/.yawm/colors) failed\n", homedir);
-		goto err;
-	}
-
-	return 0;
-
-err:
-	chdir(homedir);
-homeless:
-	free(basedir);
-	basedir = NULL;
-	baselen = 0;
-	ww("not all directories are available some features will be disabled\n");
-	return -1;
+	if (mkdir("colors", mode) < 0 && errno != EEXIST)
+		ee("mkdir(%scolors) failed\n", homedir);
 }
 
 enum fdtypes {
@@ -5849,8 +5791,7 @@ int main()
 		ii("logfile: %s\n", logfile);
 	}
 
-	if (init_homedir() < 0)
-		ww("home directory no initialized\n");
+	init_homedir();
 
 	if (signal(SIGCHLD, spawn_cleanup) == SIG_ERR)
 		panic("SIGCHLD handler failed\n");
