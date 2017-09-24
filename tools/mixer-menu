@@ -1,9 +1,11 @@
 #!/bin/sh
 
-. ~/.yawm/colors/menu-colors
+. $YAWM_HOME/lib/menu-utils
+
+comm_=mixer-dock
 
 ifs_=$IFS
-tmp_=$HOME/.yawm/tmp/volume
+tmp_=$YAWM_HOME/tmp/volume
 out_=$tmp_/menu
 inf_=$tmp_/info
 max_=0
@@ -74,17 +76,17 @@ printf "\a\tmax\n" >> $out_
 # prompt user
 
 IFS=$ifs_
-menu -n yawm-menu -b $colors_ -a -d $out_ |
-while read icon item arg; do
+
+startmenu -b -a -d $out_ | while read icon item arg; do
 	case $icon in
-	"") volume "$item" "$cid_"; yawm-mixer; exit 0;;
+	"") volume "$item" "$cid_"; $comm_; exit 0;;
 	esac
 
 	case $item in
-	mute) volume 0 "$cid_"; yawm-mixer mute;;
-	low) volume "$((max_ / 3))" "$cid_"; yawm-mixer low;;
-	med) volume "$((max_ / 2))" "$cid_"; yawm-mixer med;;
-	max) volume "$max_" "$cid_"; yawm-mixer max;;
-	*) volume "$arg" "$cid_"; yawm-mixer;;
+	mute) volume 0 "$cid_"; $comm_ mute;;
+	low) volume "$((max_ / 3))" "$cid_"; $comm_ low;;
+	med) volume "$((max_ / 2))" "$cid_"; $comm_ med;;
+	max) volume "$max_" "$cid_"; $comm_ max;;
+	*) volume "$arg" "$cid_"; $comm_;;
 	esac
 done

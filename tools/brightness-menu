@@ -1,0 +1,66 @@
+#!/bin/sh
+
+. $YAWM_HOME/lib/menu-utils
+
+ifs_=$IFS
+tmp_=$YAWM_HOME/tmp/volume
+out_=$tmp_/menu
+inf_=$tmp_/info
+cur_=0
+
+read max_ < /sys/class/backlight/intel_backlight/max_brightness
+read cur_ < /sys/class/backlight/intel_backlight/actual_brightness
+
+brightness()
+{
+	local level
+
+	if [ -z "$1" ]; then
+		level=$cur_
+	elif  [ $1 -lt 10 ]; then
+		level=10
+	elif [ $1 -gt $max_ ]; then
+		level=$max_
+	else
+		level=$1
+	fi
+
+	sudo brightness $level
+}
+
+val_=10
+norm() { val_=$1; }
+
+mkdir -p $tmp_
+
+printf "\a\t$((cur_ * 100 / max_))%%\n" > $out_
+printf "\a\tlow\n" >> $out_
+printf "\a\tmed\n" >> $out_
+printf "\a\tmax\n" >> $out_
+
+startmenu -b -a -d $out_ | while read icon item arg; do
+	case $arg in
+	[1-9]*)
+		if  [ $arg -lt 10 ]; then
+			arg=10
+		elif [ $arg -gt 100 ]; then
+			arg=100
+		fi
+		;;
+	esac
+
+	case $item in
+	low) brightness $((max_ * 10 / 100));;
+	med) brightness $((max_ * 50 / 100));;
+	max) brightness $max_;;
+	*)
+		if [ -n "$arg" ]; then
+			brightness $((max_ * $arg / 100))
+		else
+			IFS='%'; norm $item; IFS=$ifs_
+			brightness $((max_ * $val_ / 100))
+		fi
+		;;
+	esac
+	break
+done

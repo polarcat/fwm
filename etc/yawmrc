@@ -1,3 +1,16 @@
+#!/bin/sh
+
 export YAWM_HOME=$HOME/.yawm
 export YAWM_LOG=$HOME/yawm${DISPLAY}.log
-export PATH=$PATH:$YAWM_HOME/bin
+
+case $PATH in
+*$YAWM_HOME/bin*) ;;
+*) export PATH=$PATH:$YAWM_HOME/bin;;
+esac
+
+yawm
+restart-menu
+
+if [ $? -eq 0 ]; then
+	exit 0
+fi

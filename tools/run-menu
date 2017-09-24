@@ -1,15 +1,18 @@
 #!/bin/sh
 
-. ~/.yawm/colors/menu-colors
+. $YAWM_HOME/lib/menu-utils
 
 ifs_=$IFS
-tmp_=$HOME/.yawm/tmp
+tmp_=$YAWM_HOME/tmp
 out_=$tmp_/bin
 
 mkdir -p $tmp_
 
-printf "\a\t\n" > $out_
+#printf "\a\t\n" > $out_
+printf "\a\t\n" > $out_
+
 IFS=':'
+
 for dir in $PATH; do
 	ls -1 $dir | while read line; do
 		printf "$line\t$dir\n" >> $out_
@@ -17,7 +20,8 @@ for dir in $PATH; do
 done
 
 IFS=$ifs_
-menu -n yawm-run -b $colors_ -d -a $out_ | while read cmd path extra; do
+
+startmenu -b -d -a $out_ | while read cmd path extra; do
 	if [ -z "$extra" ]; then
 		exec $cmd &
 	else

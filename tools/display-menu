@@ -1,0 +1,19 @@
+#!/bin/sh
+
+. $YAWM_HOME/lib/menu-utils
+
+ctl_=$YAWM_HOME/.control$DISPLAY
+tmp_=$YAWM_HOME/tmp
+out_=$tmp_/menu
+
+#printf "\a\t\n" > $out_
+printf "\a\t\n" > $out_
+printf "\a\tbrightness\n" >> $out_
+printf "\a\tconnect\n" >> $out_
+
+startmenu -b -d $out_ | while read icon item; do
+	case $item in
+	"brightness"*) exec brightness-menu &;;
+	"connect"*) exec randr-menu &;;
+	esac
+done

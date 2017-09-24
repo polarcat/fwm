@@ -6,21 +6,25 @@ bin_=$yawm_/bin
 keys_=$yawm_/keys
 panel_=$yawm_/panel
 
+mkdir -p $yawm_
 mkdir -p $HOME/bin
 mkdir -p $bin_
 mkdir -p $keys_
 mkdir -p $panel_
 
-cp -v bin/yawm $HOME/bin
-cp -v etc/start-yawm $HOME/bin
+unlink $HOME/bin/yawm
+
+cp -v bin/yawm $HOME/bin/
+cp -v etc/start-yawm $HOME/bin/
 cp -v etc/xinitrc $HOME/.xinitrc-yawm
 cp -v etc/yawmrc $HOME/.yawmrc
+cp -v etc/autostart $yawm_/
 
-cp -v bin/menu $bin_
-cp -v bin/clock $bin_
-cp -v bin/dock $bin_
-cp -v bin/cpumon $bin_
-cp -v tools/yawm-menu $panel_/menu
+cp -v bin/menu $bin_/
+cp -v bin/clock $bin_/
+cp -v bin/dock $bin_/
+cp -v bin/cpumon $bin_/
+cp -v tools/main-menu $panel_/menu
 
 cd $HOME
 
@@ -41,12 +45,5 @@ if [ ! -f ctrl_alt_delete ]; then
 	chmod +x ctrl_alt_delete
 fi
 
-if [ ! -f mod_t ]; then
-	printf "#!/bin/sh\nexec xterm &" > mod_t
-	chmod +x mod_t
-fi
-
-if [ ! -f mod_m ]; then
-	printf "#!/bin/sh\nexec yawm-menu &" > mod_m
-	chmod +x mod_m
-fi
+printf "#!/bin/sh\nexec main-menu &" > mod_m
+chmod +x mod_m

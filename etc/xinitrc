@@ -8,10 +8,4 @@ xscreensaver -no-splash &
 
 while :; do
 	. ~/.yawmrc
-	yawm
-	yawm-restart
-
-	if [ $? -eq 0 ]; then
-		break
-	fi
 done

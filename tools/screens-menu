@@ -1,0 +1,13 @@
+#!/bin/sh
+
+. $YAWM_HOME/lib/menu-utils
+
+ctl_=$YAWM_HOME/.control$DISPLAY
+scr_=$YAWM_HOME/tmp/screens
+
+echo list-screens > $ctl_
+
+startmenu -b -d $scr_ | while read scr line; do
+	echo "focus-screen $scr" > $ctl_
+	exit 0
+done

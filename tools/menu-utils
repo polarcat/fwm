@@ -1,0 +1,94 @@
+#!/bin/sh
+
+normbg() { read normbg_ < $YAWM_HOME/colors/normal-bg; }
+normfg() { read normfg_ < $YAWM_HOME/colors/normal-fg; }
+selbg() { read selbg_ < $YAWM_HOME/colors/active-bg; }
+selfg() { read selfg_ < $YAWM_HOME/colors/notice-fg; }
+notebg() { read notebg_ < $YAWM_HOME/colors/notice-bg; }
+notefg() { read notefg_ < $YAWM_HOME/colors/notice-fg; }
+
+stoptool()
+{ # $1:prog $2:name
+	ps -opid,args | while read pid cmd; do
+		if [ $$ = "$pid" ]; then
+			continue
+		fi
+		case $cmd in
+		$1*$2*) kill -9 $pid 2>&1;;
+		esac
+	done
+}
+
+stopdock()
+{ # $1:name $2:comm
+	ps -opid,args | while read pid cmd; do
+		if [ $$ = "$pid" ]; then
+			continue
+		fi
+		case $cmd in
+		*dock*$1*$2*) kill -9 $pid 2>&1;;
+		esac
+	done
+}
+
+startdock()
+{ # $1:name $2:icon $3:bg $4:fg $5:comm $6:exec
+	local size
+
+	if [ -z "$docksize_" ]; then
+		size=''
+	else
+		size="-s $docksize_"
+	fi
+
+	stopdock $name_ $comm_
+
+	case $6 in
+	1) exec dock -n $1 -i $2 $size -bg $3 -fg $4 -c $5 &;;
+	*) dock -n $1 -i $2 $size -bg $3 -fg $4 -c $5 &;;
+	esac
+}
+
+stopmon()
+{ # $1:name
+	ps -opid,args | while read pid cmd; do
+		if [ $$ = "$pid" ]; then
+			continue
+		fi
+		case $cmd in
+		*$1*bin*sh*$1*) kill -9 $pid 2>&1;;
+		esac
+	done
+}
+
+signalmon() { stopdock $name_ $comm_; exit 0; }
+
+initmon()
+{ # $1:name $2:comm
+	trap signalmon SIGINT SIGTERM SIGKILL
+	stopmon $name_
+}
+
+startmenu()
+{ # $@ all menu arguments except colors
+	local colors
+
+	normbg
+	normfg
+	selbg
+	selfg
+
+	colors="-0 $normfg_ -1 $normbg_ -2 $selfg_ -3 $selbg_"
+	menu -n menu $colors $@
+}
+
+showinfo()
+{ # $@ all menu arguments except colors
+	local colors
+
+	normbg
+	normfg
+
+	colors="-0 $normfg_ -1 $normbg_ -2 $normfg_ -3 $normbg_"
+	menu -n menu $colors $@ >/dev/null
+}

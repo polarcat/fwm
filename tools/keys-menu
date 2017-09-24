@@ -1,21 +1,22 @@
 #!/bin/sh
 
-. ~/.yawm/colors/menu-colors
+. $YAWM_HOME/lib/menu-utils
 
 ifs_=$IFS
-dir_=$HOME/.yawm/keys
-tmp_=$HOME/.yawm/tmp
+dir_=$YAWM_HOME/keys
+tmp_=$YAWM_HOME/tmp
 out_=$tmp_/keys
 
 mkdir -p $tmp_
 
-printf "\a\t\n" > $out_
+#printf "\a\t\n" > $out_
+printf "\a\t\n" > $out_
+
 ls -1 $dir_ | while read key; do
 	printf "$key\t"
 
 	found=0
 	while read line; do
-		echo "KEY: $key LINE $i: $line" 1>&2
 		printf "$line "
 		found=1
 	done < $dir_/$key
@@ -29,7 +30,7 @@ done >> $out_
 
 getval_() { echo $2 | tr '[:lower:]' '[:upper:]'; }
 
-menu -n yawm-keys -b $colors_ -d $out_ | while read key info; do
+startmenu -b -d $out_ | while read key info; do
 	case $key in
 	mod_f*)
 		IFS='_'; val=$(getval_ $key); IFS=$ifs_

@@ -1,8 +1,14 @@
 #!/bin/sh
 
-. ~/.yawm/colors/menu-colors
+. $YAWM_HOME/lib/menu-utils
 
-colors0="-0 $norfg -1 $norbg -2 $norfg -3 $norbg"
+normbg
+normfg
+selbg
+selfg
+
+menu_="-0 $normfg_ -1 $normbg_ -2 $selfg_ -3 $selbg_"
+info_="-0 $normfg_ -1 $normbg_ -2 $normfg_ -3 $normbg_"
 
 mainmenu_=$0
 etc_=/etc/wpa_supplicant
@@ -17,7 +23,7 @@ setup()
 {
 	printf "\a\t$1\n" > $out_
 
-	menu -n yawm-menu -b $colors_ -a -d $out_ |
+	startmenu -b -a -d $out_ |
 	while read icon ssid key; do
 		if [ -z "$key" ]; then
 			break
@@ -32,7 +38,7 @@ setup()
 			esac
 
 			if [ $err -ne 0 ]; then
-				run menu -n yawm-menu $colors0 -d $out_
+				showinfo -d $out_
 			fi
 
 			break
@@ -45,7 +51,7 @@ setup()
 add()
 {
 	printf "\a\tscanning...\n" > $out_
-	run menu -n yawm-menu $colors0 -d $out_ &
+	showinfo -d $out_ &
 
 	run sudo iwlist wlan0 scan
 	run sudo wpa_cli scan
@@ -74,16 +80,15 @@ add()
 		printf "\a$lvl\t$ssid\n" >> $out_
 	done
 
-	menu -n yawm-menu -b $colors_ -a -d $out_ |
+	startmenu -b -a -d $out_ |
 	while read bar0 bar1 bar2 bar4 bar5 ssid input; do
 		if [ -n "$ssid" ]; then
 			setup $ssid
+			$mainmenu_
 		fi
 
 		break
 	done
-
-	$mainmenu_
 }
 
 connected()
@@ -103,18 +108,18 @@ connected()
 		printf "\a\tno internet connection\n" >> $out_
 	fi
 
-	run menu -n yawm-menu $colors0 -d $out_
+	showinfo -d $out_
 }
 
 connect()
 {
 	printf "\a\tconnecting to $ssid ...\n" > $out_
-	run menu -n yawm-menu $colors0 -d $out_ &
+	showinfo -d $out_ &
 
 	sudo iwup $1 | while read status message; do
 		if [ -z "$message" ]; then
 			printf "\a\t$1: unknown status\n" > $out_
-			run menu -n yawm-menu $colors0 -d $out_
+			showinfo -d $out_
 			break
 		fi
 
@@ -126,7 +131,7 @@ connect()
 		esac
 
 		if [ $err -ne 0 ]; then
-			run menu -n yawm-menu $colors0 -d $out_
+			showinfo -d $out_
 			$mainmenu_
 		else
 			connected $1 $message
@@ -153,7 +158,7 @@ manage()
 		printf "\a$ico\t$config\n" >> $out_
 	done
 
-	menu -n yawm-menu -b $colors_ -d $out_ |
+	startmenu -b -d $out_ |
 	while read icon ssid; do
 		if [ -z "$ssid" ]; then
 			break
@@ -210,7 +215,7 @@ devstat()
 		esac
 	done
 
-	run menu -n yawm-menu $colors0 $out_
+	showinfo $out_
 }
 
 status()
@@ -228,7 +233,7 @@ printf "\a\tadd\n" >> $out_
 printf "\a\tforget\n" >> $out_
 printf "\a\tstatus\n" >> $out_
 
-menu -n yawm-menu -b $colors_ -a -d $out_ |
+startmenu -b -a -d $out_ |
 while read icon item cmd arg; do
 	case $item in
 	"connect") manage;;

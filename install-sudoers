@@ -1,0 +1,36 @@
+#!/bin/sh
+
+if [ $# -ne 1 ]; then
+	echo "Usage: $(basename $0) <user>"
+	exit 0
+fi
+
+out_=/etc/sudoers.d/$1
+
+if [ -s $out_ ]; then
+	printf "\n\033[0;31m!! override\033[0m \033[0;32m$out_\033[0m? [yes/NO] "
+	read str
+	case $str in
+	yes|Yes|YES) ;;
+	*) echo "canceled"; exit 0;;
+	esac
+fi
+
+echo "Defaults env_keep += \"ftp_proxy\"
+Defaults env_keep += \"http_proxy\"
+Defaults env_keep += \"https_proxy\"
+$1 ALL=PASSWD: ALL
+$1 ALL=NOPASSWD: /usr/sbin/pm-hibernate, /usr/sbin/pm-suspend
+$1 ALL=NOPASSWD: /sbin/wpa_cli scan, /sbin/wpa_cli scan_results
+$1 ALL=NOPASSWD: /usr/sbin/iwlist *
+$1 ALL=NOPASSWD: /sbin/brightness *
+$1 ALL=NOPASSWD: /sbin/iwup *, /sbin/iwadd *, /sbin/iwdel *" > $out_
+
+echo "$out_ has been updated, install system tools.."
+
+cp -v sbin/iwadd /sbin/
+cp -v sbin/iwup /sbin/
+cp -v sbin/iwdel /sbin/
+cp -v sbin/brightness /sbin/
+
+echo done

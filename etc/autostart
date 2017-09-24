@@ -1,0 +1,30 @@
+#!/bin/sh
+
+spawn()
+{
+	exec $@ &
+	sleep 0.3 # FIXME: have to delay or wm will miss window creation event
+}
+
+iwconfig 2>/dev/null | while read line; do
+	case $line in
+	*IEEE*ESSID*) spawn wlan-dock; break;;
+	esac
+done
+
+for power in /sys/class/power_supply/*; do
+	read type < $power/type
+	case $type in
+	*attery*) spawn bat-dock; break;;
+	esac
+done
+
+for sound in /dev/snd/*; do
+	case $sound in
+	*dev*snd*pcm*) spawn mixer-dock; break;;
+	esac
+done
+
+spawn display-dock
+spawn cpu-dock
+spawn clock-dock

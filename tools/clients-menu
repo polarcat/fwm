@@ -1,0 +1,13 @@
+#!/bin/sh
+
+. $YAWM_HOME/lib/menu-utils
+
+ctl_=$YAWM_HOME/.control$DISPLAY
+cli_=$YAWM_HOME/tmp/clients
+
+echo list-clients > $ctl_
+
+startmenu -b -s 5 -d $cli_ | while read scr tag win info; do
+	echo "focus-window $win" > $ctl_
+	exit 0
+done

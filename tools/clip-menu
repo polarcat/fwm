@@ -1,6 +1,6 @@
 #!/bin/sh
 
-. ~/.yawm/colors/menu-colors
+. $YAWM_HOME/lib/menu-utils
 
 ifs_=$IFS
 max_=10
@@ -8,12 +8,8 @@ dir_=$HOME/.clipboard
 dat_=$dir_/data
 out_=$dir_/list
 tmp_=$dir_/temp
-
-pref_=''
-name_=''
-getstat_() { pref_=$1; name_=$2; }
-
 sel_='nil'
+
 getsel_()
 {
 	case $3 in
@@ -46,7 +42,7 @@ paste()
 	local i=0
 
 	ls -1t $dat_/ | while read name; do
-		if [ $i -eq $pref_ ]; then
+		if [ $i -eq $1 ]; then
 			xclip -i -selection primary $dat_/$name
 			xclip -i -selection secondary $dat_/$name
 			xclip -i -selection clipboard $dat_/$name
@@ -60,6 +56,7 @@ paste()
 # copy
 
 mkdir -p $dir_/data
+
 for sel in clipboard secondary primary; do
 	xclip -selection $sel -o 2>/dev/null >$tmp_
 
@@ -77,18 +74,23 @@ for sel in clipboard secondary primary; do
 	time=$(date +%Y%m%d%H%M%S%s)
 
 	for data in $dat_/*; do
-		IFS='-'; getstat_ $data; IFS=$ifs_
-		if [ "$name_" = "$hash" ]; then
-			mv $data $dat_/$time-$name_-$sel 2>/dev/null
+		getstat() { unused=$1; name=$2; }
+
+		IFS='-'; getstat $data; IFS=$ifs_
+
+		if [ "$name" = "$hash" ]; then
+			mv $data $dat_/$time-$name-$sel 2>/dev/null
 		elif [ -f $tmp_ ]; then
 			mv $tmp_ $dat_/$time-$hash-$sel
 		fi
 	done
 done
 
-printf "\a\t\t\n" > $out_
+#printf "\a\t\t\n" > $out_
+printf "\a\t\t\n" > $out_
 
 i=0
+
 ls -1t $dat_/ | while read name; do
 	if [ ! -s $dat_/$name ]; then
 		rm -f $dat_/$name
@@ -103,12 +105,12 @@ ls -1t $dat_/ | while read name; do
 		cat $dat_/$name | tr -d '[:cntrl:]' | cut -c 1-78 >> $out_
 #		cat $dat_/$name | tr -d '\t' | tr -d '\a' | cut -c 1-78 >> $out_
 	fi
+
 	i=$((i + 1))
 done
 
-res=$(menu -n yawm-clipboard -b $colors_ -d $out_)
-getstat_ $res
-
-case $pref_ in
-[0-9]*) paste;;
-esac
+startmenu -b -d $out_ | while read index rest; do
+	case $index in
+	[0-9]*) paste $index; exit 0;;
+	esac
+done

@@ -1,10 +1,10 @@
 #!/bin/sh
 
-. ~/.yawm/colors/menu-colors
+. $YAWM_HOME/lib/menu-utils
 
 ifs_=$IFS
 dir_=/usr/share
-tmp_=$HOME/.yawm/tmp
+tmp_=$YAWM_HOME/tmp
 out_=$tmp_/menu
 val_=''
 
@@ -23,7 +23,9 @@ exists_()
 	fi
 }
 
-printf "\a\t\t\t\n" > $out_
+#printf "\a\t\t\t\n" > $out_
+printf "\a\t\t\t\n" > $out_
+
 find $dir_ -type f -name "*.desktop" | while read file; do
 	name=''
 	cmd=''
@@ -54,10 +56,7 @@ find $dir_ -type f -name "*.desktop" | while read file; do
 	fi
 done
 
-res=$(menu -n yawm-apps -b $colors_ -d $out_)
-
-runcmd_() { exec $1; }
-
-if [ -n "$res" ]; then
-	runcmd_ $res &
-fi
+startmenu -b -d $out_ | while read cmd rest; do
+	exec $cmd &
+	exit 0
+done

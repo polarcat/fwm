@@ -1,8 +1,8 @@
 #!/bin/sh
 
-. ~/.yawm/colors/menu-colors
+. $YAWM_HOME/lib/menu-utils
 
-tmp_=$HOME/.yawm/tmp
+tmp_=$YAWM_HOME/tmp
 out_=$tmp_/suspend
 log_=$tmp_/suspend.log
 
@@ -27,7 +27,7 @@ if [ ! -f $out_ ]; then
 	printf "Cancel\t\n" >> $out_
 fi
 
-menu -n yawm-suspend $colors_ -d $out_ | while read info icon; do
+startmenu -d $out_ | while read info icon; do
 	case $info in
 	Suspend*) suspend; return 1;;
 	esac

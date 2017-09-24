@@ -1,0 +1,14 @@
+#!/bin/sh
+
+. $YAWM_HOME/lib/menu-utils
+
+icon_=""
+name_=display-dock
+comm_=display-menu
+
+normbg
+normfg
+
+docksize_=16
+
+startdock $name_ $icon_ $normbg_ $normfg_ $comm_ 1

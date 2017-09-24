@@ -1,0 +1,31 @@
+#!/bin/sh
+
+. $YAWM_HOME/lib/menu-utils
+
+icon_=""
+name_=bat-dock
+comm_=bat-info
+level_=0
+
+normbg
+normfg
+
+initmon $name_ $comm_
+
+while :; do
+	read level < /sys/class/power_supply/BAT0/capacity_level
+	case $level in
+	Full) icon_="";;
+	Low) icon_="";;
+	Normal) icon_="";;
+	High) icon_="";;
+	*) icon_="";;
+	esac
+
+	if [ "$level_" != "$level" ]; then
+		startdock $name_ $icon_ $normbg_ $normfg_ $comm_
+	fi
+
+	level_=$level
+	sleep 60
+done

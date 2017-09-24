@@ -14,35 +14,70 @@ help()
 	exit 0
 }
 
-parse() { key_="$1"; pos_="$2"; shift 2; cmd_="$@"; }
+install_bin()
+{ # $1:cmd
+	cp -v tools/$1 $yawm_/bin/
+	chmod 0755 $yawm_/bin/$1
+}
 
-# tools: <key>:<position>:<cmd>
+install_pos()
+{ # $1:cmd $2:pos
+	if [ $# -ne 2 ]; then return; fi
+	mkdir -p $yawm_/$2
+	touch $yawm_/$2/$1
+}
 
-cp -v tools/menu-colors $yawm_/colors
-cp -v tools/yawm-menu $yawm_/panel/menu
+install_pop()
+{ # $1:cmd
+	mkdir -p $yawm_/popup
+	touch $yawm_/popup/$1
+}
+
+install_key()
+{ # $1:cmd $2:key
+	if [ $# -ne 2 ]; then return; fi
+	if [ $force_ -eq 0 ] && [ -f $keys_/$2 ]; then
+		printf "key \033[0;32m$2\033[0m already defined\n"
+		printf "run with -f parameter to override\n"
+		return
+	fi
+
+	printf "#!/bin/sh\nexec $1 &\n" > $keys_/$2
+	chmod 0755 $keys_/$2
+	echo "updated key $keys_/$2"
+}
+
+cp -v tools/main-menu $yawm_/panel/menu
 chmod 0755 $yawm_/panel/menu
 
 dock_=screens/0/dock
 
-tools_="
-mod_e:center:yawm-tagmenu
-mod_k:center:yawm-keys
-mod_l:center:yawm-clients
-mod_m:center:yawm-menu
-mod_o:center:yawm-screens
-mod_p:center:yawm-apps
-mod_r:center:yawm-run
-mod_v:center:yawm-clipboard
-:center:yawm-suspend
-:center:yawm-wlancfg
-:center:yawm-restart
-:center:yawm-volume
-:center:yawm-batinfo
-:$dock_:yawm-clock
-:$dock_:yawm-cpumon
-:$dock_:yawm-wlanmon
-:$dock_:yawm-mixer
-:$dock_:yawm-batmon
+# config: <key>:<pos>:<cmd>
+
+config_="
+mod_m:center:main-menu
+mod_e:center:tag-menu
+mod_k:center:keys-menu
+mod_l:center:clients-menu
+mod_o:center:screens-menu
+mod_p:center:apps-menu
+mod_r:center:run-menu
+mod_v:center:clip-menu
+:center:display-menu
+:center:brightness-menu
+:center:randr-menu
+:center:suspend-menu
+:center:restart-menu
+:center:wlan-menu
+:center:mixer-menu
+:center:bat-info
+dock:$dock_/left-gravity:display-dock
+dock:$dock_/left-gravity:wlan-dock
+dock:$dock_/left-gravity:clock-dock
+dock:$dock_/left-gravity:mixer-dock
+dock:$dock_:bat-dock
+dock:$dock_:clock-dock
+dock:$dock_:cpu-dock
 "
 
 case $1 in
@@ -51,40 +86,45 @@ case $1 in
 esac
 
 mkdir -p $yawm_/bin
+mkdir -p $yawm_/lib
 mkdir -p $keys_
 
-for tool in $tools_; do
+cp -v tools/menu-utils $yawm_/lib
+
+parse() { key_="$1"; pos_="$2"; shift 2; cmd_="$@"; }
+
+for item in $config_; do
 	key_=''
 	pos_=''
 	cmd_=''
-	IFS=':'; parse $tool; IFS=$ifs_
+
+	IFS=':'; parse $item; IFS=$ifs_
 
 	if [ -z "$cmd_" ]; then
 		continue
 	fi
 
-	cp -v tools/$cmd_ $yawm_/bin/
-	chmod 0755 $yawm_/bin/$cmd_
+	install_bin $cmd_
+	install_pos $cmd_ $pos_
 
-	if [ -n "$pos_" ]; then
-		mkdir -p $yawm_/$pos_
-		touch $yawm_/$pos_/$cmd_
+	if [ "$key_" != "dock" ]; then
+		install_pop $cmd_ # ignore toolbox
+		install_key $cmd_ $key_
 	fi
-
-	if [ -z "$key_" ]; then
-		continue
-	fi
-
-	if [ $force_ -eq 0 ] && [ -f $keys_/$key_ ]; then
-		printf "key \033[0;32m$key_\033[0m already defined\n"
-		printf "run with -f parameter to override\n"
-		continue
-	fi
-
-	printf "#!/bin/sh\nexec $cmd_ &\n" > $keys_/$key_
-	chmod 0755 $keys_/$key_
 done
 
-if [ -p $ctl_ ]; then
+# special cases
+
+touch $yawm_/center/menu # default for all menus
+touch $yawm_/popup/menu # default for all menus
+touch $yawm_/popup/popup # default for all popups
+
+pwd_=$PWD
+cd $yawm_/$dock_
+ln -sf clock-dock right-anchor
+ln -sf bat-dock left-anchor
+cd $pwd_
+
+if pidof yawm && [ -p $ctl_ ]; then
 	echo "reload-keys" > $ctl_
 fi

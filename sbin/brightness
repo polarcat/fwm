@@ -1,0 +1,9 @@
+#!/bin/sh
+
+if [ $# -ne 1 ]; then
+	exit 1
+fi
+
+echo $1 > /sys/class/backlight/intel_backlight/brightness
+#cat /sys/class/backlight/intel_backlight/brightness
+#cat /sys/class/backlight/intel_backlight/actual_brightness

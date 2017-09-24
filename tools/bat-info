@@ -1,11 +1,9 @@
 #!/bin/sh
 
-. ~/.yawm/colors/menu-colors
-
-colors0="-0 $norfg -1 $norbg -2 $norfg -3 $norbg"
+. $YAWM_HOME/lib/menu-utils
 
 ifs_=$IFS
-tmp_=$HOME/.yawm/tmp
+tmp_=$YAWM_HOME/tmp
 out_=$tmp_/menu
 
 printf "" > $out_
@@ -17,4 +15,5 @@ while read line; do
 done < /sys/class/power_supply/BAT0/uevent
 
 IFS=$ifs_
-exec menu -n yawm-menu $colors0 $out_ >/dev/null 2>&1
+
+showinfo $out_

@@ -1,8 +1,0 @@
-#!/bin/sh
-
-read norfg < $HOME/.yawm/colors/normal-fg
-read norbg < $HOME/.yawm/colors/normal-bg
-read selfg < $HOME/.yawm/colors/notice-fg
-read selbg < $HOME/.yawm/colors/active-bg
-
-colors_="-0 $norfg -1 $norbg -2 $selfg -3 $selbg"

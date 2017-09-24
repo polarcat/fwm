@@ -1,0 +1,20 @@
+#!/bin/sh
+
+. $YAWM_HOME/lib/menu-utils
+
+icon_=""
+name_=mixer-dock
+comm_=mixer-menu
+
+normbg
+
+case $1 in
+mute) fg_=$(printf "0x%x" $((normbg_ + 0x202020)));;
+low) fg_=$(printf "0x%x" $((normbg_ + 0x404040)));;
+max) notebg; fg_=$notebg_;;
+*) normfg; fg_=$normfg_;;
+esac
+
+docksize_=14 # override default size so it looks better
+
+startdock $name_ $icon_ $normbg_ $fg_ $comm_
