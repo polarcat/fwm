@@ -86,9 +86,9 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_FULLSCREEN (1 << 10)
 #define CLI_FLG_POPUP (1 << 11)
 #define CLI_FLG_IGNORED (1 << 12)
-#define CLI_FLG_LDOCK (1 << 13)
-#define CLI_FLG_RDOCK (1 << 14)
-#define CLI_FLG_LGRAV (1 << 15)
+#define CLI_FLG_LANCHOR (1 << 13)
+#define CLI_FLG_RANCHOR (1 << 14)
+#define CLI_FLG_LDOCK (1 << 15)
 
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
@@ -298,7 +298,7 @@ struct client {
 	pid_t pid;
 	struct screen *scr;
 	struct tag *tag;
-	uint16_t flags;
+	uint32_t flags;
 	uint32_t crc; /* based on class name */
 	uint8_t busy;
 	uint8_t pos; /* enum winpos */
@@ -1969,73 +1969,88 @@ static uint8_t tray_window(xcb_window_t win)
 	return ret;
 }
 
-static uint8_t dock_grleft(const char *name, uint8_t len, uint8_t scrid)
+static uint8_t dock_left(char *path, uint8_t offs,
+			 const char *name, uint8_t len,
+			 uint8_t scrid)
 {
 	struct stat st = {0};
-	char path[MAX_PATH];
-	uint8_t n;
+	char *file;
 
-	n = snprintf(path, MAX_PATH, "%s/screens/%u/dock/left-gravity/",
-		     homedir, scrid);
+	if (MAX_PATH - offs - sizeof("left-gravity") < len) {
+		ww("path exceeds maximum length %u\n", MAX_PATH);
+		return 0;
+	}
 
-	strncat(&path[n], name, len);
+	file = &path[offs];
+	*file = '\0';
+	file = strncat(file, "left-gravity/", sizeof("left-gravity"));
+	strncat(file, name, len);
 	return (stat(path, &st) == 0 && S_ISREG(st.st_mode));
 }
 
-static uint8_t dock_gravity(const char *name, uint8_t len, uint8_t scrid)
+static uint8_t dock_default(char *path, uint8_t offs,
+			    const char *name, uint8_t len,
+			    uint8_t scrid)
+{
+	struct stat st = {0};
+	char *file;
+
+	if (MAX_PATH - offs - 1 < len) {
+		ww("path exceeds maximum length %u\n", MAX_PATH);
+		return 0;
+	}
+
+	file = &path[offs];
+	*file = '\0';
+	strncat(file, name, len);
+	return (stat(path, &st) == 0 && S_ISREG(st.st_mode));
+}
+
+static uint32_t dock_gravity(char *path, const char *name, uint8_t len,
+			    uint8_t scrid)
 {
 	char link[MAX_PATH] = {0};
+	uint8_t n;
 
-	if (readlink("left-anchor", link, sizeof(link) - 1) < 0)
-		return 0;
+	n = snprintf(path, MAX_PATH, "%s/screens/%u/dock/", homedir, scrid);
+	chdir(path);
 
-	if (strncmp(link, name, len) == 0)
-		return 1;
+	if (readlink("left-anchor", link, sizeof(link) - 1) > 0) {
+		if (strncmp(link, name, len) == 0)
+			return (CLI_FLG_LANCHOR | CLI_FLG_DOCK);
+	}
 
-	if (readlink("right-anchor", link, sizeof(link) - 1) < 0)
-		return 0;
+	if (readlink("right-anchor", link, sizeof(link) - 1) > 0) {
+		if (strncmp(link, name, len) == 0)
+			return (CLI_FLG_RANCHOR | CLI_FLG_DOCK);
+	}
 
-	if (strncmp(link, name, len) == 0)
-		return 2;
-
-	if (dock_grleft(name, len, scrid))
-		return 3;
+	if (dock_left(path, n, name, len, scrid))
+		return (CLI_FLG_LDOCK | CLI_FLG_DOCK);
+	else if (dock_default(path, n, name, len, scrid))
+		return CLI_FLG_DOCK;
 
 	return 0;
 }
 
-/* @return 2 window is leftmost-dock
- *         3 window is rightmost-dock
- *	   4 window has left-side gravity
- */
-
-static uint8_t dock_window(char *path, const char *name, uint8_t len)
+static uint32_t dock_window(char *path, const char *name, uint8_t len)
 {
 	struct list_head *cur;
-	struct stat st = {0};
 	const char *userhome = getenv("HOME");
 
+	if (!name[0])
+		return 0;
+
 	list_walk(cur, &screens) {
+		uint32_t flags;
 		struct screen *scr = list2screen(cur);
-		uint8_t n = snprintf(path, MAX_PATH, "%s/screens/%u/dock/",
-				     homedir, scr->id);
 
-		if ((MAX_PATH - n) < len)
-			continue;
-
-		chdir(path);
-		strncat(&path[n], name, len);
-
-		if (name[0] && stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
-			uint8_t ret = 1;
-
-			dockscr = scr;
-			ret += dock_gravity(name, len, scr->id);
-
+		if ((flags = dock_gravity(path, name, len, scr->id))) {
 			if (userhome)
 				chdir(userhome);
 
-			return ret;
+			dockscr = scr;
+			return flags;
 		}
 	}
 
@@ -2064,19 +2079,20 @@ static uint8_t dock_window(char *path, const char *name, uint8_t len)
  *
  */
 
-static uint8_t specialcrc(xcb_window_t win, const char *dir, uint8_t len,
-			  uint32_t *crc)
+static uint32_t specialcrc(xcb_window_t win, const char *dir, uint8_t len,
+			   uint32_t *crc)
 {
 	struct sprop class;
 	char path[MAX_PATH];
 	struct stat st;
 	xcb_atom_t atom;
 	uint8_t count;
-	uint8_t ret;
+	uint32_t flags;
 
 	atom = XCB_ATOM_WM_CLASS;
 	count = 0;
 more:
+	flags = 0;
 	get_sprop(&class, win, atom, UCHAR_MAX);
 
 	if (!class.ptr) {
@@ -2087,25 +2103,23 @@ more:
 	memset(path, 0, sizeof(path));
 
 	if (dir[0] == 'd' && dir[1] == 'o' && dir[2] == 'c' && dir[3] == 'k') {
-		ret = dock_window(path, class.str, class.len);
+		flags = dock_window(path, class.str, class.len);
+		count++; /* do dock check only once */
 	} else {
 		uint8_t n = snprintf(path, MAX_PATH, "%s/%s/", homedir, dir);
 
-		if ((MAX_PATH - n) < len) {
-			ret = 0;
+		if ((MAX_PATH - n - 1) < len) {
+			flags = 0;
 		} else {
 			strncat(&path[n], class.str, class.len);
-			ret = (class.str[0] && (stat(path, &st) == 0) &&
-			       S_ISREG(st.st_mode));
+			flags = (class.str[0] && (stat(path, &st) == 0) &&
+				 S_ISREG(st.st_mode));
 		}
 	}
 
-	if (ret) {
-		if (crc) {
-			*crc = crc32(class.str, class.len);
-			dd("special win 0x%x, path %s, crc 0x%x\n", win, path,
-			   *crc);
-		}
+	if (flags && crc) {
+		*crc = crc32(class.str, class.len);
+		dd("special win 0x%x, path %s, crc 0x%x\n", win, path, *crc);
 	} else if (++count < 2) {
 		free(class.ptr);
 		atom = XCB_ATOM_WM_NAME;
@@ -2113,10 +2127,10 @@ more:
 	}
 
 	free(class.ptr);
-	return ret;
+	return flags;
 }
 
-static uint8_t special(xcb_window_t win, const char *dir, uint8_t len)
+static uint32_t special(xcb_window_t win, const char *dir, uint8_t len)
 {
 	return specialcrc(win, dir, len, NULL);
 }
@@ -2941,8 +2955,8 @@ static void arrange_dock(struct screen *scr)
 {
 	struct list_head *cur, *tmp;
 	int16_t x, y;
-	struct client *ldock = NULL;
-	struct client *rdock = NULL;
+	struct client *lanchor = NULL;
+	struct client *ranchor = NULL;
 
 	scr->items[PANEL_AREA_DOCK].x = scr->x + scr->w;
 	scr->items[PANEL_AREA_DOCK].w = 0;
@@ -2960,20 +2974,20 @@ static void arrange_dock(struct screen *scr)
 			continue;
 		}
 
-		if (cli->flags & CLI_FLG_LDOCK)
-			ldock = cli;
-		else if (cli->flags & CLI_FLG_RDOCK)
-			rdock = cli;
+		if (cli->flags & CLI_FLG_LANCHOR)
+			lanchor = cli;
+		else if (cli->flags & CLI_FLG_RANCHOR)
+			ranchor = cli;
 	}
 
-	if (ldock) {
-		list_del(&ldock->head);
-		list_add(&scr->dock, &ldock->head);
+	if (lanchor) {
+		list_del(&lanchor->head);
+		list_add(&scr->dock, &lanchor->head);
 	}
 
-	if (rdock) {
-		list_del(&rdock->head);
-		list_top(&scr->dock, &rdock->head);
+	if (ranchor) {
+		list_del(&ranchor->head);
+		list_top(&scr->dock, &ranchor->head);
 	}
 
 	list_walk(cur, &scr->dock) {
@@ -3004,7 +3018,7 @@ static void add_dock(struct client *cli, uint8_t bw)
 	if (dockscr)
 		cli->scr = dockscr;
 
-	if (cli->flags & CLI_FLG_LGRAV)
+	if (cli->flags & CLI_FLG_LDOCK)
 		list_add(&cli->scr->dock, &cli->head);
 	else
 		list_top(&cli->scr->dock, &cli->head);
@@ -3120,7 +3134,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	struct client *cli;
 	uint32_t val[1];
 	uint32_t crc;
-	uint8_t dock;
+	uint16_t grav;
 	xcb_window_t leader;
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
@@ -3136,8 +3150,8 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		flags |= CLI_FLG_IGNORED;
 	}
 
-	if ((dock = special(win, "dock", sizeof("dock"))))
-		flags |= CLI_FLG_DOCK;
+	if ((grav = special(win, "dock", sizeof("dock"))))
+		flags |= grav;
 	else if (special(win, "center", sizeof("center")))
 		flags |= CLI_FLG_CENTER;
 	else if (special(win, "top-left", sizeof("top-left")))
@@ -3148,13 +3162,6 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		flags |= CLI_FLG_BOTLEFT;
 	else if (special(win, "bottom-right", sizeof("bottom-right")))
 		flags |= CLI_FLG_BOTRIGHT;
-
-	if (dock == 2)
-		flags |= CLI_FLG_LDOCK;
-	else if (dock == 3)
-		flags |= CLI_FLG_RDOCK;
-	else if (dock == 4)
-		flags |= CLI_FLG_LGRAV;
 
 	if (tray_window(win) || tray) {
 		ii("win 0x%x provides embed info\n", win);
@@ -3312,7 +3319,8 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		g->y += scr->y;
 	}
 
-	cli->tag = configured_tag(win); /* read tag from configuration */
+	if (!(cli->flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
+		cli->tag = configured_tag(win); /* read tag from configuration */
 
 	if (!cli->tag && tag) /* not configured, restore from last session */
 		cli->tag = tag;
