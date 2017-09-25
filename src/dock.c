@@ -170,10 +170,11 @@ static int opt(const char *arg, const char *args, const char *argl)
 	return (strcmp(arg, args) == 0 || strcmp(arg, argl) == 0);
 }
 
-static void help(const char *name)
+static void help(const char *prog, const char *name)
 {
 	printf("Usage: %s <options>\n"
 	       "Options:\n"
+	       "-n, --name <str>      window name (%s)\n"
 	       "-f, --font <font>     icon font (%s:%.1f)\n"
 	       "-m, --margin <num>    icon margin (%u)\n"
 	       "-s, --size <num>      window size (auto)\n"
@@ -181,7 +182,7 @@ static void help(const char *name)
 	       "-c, --cmd <str>       command to run on mouse click\n"
 	       "-bg, --bgcolor <hex>  rgb color, default 0x%x\n"
 	       "-fg, --fgcolor <hex>  rgb color, default 0x%x\n\n",
-               name, font_name_, font_size_, margin_, bg_, fg_);
+               prog, name, font_name_, font_size_, margin_, bg_, fg_);
 }
 
 int main(int argc, char *argv[])
@@ -191,16 +192,15 @@ int main(int argc, char *argv[])
 	uint32_t val[2];
 	XRenderColor ref;
 	const char *arg;
-	const char *name;
+	const char *name = "dock";
 	uint8_t name_len;
 	uint16_t size;
 
 	if (argc < 2) {
-		help(argv[0]);
+		help(argv[0], name);
 		exit(0);
 	}
 
-	name = "dock";
 	size = 0; /* auto */
 
 	while (argc > 1) {
@@ -225,7 +225,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (!icon_) {
-		help(argv[0]);
+		help(argv[0], name);
 		exit(0);
 	}
 

@@ -52,7 +52,7 @@ static void textexts(const char *text, int len, uint16_t *w, uint16_t *h)
 
 	XftTextExtentsUtf8(xdpy, font, (XftChar8 *) text, len, &ext);
 
-	ii("text: %s, geo (%d,%d %d,%d) off (%d,%d)\n",
+	dd("text: %s, geo (%d,%d %d,%d) off (%d,%d)\n",
 	   text, ext.x, ext.y, ext.width, ext.height, ext.xOff, ext.yOff);
 
         ext.width % 2 ? (*w = ext.width + 1) : (*w = ext.width);
@@ -155,11 +155,17 @@ int main(int argc, char *argv[])
 	uint32_t val[2];
 	XRenderColor ref;
 	const char *arg;
+	const char *name;
+	uint8_t name_len;
+
+	name = "clock";
 
 	while (argc > 1) {
 		arg = argv[--argc];
 		if (opt(arg, "-f", "--fmt")) {
 			timefmt = argv[argc + 1];
+		} else if (opt(arg, "-n", "--name")) {
+			name = argv[argc + 1];
 		} else if (opt(arg, "-c", "--cmd")) {
 			cmd = argv[argc + 1];
 		} else if (opt(arg, "-bg", "--bgcolor")) {
@@ -172,11 +178,12 @@ int main(int argc, char *argv[])
 	if (!timefmt) {
 		printf("Usage: %s <options>\n"
 			"Options:\n"
+			"-n, --name <str>      window name (%s)\n"
 			"-f, --fmt <str>       RFC 2822-compliant date format\n"
 			"-c, --cmd <str>       command to run on mouse click\n"
 			"-bg, --bgcolor <hex>  clock background color (0x%x)\n"
 			"-fg, --fgcolor <hex>  clock foreground color (0x%x)\n\n"
-			, argv[0], bg, fg);
+			, argv[0], name, bg, fg);
 		return 1;
 	}
 
@@ -246,7 +253,7 @@ int main(int argc, char *argv[])
 	ypos = font->ascent;
 	height = font->ascent + font->descent + 2 * FONT_H_MARGIN;
 
-	ii("win dim (%d,%d) text pos (%d,%d)\n", width, height, xpos, ypos);
+	dd("win dim (%d,%d) text pos (%d,%d)\n", width, height, xpos, ypos);
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
 	val[0] = bg;
@@ -257,13 +264,15 @@ int main(int argc, char *argv[])
 			  0, 0, width, height, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			  scr->root_visual, mask, val);
 
+	name_len = strlen(name);
+
         xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, win,
 			    XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
-                            sizeof("yawm-clock") - 1, "yawm-clock");
+                            name_len, name);
 
         xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, win,
 			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
-                            sizeof("yawm-clock") - 1, "yawm-clock");
+                            name_len, name);
 
 	xcb_map_window(dpy, win);
 	xcb_flush(dpy);
