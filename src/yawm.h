@@ -26,14 +26,6 @@
 #define FONT2_NAME "fontawesome"
 #endif
 
-#ifndef YAWM_BASE
-#define YAWM_BASE ".yawm"
-#endif
-
-#ifndef YAWM_CTRL
-#define YAWM_CTRL ".control"
-#endif
-
 #define MOUSE_BTN_LEFT 1
 #define MOUSE_BTN_MID 2
 #define MOUSE_BTN_RIGHT 3

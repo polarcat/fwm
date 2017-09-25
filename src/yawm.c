@@ -482,6 +482,7 @@ static XftFont *font2;
 static int xscr;
 static Display *xdpy;
 static xcb_connection_t *dpy;
+static uint8_t disp;
 
 static xcb_atom_t a_state;
 static xcb_atom_t a_client_list;
@@ -5770,9 +5771,10 @@ enum fdtypes {
 
 static int open_control(int fd)
 {
-	char path[sizeof(YAWM_CTRL) + sizeof("255") - 1];
+	char path[MAX_PATH];
 
-	snprintf(path, sizeof(path), YAWM_CTRL ":%d", xscr);
+	snprintf(path, sizeof(path), "%s/.control:%u", homedir, disp);
+	dd("open control %s\n", path);
 	return open_fifo(path, fd);
 }
 
@@ -5786,12 +5788,23 @@ static inline void handle_server_event(struct pollfd *pfd)
 
 static inline void handle_control_event(struct pollfd *pfd)
 {
-	if (pfd->revents & POLLIN)
+	if (pfd->revents & POLLIN) {
 		handle_user_request(pfd->fd);
+		pfd->fd = open_control(pfd->fd); /* and reset pipe */
+		pfd->revents = 0;
+	}
+}
 
-	/* reset pipe */
-	pfd->fd = open_control(pfd->fd);
-	pfd->revents = 0;
+static uint8_t getdisplay(void)
+{
+	char *str = getenv("DISPLAY");
+
+	if (!str) {
+		ee("DISPLAY variable is not set\n");
+		return 0;
+	}
+
+	return atoi(str + 1); /* skip ':' */
 }
 
 int main()
@@ -5816,11 +5829,14 @@ int main()
 	if (signal(SIGCHLD, spawn_cleanup) == SIG_ERR)
 		panic("SIGCHLD handler failed\n");
 
+	disp = getdisplay();
 	xdpy = XOpenDisplay(NULL);
+
 	if (!xdpy) {
-		ee("XOpenDisplay(%s) failed\n", getenv("DISPLAY"));
+		ee("XOpenDisplay(%u) failed\n", disp);
 		return 1;
 	}
+
 	xscr = DefaultScreen(xdpy);
 	init_font();
 	init_colors();
@@ -5861,7 +5877,7 @@ int main()
 	pfds[FD_CTL].events = POLLIN;
 	pfds[FD_CTL].revents = 0;
 
-	ii("defscr %d, curscr %d\n", defscr->id, curscr->id);
+	ii("defscr %d curscr %d display %u\n", defscr->id, curscr->id, disp);
 	ii("enter events loop\n");
 
 	while (1) {
@@ -5877,8 +5893,8 @@ int main()
 			continue;
 		}
 
-		handle_control_event(&pfds[FD_CTL]);
 		handle_server_event(&pfds[FD_SRV]);
+		handle_control_event(&pfds[FD_CTL]);
 
 		if (logfile) {
 			fflush(stdout);
