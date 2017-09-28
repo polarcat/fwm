@@ -5,7 +5,7 @@
 icon_=""
 name_=bat-dock
 comm_=bat-info
-level_=0
+capacity_=0
 
 normbg
 normfg
@@ -13,19 +13,23 @@ normfg
 initmon $name_ $comm_
 
 while :; do
-	read level < /sys/class/power_supply/BAT0/capacity_level
-	case $level in
-	Full) icon_="";;
-	Low) icon_="";;
-	Normal) icon_="";;
-	High) icon_="";;
-	*) icon_="";;
-	esac
+	read capacity < /sys/class/power_supply/BAT0/capacity
 
-	if [ "$level_" != "$level" ]; then
-		startdock $name_ $icon_ $normbg_ $normfg_ $comm_
+	if [ "$capacity_" != "$capacity" ]; then
+		if [ $capacity -gt 100 ]; then
+			capacity=100
+			icon_=""  # full
+		elif [ $capacity -ge 75 -a $capacity -le 100 ]; then
+			icon_=""  # high
+		elif [ $capacity -ge 25 -a $capacity -lt 75 ]; then
+			icon_="" # normal
+		else
+			icon_="" # low
+		fi
+
+		startdock $name_ "$icon_:$capacity" $normbg_ $normfg_ $comm_
 	fi
 
-	level_=$level
+	capacity_=$capacity
 	sleep 60
 done
