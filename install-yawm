@@ -24,6 +24,7 @@ cp -v bin/menu $bin_/
 cp -v bin/clock $bin_/
 cp -v bin/dock $bin_/
 cp -v bin/cpumon $bin_/
+cp -v bin/netlink $bin_/
 cp -v tools/main-menu $panel_/menu
 
 cd $HOME

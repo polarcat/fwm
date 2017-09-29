@@ -1,0 +1,9 @@
+out = netlink
+src = src/netlink.c
+
+.PHONY: FORCE clean
+
+$(out): FORCE
+	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
+
+include $(common)

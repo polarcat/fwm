@@ -37,3 +37,6 @@ cpumon: FORCE
 
 dock: FORCE
 	$(makecmd)
+
+netlink: FORCE
+	$(makecmd)
