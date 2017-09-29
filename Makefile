@@ -5,6 +5,7 @@ cflags += $(CFLAGS)
 ldflags = $(LDFLAGS)
 xftcflags = $(shell pkg-config --cflags xft)
 xftldflags = $(shell pkg-config --libs xft)
+target = $@
 
 export
 

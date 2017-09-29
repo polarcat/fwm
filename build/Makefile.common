@@ -1,4 +1,8 @@
+ifeq ($(target),yawm)
 bin = $(HOME)/bin
+else
+bin = $(HOME)/.yawm/bin
+endif
 
 install: FORCE
 	-mkdir -p $(bin)
