@@ -32,8 +32,11 @@ stopdock()
 }
 
 startdock()
-{ # $1:name $2:icon $3:bg $4:fg $5:comm $6:exec
+{ # $1:name $2:icon<:text> $3:bg $4:fg $5:comm $6:exec
 	local size
+	local icon
+	local text
+	local ifs=$IFS
 
 	if [ -z "$docksize_" ]; then
 		size=''
@@ -41,11 +44,19 @@ startdock()
 		size="-s $docksize_"
 	fi
 
+	gettext() { icon=$1; text=$2; }
+
+	IFS=':'; gettext $2; IFS=$ifs
+
+	if [ -n "$text" ]; then
+		text="-t $text%"
+	fi
+
 	stopdock $name_ $comm_
 
 	case $6 in
-	1) exec dock -n $1 -i $2 $size -bg $3 -fg $4 -c $5 &;;
-	*) dock -n $1 -i $2 $size -bg $3 -fg $4 -c $5 &;;
+	1) exec dock -n $1 -i $icon $text $size -bg $3 -fg $4 -c $5 &;;
+	*) dock -n $1 -i $icon $text $size -bg $3 -fg $4 -c $5 &;;
 	esac
 }
 
