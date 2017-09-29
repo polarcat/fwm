@@ -546,6 +546,25 @@ static pid_t win2pid(xcb_window_t win)
 	return pid;
 }
 
+static struct client *pid2dock(pid_t pid)
+{
+	struct list_head *cur_scr;
+	struct list_head *cur_cli;
+
+	list_walk(cur_scr, &screens) {
+		struct screen *scr = list2screen(cur_scr);
+
+		list_walk(cur_cli, &scr->dock) {
+			struct client *cli = list2cli(cur_cli);
+			if (cli->pid == pid)
+				return cli;
+		}
+	}
+
+	ww("client with pid %u not found\n", pid);
+	return NULL;
+}
+
 static struct client *win2cli(xcb_window_t win)
 {
 	struct list_head *cur;
@@ -914,6 +933,35 @@ static void free_client(struct client *cli)
 	list_del(&cli->head);
 	list_del(&cli->list);
 	free(cli);
+}
+
+static void update_dock(pid_t pid, char *msg)
+{
+	size_t len;
+	xcb_client_message_event_t e;
+	struct client *cli = pid2dock(pid);
+
+	if (!msg || !cli)
+		return;
+
+	memset(&e, 0, sizeof(e));
+
+	e.response_type = XCB_CLIENT_MESSAGE;
+	e.window = cli->win;
+	e.type = a_protocols;
+	e.format = 8;
+
+	len = strlen(msg);
+
+	if (len > sizeof(e.data.data8) - 1)
+		len = sizeof(e.data.data8) - 1;
+
+	memcpy(e.data.data8, msg, len);
+	xcb_send_event(dpy, 0, cli->win, XCB_EVENT_MASK_NO_EVENT,
+		       (const char *) &e);
+	xcb_flush(dpy);
+
+	ii("win 0x%x message '%s' len %zu\n", cli->win, msg, len);
 }
 
 #if 0
@@ -3059,6 +3107,8 @@ static void del_window(xcb_window_t win)
 	struct screen *scr;
 	struct client *cli;
 
+	dd("delete win 0x%x", win);
+
 	if (toolbar.cli && toolbar.cli->win == win)
 		hide_toolbar();
 
@@ -3223,9 +3273,9 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		if (scr->panel.win == win) {
 			goto out; /* don't handle it here */
 		} else if ((cli = dock2cli(scr, win))) {
-			ii("win 0x%x already on dock list\n", win);
-			list_del(&cli->head);
-			list_del(&cli->list);
+			dd("destroy dock win 0x%x", win);
+			close_client(cli);
+			cli = NULL;
 		} else if ((cli = tag2cli(scr->tag, win))) {
 			ii("win 0x%x already on [%s] list\n", win,
 			   scr->tag->name);
@@ -3279,6 +3329,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	cli->win = win;
 	cli->crc = crc;
 	cli->flags = flags;
+	cli->pid = win2pid(win);
 
 #define DONT_CENTER (\
 	CLI_FLG_TOPLEFT |\
@@ -3312,6 +3363,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	} else if (cli->flags & CLI_FLG_TRAY || cli->flags & CLI_FLG_DOCK) {
 		cli->w = g->width;
 		cli->h = g->height;
+		ii("add dock win 0x%x pid %u\n", cli->win, cli->pid);
 		add_dock(cli, g->border_width);
 		goto out;
 	} else if (!scan) {
@@ -3340,7 +3392,6 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	xcb_change_window_attributes_checked(dpy, win, XCB_CW_EVENT_MASK, val);
 	unfocus_clients(curscr->tag);
 	list_add(&cli->tag->clients, &cli->head);
-	cli->pid = win2pid(win);
 	list_add(&clients, &cli->list); /* also add to global list of clients */
 	client_moveresize(cli, g->x, g->y, g->width, g->height);
 
@@ -4559,8 +4610,9 @@ static void dump_clients(uint8_t all)
 
 static void handle_user_request(int fd)
 {
-	char req[32];
+	char req[64] = {0};
 	struct sprop name;
+	size_t len;
 
 	if (fd < 0) {
 		get_sprop(&name, rootscr->root, XCB_ATOM_WM_NAME, UCHAR_MAX);
@@ -4570,16 +4622,17 @@ static void handle_user_request(int fd)
 				return;
 		}
 	} else {
-		if (read(fd, req, sizeof(req)) < 1) {
+		if ((len = read(fd, req, sizeof(req))) < 1) {
 			ee("read(%d) failed, %s\n", fd, strerror(errno));
 			return;
 		}
+
+		req[len] = '\0';
 		name.str = req;
-		name.len = sizeof(req);
 		name.ptr = NULL;
 	}
 
-	ii("handle request '%s'\n", name.str);
+	ii("handle request '%s' len %zu\n", name.str, len);
 
 	if (match(name.str, "reload-keys")) {
 		init_keys();
@@ -4616,6 +4669,16 @@ static void handle_user_request(int fd)
 
 		list_walk(cur, &screens) {
 			redraw_panel(list2screen(cur), NULL, 1);
+		}
+	} else if (match(name.str, "update-dock")) {
+		char *arg = &name.str[sizeof("update-dock")];
+
+		if (arg) {
+			char *msg;
+			pid_t pid = strtol(arg, &msg, 10);
+
+			if (pid && msg && *msg == ' ' && strlen(msg) > 1)
+				update_dock(pid, ++msg);
 		}
 	}
 
