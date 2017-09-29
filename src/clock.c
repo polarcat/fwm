@@ -145,6 +145,25 @@ static int opt(const char *arg, const char *args, const char *argl)
 	return (strcmp(arg, args) == 0 || strcmp(arg, argl) == 0);
 }
 
+static xcb_atom_t getatom(xcb_connection_t *dpy, const char *str, uint8_t len)
+{
+	xcb_intern_atom_cookie_t c;
+	xcb_intern_atom_reply_t *r;
+	xcb_atom_t a;
+
+	c = xcb_intern_atom(dpy, 0, len, str);
+	r = xcb_intern_atom_reply(dpy, c, NULL);
+
+	if (!r) {
+		ee("xcb_intern_atom(%s) failed\n", str);
+		return (XCB_ATOM_NONE);
+	}
+
+	a = r->atom;
+	free(r);
+	return a;
+}
+
 int main(int argc, char *argv[])
 {
 	time_t t;
@@ -157,6 +176,7 @@ int main(int argc, char *argv[])
 	const char *arg;
 	const char *name;
 	uint8_t name_len;
+	xcb_atom_t atom;
 
 	name = "clock";
 
@@ -273,6 +293,14 @@ int main(int argc, char *argv[])
         xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, win,
 			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
                             name_len, name);
+
+	atom = getatom(dpy, "_NET_WM_PID", sizeof("_NET_WM_PID") - 1);
+
+	if (atom != XCB_ATOM_NONE) {
+		pid_t pid = getpid();
+		xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, win,
+				    atom, XCB_ATOM_CARDINAL, 32, 1, &pid);
+	}
 
 	xcb_map_window(dpy, win);
 	xcb_flush(dpy);

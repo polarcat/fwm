@@ -346,6 +346,25 @@ static int init(struct ctx *ctx)
 	return 0;
 }
 
+static xcb_atom_t getatom(xcb_connection_t *dpy, const char *str, uint8_t len)
+{
+	xcb_intern_atom_cookie_t c;
+	xcb_intern_atom_reply_t *r;
+	xcb_atom_t a;
+
+	c = xcb_intern_atom(dpy, 0, len, str);
+	r = xcb_intern_atom_reply(dpy, c, NULL);
+
+	if (!r) {
+		ee("xcb_intern_atom(%s) failed\n", str);
+		return (XCB_ATOM_NONE);
+	}
+
+	a = r->atom;
+	free(r);
+	return a;
+}
+
 int main(int argc, char *argv[])
 {
 	struct timespec ts;
@@ -356,6 +375,7 @@ int main(int argc, char *argv[])
 	uint16_t i;
 	xcb_point_t *bar;
 	size_t size;
+	xcb_atom_t atom;
 
 	if (init(&ctx) < 0)
 		goto out;
@@ -439,6 +459,14 @@ int main(int argc, char *argv[])
         xcb_change_property(ctx.dpy, XCB_PROP_MODE_REPLACE, ctx.win,
 			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
                             strlen(ctx.class), ctx.class);
+
+	atom = getatom(ctx.dpy, "_NET_WM_PID", sizeof("_NET_WM_PID") - 1);
+
+	if (atom != XCB_ATOM_NONE) {
+		pid_t pid = getpid();
+		xcb_change_property(ctx.dpy, XCB_PROP_MODE_REPLACE, ctx.win,
+				    atom, XCB_ATOM_CARDINAL, 32, 1, &pid);
+	}
 
 	if (ctx.bw) {
 		val[0] = ctx.bw;

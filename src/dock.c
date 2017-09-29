@@ -198,6 +198,8 @@ static int events(void)
 		dd("XCB_RESIZE_REQUEST");
 		resize((xcb_resize_request_event_t *) e);
 		break;
+	default:
+		dd("got message type %d", type);
 	}
 
 	xcb_flush(dpy_);
@@ -286,6 +288,25 @@ static void help(const char *prog, const char *name)
 	       TEXT_MAXLEN, bg_, fg_);
 }
 
+static xcb_atom_t getatom(const char *str, uint8_t len)
+{
+	xcb_intern_atom_cookie_t c;
+	xcb_intern_atom_reply_t *r;
+	xcb_atom_t a;
+
+	c = xcb_intern_atom(dpy_, 0, len, str);
+	r = xcb_intern_atom_reply(dpy_, c, NULL);
+
+	if (!r) {
+		ee("xcb_intern_atom(%s) failed\n", str);
+		return (XCB_ATOM_NONE);
+	}
+
+	a = r->atom;
+	free(r);
+	return a;
+}
+
 int main(int argc, char *argv[])
 {
 	uint32_t mask;
@@ -295,6 +316,7 @@ int main(int argc, char *argv[])
 	const char *arg;
 	const char *name = "dock";
 	uint8_t name_len;
+	xcb_atom_t atom;
 
 	if (argc < 2) {
 		help(argv[0], name);
@@ -416,6 +438,15 @@ int main(int argc, char *argv[])
         xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
 			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
 			    name_len, name);
+
+	atom = getatom("_NET_WM_PID", sizeof("_NET_WM_PID") - 1);
+
+	if (atom != XCB_ATOM_NONE) {
+		pid_t pid = getpid();
+		xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_, atom,
+				    XCB_ATOM_CARDINAL, 32, 1, &pid);
+		dd("pid %u win 0x%x", pid, win_);
+	}
 
 	xcb_map_window(dpy_, win_);
 	xcb_flush(dpy_);
