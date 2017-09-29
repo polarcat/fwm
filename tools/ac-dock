@@ -1,0 +1,33 @@
+#!/bin/sh
+
+. $YAWM_HOME/lib/menu-utils
+
+normbg
+normfg
+
+icon_=""
+name_=ac-dock
+comm_=/dev/null
+dimfg_=$(printf "0x%x" $((normbg_ + 0x202020)))
+
+update()
+{
+	read online < /sys/class/power_supply/AC/online
+
+	if [ $online -eq 1 ]; then
+		startdock $name_ "$icon_" $normbg_ $normfg_ $comm_
+	else
+		startdock $name_ "$icon_" $normbg_ $dimfg_ $comm_
+	fi
+}
+
+initmon $name_ $comm_
+update
+
+while :; do
+	if netlink; then
+		update
+	else
+		sleep 1 # relax
+	fi
+done
