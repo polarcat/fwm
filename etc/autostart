@@ -15,7 +15,8 @@ done
 for power in /sys/class/power_supply/*; do
 	read type < $power/type
 	case $type in
-	*attery*) spawn bat-dock; break;;
+	*attery*) spawn bat-dock;;
+	*ains*) spawn ac-dock;;
 	esac
 done
 

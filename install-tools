@@ -75,6 +75,7 @@ dock:$dock_/left-gravity:display-dock
 dock:$dock_/left-gravity:wlan-dock
 dock:$dock_/left-gravity:clock-dock
 dock:$dock_/left-gravity:mixer-dock
+dock:$dock_/left-gravity:ac-dock
 dock:$dock_:bat-dock
 dock:$dock_:clock-dock
 dock:$dock_:cpu-dock
