@@ -47,16 +47,24 @@ static XftDraw *draw_;
 static XftColor fgx_;
 
 static const char *cmd_;
+static pid_t pid_;
 
-static const char *icon_;
+static char *icon_;
 static xcb_rectangle_t irect_;
 static uint8_t ilen_;
 static XGlyphInfo iinfo_;
 
-static const char *text_;
+static char *text_;
 static xcb_rectangle_t trect_;
 static uint8_t tlen_;
 static XGlyphInfo tinfo_;
+
+static void clean(void)
+{
+	xcb_rectangle_t rect = { 0, 0, w_, h_, };
+	xcb_change_gc(dpy_, gc_, XCB_GC_FOREGROUND, &bg_);
+	xcb_poly_fill_rectangle(dpy_, win_, gc_, 1, &rect);
+}
 
 static void draw(XftFont *font)
 {
@@ -74,14 +82,15 @@ static void draw(XftFont *font)
 		rect = &trect_;
 	}
 
-	xcb_change_gc(dpy_, gc_, XCB_GC_FOREGROUND, &bg_);
-	xcb_poly_fill_rectangle(dpy_, win_, gc_, 1, rect);
 	XftDrawStringUtf8(draw_, &fgx_, font, rect->x, rect->y, str, len);
+	xcb_flush(dpy_);
 	XSync(xdpy_, 0);
 }
 
 static void show(void)
 {
+	clean();
+
 	if (icon_)
 		draw(ift_);
 
@@ -98,13 +107,22 @@ static void *task(void *arg)
 
 static void spawn(const char *cmd)
 {
+	char *arg;
+	size_t len = strlen(cmd) + sizeof("65535") + 1;
 	pthread_t t;
 	const char *home;
+
+	if ((arg = calloc(1, len))) {
+		snprintf(arg, len, "%s %u", cmd, pid_);
+	} else {
+		ww("calloc(%zu) failed\n", len);
+		arg = (char *) cmd;
+	}
 
 	if ((home = getenv("HOME")))
 		chdir(home);
 
-	pthread_create(&t, NULL, task, (void *) cmd);
+	pthread_create(&t, NULL, task, (void *) arg);
 }
 
 static uint16_t h_margin(uint16_t h, XGlyphInfo *info)
@@ -163,6 +181,56 @@ static void resize(xcb_resize_request_event_t *e)
 	adjust_rects(e->width, e->height);
 }
 
+static void handle_message(xcb_client_message_event_t *e)
+{
+	char *dat = (char *) e->data.data8;
+	char *end = dat + sizeof(e->data.data8);
+	char *ptr = dat;
+	char *msg[3] = {0};
+	uint8_t i = 0;
+	XRenderColor ref;
+
+	dd("dat '%s' len %u", (char *) e->data.data8, sizeof(e->data.data8));
+
+	msg[i] = ptr;
+
+	while (ptr < end) {
+		if (*ptr == ' ') {
+			*ptr = '\0';
+			msg[++i] = ptr + 1;
+		}
+
+		ptr++;
+	}
+
+	if (msg[0] && icon_) {
+		free(icon_);
+		icon_ = strdup(msg[0]);
+		dd("ico '%s' len %u", icon_, ilen_);
+	}
+
+	if (msg[1]) {
+		fg_ = strtol(msg[1], NULL, 16);
+		ref.alpha = 0xffff;
+		ref.red = (fg_ & 0xff0000) >> 8;
+		ref.green = fg_ & 0xff00;
+		ref.blue = (fg_ & 0xff) << 8;
+		XftColorAllocValue(xdpy_, DefaultVisual(xdpy_, xscr_),
+				   DefaultColormap(xdpy_, xscr_), &ref,
+				   &fgx_);
+		dd("rgb '%s' len %u", msg[1], strlen(msg[1]));
+	}
+
+	if (msg[2] && text_) {
+		free(text_);
+		text_ = strdup(msg[2]);
+		tlen_ = strlen(text_);
+		dd("txt '%s' len %u", text_, tlen_);
+	}
+
+	show();
+}
+
 static int events(void)
 {
 	uint8_t type;
@@ -197,6 +265,9 @@ static int events(void)
 	case XCB_RESIZE_REQUEST:
 		dd("XCB_RESIZE_REQUEST");
 		resize((xcb_resize_request_event_t *) e);
+		break;
+	case XCB_CLIENT_MESSAGE:
+		handle_message((xcb_client_message_event_t *) e);
 		break;
 	default:
 		dd("got message type %d", type);
@@ -330,9 +401,9 @@ int main(int argc, char *argv[])
 		} else if (opt(arg, "-fnt", "--text-font")) {
 			tft_name_ = argv[argc + 1];
 		} else if (opt(arg, "-i", "--icon")) {
-			icon_ = argv[argc + 1];
+			icon_ = strdup(argv[argc + 1]);
 		} else if (opt(arg, "-t", "--text")) {
-			text_ = argv[argc + 1];
+			text_ = strdup(argv[argc + 1]);
 		} else if (opt(arg, "-c", "--cmd")) {
 			cmd_ = argv[argc + 1];
 		} else if (opt(arg, "-bg", "--bgcolor")) {
@@ -442,10 +513,10 @@ int main(int argc, char *argv[])
 	atom = getatom("_NET_WM_PID", sizeof("_NET_WM_PID") - 1);
 
 	if (atom != XCB_ATOM_NONE) {
-		pid_t pid = getpid();
+		pid_ = getpid();
 		xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_, atom,
-				    XCB_ATOM_CARDINAL, 32, 1, &pid);
-		dd("pid %u win 0x%x", pid, win_);
+				    XCB_ATOM_CARDINAL, 32, 1, &pid_);
+		dd("pid %u win 0x%x", pid_, win_);
 	}
 
 	xcb_map_window(dpy_, win_);
