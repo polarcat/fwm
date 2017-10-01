@@ -866,6 +866,8 @@ static void store_client(struct client *cli, uint8_t clean)
 
 	if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
 		clean = 1;
+	} else if (!cli->scr || !cli->tag) {
+		clean = 1;
 	} else if (cli->flags & (CLI_FLG_POPUP | CLI_FLG_IGNORED)) {
 		return;
 	}
