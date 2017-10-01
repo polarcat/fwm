@@ -2,6 +2,10 @@
 
 . $YAWM_HOME/lib/menu-utils
 
+normbg
+normfg
+
+dimfg_=$(printf "0x%x" $((normbg_ + 0x202020)))
 icon_=""
 name_=wlan-dock
 comm_=wlan-menu
@@ -26,22 +30,16 @@ status()
 	done
 }
 
-restart() { startdock $name_ $icon_ $normbg_ $1 $comm_; }
-
 initmon $name_ $comm_
-
+startdock $name_ $icon_ $normbg_ $normfg_ $comm_
 status
 oldstat=$?
 newstat=0
 
-normbg
-normfg
-dimfg_=$(printf "0x%x" $((normbg_ + 0x202020)))
-
 if [ $oldstat -eq 1 ]; then
-	restart $normfg_
+	updatedock $icon_ $normfg_
 elif [ $oldstat -eq 0 ]; then
-	restart $dimfg_
+	updatedock $icon_ $dimfg_
 fi
 
 while :; do
@@ -52,9 +50,9 @@ while :; do
 		sleep 2
 		continue
 	elif [ $newstat -eq 1 ]; then
-		restart $normfg_
+		updatedock $icon_ $normfg_
 	elif [ $newstat -eq 0 ]; then
-		restart $dimfg_
+		updatedock $icon_ $dimfg_
 	fi
 
 	oldstat=$newstat

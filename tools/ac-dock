@@ -15,13 +15,14 @@ update()
 	read online < /sys/class/power_supply/AC/online
 
 	if [ $online -eq 1 ]; then
-		startdock $name_ "$icon_" $normbg_ $normfg_ $comm_
+		updatedock $icon_ $normfg_
 	else
-		startdock $name_ "$icon_" $normbg_ $dimfg_ $comm_
+		updatedock $icon_ $dimfg_
 	fi
 }
 
 initmon $name_ $comm_
+startdock $name_ $icon_ $normbg_ $normfg_ $comm_
 update
 
 while :; do

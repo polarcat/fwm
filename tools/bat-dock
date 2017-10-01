@@ -2,17 +2,18 @@
 
 . $YAWM_HOME/lib/menu-utils
 
+normbg
+normfg
+
 icon_=""
 name_=bat-dock
 comm_=bat-info
 capacity_=0
 
-normbg
-normfg
+update()
+{
+	local rc=0
 
-initmon $name_ $comm_
-
-while :; do
 	read capacity < /sys/class/power_supply/BAT0/capacity
 
 	if [ "$capacity_" != "$capacity" ]; then
@@ -26,10 +27,22 @@ while :; do
 		else
 			icon_="" # low
 		fi
-
-		startdock $name_ "$icon_:$capacity" $normbg_ $normfg_ $comm_
+		rc=1
 	fi
 
 	capacity_=$capacity
+	return $rc
+}
+
+read capacity < /sys/class/power_supply/BAT0/capacity
+initmon $name_ $comm_
+update
+startdock $name_ $icon_ $normbg_ $normfg_ $comm_ "-t $capacity_%"
+
+while :; do
 	sleep 60
+
+	if update; then
+		updatedock $icon_ $normfg_ $capacity_%%
+	fi
 done

@@ -1,5 +1,7 @@
 #!/bin/sh
 
+ctl_=$YAWM_HOME/.control$DISPLAY
+
 normbg() { read normbg_ < $YAWM_HOME/colors/normal-bg; }
 normfg() { read normfg_ < $YAWM_HOME/colors/normal-fg; }
 selbg() { read selbg_ < $YAWM_HOME/colors/active-bg; }
@@ -19,45 +21,49 @@ stoptool()
 	done
 }
 
-stopdock()
-{ # $1:name $2:comm
-	ps -opid,args | while read pid cmd; do
-		if [ $$ = "$pid" ]; then
-			continue
+dockpid_=''
+
+dockpid()
+{ # $1:name
+	local pwd=$PWD
+
+	dockpid_=''
+	cd /proc
+
+	for pid in *; do
+		if [ -f $pid/cmdline ]; then
+			read cmd < $pid/cmdline
+			case $cmd in
+			dock*$1*) dockpid_="$dockpid_ $pid";;
+			esac
 		fi
-		case $cmd in
-		*dock*$1*$2*) kill -9 $pid 2>&1;;
-		esac
+	done
+
+	cd $pwd
+}
+
+stopdock()
+{ # $1:name $2:icon
+	dockpid $1
+
+	for pid in $dockpid_; do
+		kill -9 $pid
 	done
 }
 
 startdock()
-{ # $1:name $2:icon<:text> $3:bg $4:fg $5:comm $6:exec
-	local size
-	local icon
-	local text
-	local ifs=$IFS
+{ # $1:name $2:icon $3:bg $4:fg $5:comm $6:text
+	stopdock $1
+	exec dock -n $1 -i $2 -bg $3 -fg $4 -c $5 $6 &
+}
 
-	if [ -z "$docksize_" ]; then
-		size=''
-	else
-		size="-s $docksize_"
-	fi
+updatedock()
+{ # $1:name $2:icon $3:color $4:text
+	dockpid $1
 
-	gettext() { icon=$1; text=$2; }
-
-	IFS=':'; gettext $2; IFS=$ifs
-
-	if [ -n "$text" ]; then
-		text="-t $text%"
-	fi
-
-	stopdock $name_ $comm_
-
-	case $6 in
-	1) exec dock -n $1 -i $icon $text $size -bg $3 -fg $4 -c $5 &;;
-	*) dock -n $1 -i $icon $text $size -bg $3 -fg $4 -c $5 &;;
-	esac
+	for pid in $dockpid_; do
+		printf "update-dock $pid $2 $3 $4" > $ctl_
+	done
 }
 
 stopmon()
