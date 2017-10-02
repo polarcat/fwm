@@ -820,12 +820,12 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 {
 	struct list_head *cur;
 	FILE *f;
-	char path[sizeof("0xffffffffffffffff")];
+	char path[homelen + sizeof("/.session/0xffffffffffffffff")];
 	uint8_t buf[2];
 
 	*scr = NULL;
 	*tag = NULL;
-	snprintf(path, sizeof(path), ".session/0x%x", win);
+	sprintf(path, "%s/.session/0x%x", homedir, win);
 
 	if (!(f = fopen(path, "r"))) {
 		ww("skip restore win 0x%x, %s\n", win, strerror(errno));
@@ -861,7 +861,7 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 static void store_client(struct client *cli, uint8_t clean)
 {
 	FILE *f;
-	char path[sizeof("0xffffffffffffffff")];
+	char path[homelen + sizeof("/.session/0xffffffffffffffff")];
 	uint8_t buf[2];
 
 	if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
@@ -872,7 +872,7 @@ static void store_client(struct client *cli, uint8_t clean)
 		return;
 	}
 
-	snprintf(path, sizeof(path), ".session/0x%x", cli->win);
+	sprintf(path, "%s/.session/0x%x", homedir, cli->win);
 
 	if (clean) {
 		errno = 0;
