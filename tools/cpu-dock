@@ -10,7 +10,6 @@ normfg
 
 monitor()
 {
-	sleep 0.1
 	exec cpumon -n $name_ -bg $normbg_ -fg $normfg_ -bw 1 -f 60 -i 60\
 		    -c $1 &
 }
