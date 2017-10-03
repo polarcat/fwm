@@ -33,8 +33,10 @@ static uint32_t bg_ = 0x202020;
 
 static int xscr_;
 static Display *xdpy_;
+static xcb_screen_t *scr_;
 static xcb_connection_t *dpy_;
 static xcb_gcontext_t gc_;
+static const char *name_ = "dock";
 static uint8_t done_;
 
 static xcb_drawable_t win_;
@@ -173,10 +175,105 @@ static void adjust_rects(uint16_t w, uint16_t h)
 	   w_, h_, icon_, irect_.x, irect_.y, text_, trect_.x, trect_.y);
 }
 
+static xcb_atom_t getatom(const char *str, uint8_t len)
+{
+	xcb_intern_atom_cookie_t c;
+	xcb_intern_atom_reply_t *r;
+	xcb_atom_t a;
+
+	c = xcb_intern_atom(dpy_, 0, len, str);
+	r = xcb_intern_atom_reply(dpy_, c, NULL);
+
+	if (!r) {
+		ee("xcb_intern_atom(%s) failed\n", str);
+		return (XCB_ATOM_NONE);
+	}
+
+	a = r->atom;
+	free(r);
+	return a;
+}
+
+static int create_window(void)
+{
+	uint32_t mask;
+	uint32_t val[2];
+	uint8_t name_len;
+	xcb_atom_t atom;
+
+
+	win_ = xcb_generate_id(dpy_);
+	draw_ = XftDrawCreate(xdpy_, win_,
+			      DefaultVisual(xdpy_, xscr_),
+			      DefaultColormap(xdpy_, xscr_));
+
+	if (!draw_) {
+		ee("XftDrawCreate() failed\n");
+		return -1;
+	}
+
+	gc_ = xcb_generate_id(dpy_);
+
+	mask = XCB_GC_FOREGROUND;
+	val[0] = fg_;
+	mask |= XCB_GC_GRAPHICS_EXPOSURES;
+	val[1] = 0;
+	xcb_create_gc(dpy_, gc_, scr_->root, mask, val);
+
+	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
+	val[0] = bg_;
+	val[1] = XCB_EVENT_MASK_EXPOSURE;
+	val[1] |= XCB_EVENT_MASK_VISIBILITY_CHANGE;
+	val[1] |= XCB_EVENT_MASK_KEY_PRESS;
+	val[1] |= XCB_EVENT_MASK_BUTTON_PRESS;
+	val[1] |= XCB_EVENT_MASK_RESIZE_REDIRECT;
+
+	xcb_create_window(dpy_, XCB_COPY_FROM_PARENT, win_, scr_->root,
+			  0, 0, w_, h_, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
+			  scr_->root_visual, mask, val);
+
+	name_len = strlen(name_);
+
+	xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
+			    XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
+			    name_len, name_);
+
+	xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
+			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
+			    name_len, name_);
+
+	atom = getatom("_NET_WM_PID", sizeof("_NET_WM_PID") - 1);
+
+	if (atom != XCB_ATOM_NONE) {
+		pid_ = getpid();
+		xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_, atom,
+				    XCB_ATOM_CARDINAL, 32, 1, &pid_);
+		dd("pid %u win 0x%x", pid_, win_);
+	}
+
+	xcb_map_window(dpy_, win_);
+	xcb_flush(dpy_);
+
+	return 0;
+}
+
 static void resize(xcb_resize_request_event_t *e)
 {
 	dd("win 0x%x size %ux%u --> %ux%u", e->window, w_, h_, e->width,
 	   e->height);
+
+	if (e->height > h_) { /* have to re-create window to resize gc */
+		h_ = e->height;
+		XftDrawDestroy(draw_);
+		xcb_free_gc(dpy_, gc_);
+		xcb_destroy_window(dpy_, win_);
+		xcb_flush(dpy_);
+
+		if (create_window() < 0) {
+			ee("failed to create new window %ux%u\n", e->width, e->height);
+			exit(1); /* consider it fatal */
+		}
+	}
 
 	adjust_rects(e->width, e->height);
 }
@@ -190,7 +287,7 @@ static void handle_message(xcb_client_message_event_t *e)
 	uint8_t i = 0;
 	XRenderColor ref;
 
-	dd("dat '%s' len %u", (char *) e->data.data8, sizeof(e->data.data8));
+	dd("dat '%s' len %zu", (char *) e->data.data8, sizeof(e->data.data8));
 
 	msg[i] = ptr;
 
@@ -218,7 +315,7 @@ static void handle_message(xcb_client_message_event_t *e)
 		XftColorAllocValue(xdpy_, DefaultVisual(xdpy_, xscr_),
 				   DefaultColormap(xdpy_, xscr_), &ref,
 				   &fgx_);
-		dd("rgb '%s' len %u", msg[1], strlen(msg[1]));
+		dd("rgb '%s' len %zu", msg[1], strlen(msg[1]));
 	}
 
 	if (msg[2] && text_) {
@@ -343,7 +440,7 @@ static int opt(const char *arg, const char *args, const char *argl)
 	return (strcmp(arg, args) == 0 || strcmp(arg, argl) == 0);
 }
 
-static void help(const char *prog, const char *name)
+static void help(const char *prog)
 {
 	printf("Usage: %s <options>\n"
 	       "Options:\n"
@@ -355,42 +452,17 @@ static void help(const char *prog, const char *name)
 	       "-c, --cmd <str>           command to run on mouse click\n"
 	       "-bg, --bgcolor <hex>      rgb color, default 0x%x\n"
 	       "-fg, --fgcolor <hex>      rgb color, default 0x%x\n\n",
-               prog, name, ift_name_, ift_size_, tft_name_, tft_size_,
+               prog, name_, ift_name_, ift_size_, tft_name_, tft_size_,
 	       TEXT_MAXLEN, bg_, fg_);
-}
-
-static xcb_atom_t getatom(const char *str, uint8_t len)
-{
-	xcb_intern_atom_cookie_t c;
-	xcb_intern_atom_reply_t *r;
-	xcb_atom_t a;
-
-	c = xcb_intern_atom(dpy_, 0, len, str);
-	r = xcb_intern_atom_reply(dpy_, c, NULL);
-
-	if (!r) {
-		ee("xcb_intern_atom(%s) failed\n", str);
-		return (XCB_ATOM_NONE);
-	}
-
-	a = r->atom;
-	free(r);
-	return a;
 }
 
 int main(int argc, char *argv[])
 {
-	uint32_t mask;
-	uint32_t val[2];
-	xcb_screen_t *scr;
 	XRenderColor ref;
 	const char *arg;
-	const char *name = "dock";
-	uint8_t name_len;
-	xcb_atom_t atom;
 
 	if (argc < 2) {
-		help(argv[0], name);
+		help(argv[0]);
 		exit(0);
 	}
 
@@ -411,13 +483,13 @@ int main(int argc, char *argv[])
 		} else if (opt(arg, "-fg", "--fgcolor")) {
 			fg_ = strtol(argv[argc + 1], NULL, 16);
 		} else if (opt(arg, "-n", "--name")) {
-			name = argv[argc + 1];
+			name_ = argv[argc + 1];
 		}
 	}
 
 	if (!icon_ && !text_) {
 		ii("missing text or icon\n");
-		help(argv[0], name);
+		help(argv[0]);
 		exit(0);
 	}
 
@@ -469,58 +541,10 @@ int main(int argc, char *argv[])
 			DefaultColormap(xdpy_, xscr_), &ref,
 			&fgx_);
 
-	scr = xcb_setup_roots_iterator(xcb_get_setup(dpy_)).data;
-	gc_ = xcb_generate_id(dpy_);
+	scr_ = xcb_setup_roots_iterator(xcb_get_setup(dpy_)).data;
 
-	mask = XCB_GC_FOREGROUND;
-	val[0] = fg_;
-	mask |= XCB_GC_GRAPHICS_EXPOSURES;
-	val[1] = 0;
-	xcb_create_gc(dpy_, gc_, scr->root, mask, val);
-
-	win_ = xcb_generate_id(dpy_);
-	draw_ = XftDrawCreate(xdpy_, win_,
-			      DefaultVisual(xdpy_, xscr_),
-			      DefaultColormap(xdpy_, xscr_));
-
-	if (!draw_) {
-		ee("XftDrawCreate() failed\n");
+	if (create_window() < 0)
 		return 1;
-	}
-
-	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
-	val[0] = bg_;
-	val[1] = XCB_EVENT_MASK_EXPOSURE;
-	val[1] |= XCB_EVENT_MASK_VISIBILITY_CHANGE;
-	val[1] |= XCB_EVENT_MASK_KEY_PRESS;
-	val[1] |= XCB_EVENT_MASK_BUTTON_PRESS;
-	val[1] |= XCB_EVENT_MASK_RESIZE_REDIRECT;
-
-	xcb_create_window(dpy_, XCB_COPY_FROM_PARENT, win_, scr->root,
-			  0, 0, w_, h_, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
-			  scr->root_visual, mask, val);
-
-	name_len = strlen(name);
-
-        xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
-			    XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
-                            name_len, name);
-
-        xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
-			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
-			    name_len, name);
-
-	atom = getatom("_NET_WM_PID", sizeof("_NET_WM_PID") - 1);
-
-	if (atom != XCB_ATOM_NONE) {
-		pid_ = getpid();
-		xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_, atom,
-				    XCB_ATOM_CARDINAL, 32, 1, &pid_);
-		dd("pid %u win 0x%x", pid_, win_);
-	}
-
-	xcb_map_window(dpy_, win_);
-	xcb_flush(dpy_);
 
 	while (1)
 		events();
