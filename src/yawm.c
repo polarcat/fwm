@@ -508,6 +508,7 @@ static const char *homedir;
 static uint8_t homelen;
 static struct toolbar_item *focused_item;
 static uint8_t toolbar_pressed;
+static uint8_t ignore_panel;
 
 static uint8_t randrbase;
 
@@ -3195,6 +3196,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	if (win == rootscr->root || win == toolbar.panel.win)
 		return NULL;
 
+	ignore_panel = 0;
 	flags = 0;
 
 	if (window_status(win) == WIN_STATUS_UNKNOWN) {
@@ -3367,6 +3369,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		cli->h = g->height;
 		ii("add dock win 0x%x pid %u\n", cli->win, cli->pid);
 		add_dock(cli, g->border_width);
+		ignore_panel = 1; /* do not handle panel visibility */
 		goto out;
 	} else if (!scan) {
 		g->x += scr->x;
@@ -5141,7 +5144,7 @@ static void handle_visibility(xcb_window_t win)
 
 	if (win == toolbar.panel.win) {
 		draw_toolbar();
-	} else {
+	} else if (!ignore_panel) {
 		list_walk(cur, &screens) {
 			struct screen *scr = list2screen(cur);
 
