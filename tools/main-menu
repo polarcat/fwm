@@ -1,9 +1,9 @@
 #!/bin/sh
 
-. $YAWM_HOME/lib/menu-utils
+. $FWM_HOME/lib/menu-utils
 
-ctl_=$YAWM_HOME/.control$DISPLAY
-tmp_=$YAWM_HOME/tmp
+ctl_=$FWM_HOME/.control$DISPLAY
+tmp_=$FWM_HOME/tmp
 out_=$tmp_/menu
 
 #printf "\a\t\n" > $out_
@@ -46,6 +46,6 @@ startmenu -b -d $out_ | while read icon item; do
 	"sound"*) mixer-menu &;;
 	"display"*) display-menu &;;
 	"suspend"*) suspend-menu &;;
-	"exit"*) killall yawm;;
+	"exit"*) killall fwm;;
 	esac
 done

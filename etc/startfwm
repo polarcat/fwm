@@ -6,5 +6,6 @@ start()
 	exec startx >$HOME/.xsession-errors 2>&1
 }
 
+clear
 start &
 exec vlock

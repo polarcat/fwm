@@ -1,12 +1,12 @@
-out = yawm
-src = src/yawm.c
+out = fwm
+src = src/fwm.c
 cflags += $(xftcflags)
 ldflags += -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms -lpthread
 ldflags += -lX11 -lX11-xcb $(xftldflags)
 
 .PHONY: FORCE clean
 
-$(out): FORCE
+$(target): FORCE
 	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
 include $(common)

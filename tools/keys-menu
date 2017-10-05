@@ -1,10 +1,10 @@
 #!/bin/sh
 
-. $YAWM_HOME/lib/menu-utils
+. $FWM_HOME/lib/menu-utils
 
 ifs_=$IFS
-dir_=$YAWM_HOME/keys
-tmp_=$YAWM_HOME/tmp
+dir_=$FWM_HOME/keys
+tmp_=$FWM_HOME/tmp
 out_=$tmp_/keys
 
 mkdir -p $tmp_

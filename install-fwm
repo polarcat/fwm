@@ -1,0 +1,53 @@
+#!/bin/sh
+
+pwd_=$PWD
+fwm_=$HOME/.fwm
+bin_=$fwm_/bin
+keys_=$fwm_/keys
+panel_=$fwm_/panel
+
+mkdir -p $fwm_
+mkdir -p $HOME/bin
+mkdir -p $bin_
+mkdir -p $keys_
+mkdir -p $panel_
+
+unlink $HOME/bin/fwm
+
+cp -v bin/fwm $HOME/bin/
+cp -v etc/startfwm $HOME/bin/
+cp -v etc/xinitrc $HOME/.xinitrc-fwm
+cp -v etc/fwmrc $HOME/.fwmrc
+cp -v etc/autostart $fwm_/
+
+cp -v bin/fwm-menu $bin_/
+cp -v bin/fwm-clock $bin_/
+cp -v bin/fwm-dock $bin_/
+cp -v bin/fwm-cpumon $bin_/
+cp -v bin/fwm-netlink $bin_/
+cp -v tools/main-menu $panel_/menu
+
+cd $HOME
+
+if [ ! -L .xinitrc ]; then
+	mv -v .xinitrc .xinitrc-$(date +%Y%m%d-%H%M%S%s)
+fi
+
+ln -sf .xinitrc-fwm .xinitrc
+
+# set defaults
+
+mkdir -p $fwm_/screens/0/tags/0
+touch $fwm_/panel/top
+
+cd $keys_
+
+if [ ! -f ctrl_alt_delete ]; then
+	printf "#!/bin/sh\nexec xscreensaver-command -lock &" > ctrl_alt_delete
+	chmod +x ctrl_alt_delete
+fi
+
+printf "#!/bin/sh\nexec xterm &" > mod_t
+chmod +x mod_t
+printf "#!/bin/sh\nexec main-menu &" > mod_m
+chmod +x mod_m

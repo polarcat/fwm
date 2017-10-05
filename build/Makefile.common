@@ -1,7 +1,7 @@
-ifeq ($(target),yawm)
+ifeq ($(target),fwm)
 bin = $(HOME)/bin
 else
-bin = $(HOME)/.yawm/bin
+bin = $(HOME)/.fwm/bin
 endif
 
 install: FORCE

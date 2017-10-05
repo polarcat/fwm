@@ -19,7 +19,7 @@
 #include <X11/Xlib-xcb.h>
 #include <X11/Xft/Xft.h>
 
-#include "yawm.h"
+#include "fwm.h"
 #include "misc.h"
 
 #define TEXT_MAXLEN 16

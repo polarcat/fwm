@@ -1,0 +1,16 @@
+#!/bin/sh
+
+export FWM_HOME=$HOME/.fwm
+export FWM_LOG=$HOME/fwm${DISPLAY}.log
+
+case $PATH in
+*$FWM_HOME/bin*) ;;
+*) export PATH=$PATH:$FWM_HOME/bin;;
+esac
+
+fwm
+restart-menu
+
+if [ $? -eq 0 ]; then
+	exit 0
+fi

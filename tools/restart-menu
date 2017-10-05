@@ -1,8 +1,8 @@
 #!/bin/sh
 
-. $YAWM_HOME/lib/menu-utils
+. $FWM_HOME/lib/menu-utils
 
-tmp_=$YAWM_HOME/tmp
+tmp_=$FWM_HOME/tmp
 out_=$tmp_/restart
 
 mkdir -p $tmp_

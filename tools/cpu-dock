@@ -1,17 +1,17 @@
 #!/bin/sh
 
-. $YAWM_HOME/lib/menu-utils
+. $FWM_HOME/lib/menu-utils
 
 name_=cpu-dock
 
-stoptool cpumon $name_
+stoptool fwm-cpumon $name_
 normbg
 normfg
 
 monitor()
 {
-	exec cpumon -n $name_ -bg $normbg_ -fg $normfg_ -bw 1 -f 60 -i 60\
-		    -c $1 &
+	exec fwm-cpumon -n $name_ -bg $normbg_ -fg $normfg_ -bw 1 -f 60 -i 60\
+			-c $1 &
 }
 
 i=0

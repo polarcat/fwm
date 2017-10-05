@@ -18,7 +18,7 @@
 #include <X11/Xlib-xcb.h>
 #include <X11/Xft/Xft.h>
 
-#include "yawm.h"
+#include "fwm.h"
 #include "misc.h"
 
 #define FONT_H_MARGIN 2

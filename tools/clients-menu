@@ -1,9 +1,9 @@
 #!/bin/sh
 
-. $YAWM_HOME/lib/menu-utils
+. $FWM_HOME/lib/menu-utils
 
-ctl_=$YAWM_HOME/.control$DISPLAY
-cli_=$YAWM_HOME/tmp/clients
+ctl_=$FWM_HOME/.control$DISPLAY
+cli_=$FWM_HOME/tmp/clients
 
 echo list-clients > $ctl_
 

@@ -1,9 +1,9 @@
 #!/bin/sh
 
-. $YAWM_HOME/lib/menu-utils
+. $FWM_HOME/lib/menu-utils
 
-ctl_=$YAWM_HOME/.control$DISPLAY
-tmp_=$YAWM_HOME/tmp
+ctl_=$FWM_HOME/.control$DISPLAY
+tmp_=$FWM_HOME/tmp
 seq_=$tmp_/.seq
 out_=$tmp_/tagmenu
 maxtags_=255
@@ -14,52 +14,24 @@ wcnt_=0
 
 mkdir -p $tmp_
 
-read prevseq < $seq_
-echo list-tags > $ctl_
-
-count=0
-while :; do
-	read curseq < $seq_
-	if [ $prevseq -ne $curseq -o $count -gt 5 ]; then
-		break
-	fi
-	count=$((count + 1))
-	sleep 0.1
-done
-
-while read scr tag name geo wcnt cur; do
-	if [ "$cur" = '*' ]; then
-		scr_=$scr
-		tag_=$tag
-		name_=$name
-		wcnt_=$wcnt
-		break
-	fi
-done < $tmp_/tags
-
-#printf "\a\t\n" > $out_
-printf "\a\t\n" > $out_
-#printf "\a\tleft\n" >> $out_
-#printf "\a\tright\n" >> $out_
-printf "\a\tcreate <name>\n" >> $out_
-
-if [ $wcnt_ -eq 0 ]; then
-	printf "\a\tdelete [$name_]\n" >> $out_
-fi
-
-printf "\a\trename <newname>\n" >> $out_
+help()
+{
+	printf "Usage: $1 my-new-tag\n" > $out_
+	showinfo $out_
+}
 
 create()
 {
 	if [ -z "$1" ]; then
-		return
+		help c
+		return 1
 	fi
 
 	local tag=0
 	local path=''
 
 	while :; do
-		path=$YAWM_HOME/screens/$scr_/tags/$tag
+		path=$FWM_HOME/screens/$scr_/tags/$tag
 
 		if [ ! -d $path ]; then
 			mkdir -p $path
@@ -82,17 +54,18 @@ delete()
 		return
 	fi
 
-	rm -fr $YAWM_HOME/screens/$scr_/tags/$tag_
+	rm -fr $FWM_HOME/screens/$scr_/tags/$tag_
 	echo "refresh-panel $scr_" > $ctl_
 }
 
 rename()
 {
 	if [ $# -eq 0 ]; then
-		return
+		help r
+		return 1
 	fi
 
-	local path=$YAWM_HOME/screens/$scr_/tags/$tag_
+	local path=$FWM_HOME/screens/$scr_/tags/$tag_
 
 	if [ ! -d $path ]; then
 		return
@@ -102,21 +75,66 @@ rename()
 	echo "refresh-panel $scr_" > $ctl_
 }
 
-if [ -z "$tag_" ]; then
-	return
-fi
+topmenu()
+{
+	read prevseq < $seq_
+	echo list-tags > $ctl_
 
-if [ $tag_ -lt 0 ]; then
-	exit 1
-fi
+	count=0
+	while :; do
+		read curseq < $seq_
+		if [ $prevseq -ne $curseq -o $count -gt 5 ]; then
+			break
+		fi
+		count=$((count + 1))
+		sleep 0.1
+	done
 
-startmenu -b -a -d $out_ |
-while read icon item param cmd arg; do
-	case $item in
-	"left"*) echo "move left";;
-	"right"*) echo "move right";;
-	"create"*) create $arg;;
-	"delete"*) delete;;
-	"rename"*) rename $arg;;
-	esac
+	while read scr tag name geo wcnt cur; do
+		if [ "$cur" = '*' ]; then
+			scr_=$scr
+			tag_=$tag
+			name_=$name
+			wcnt_=$wcnt
+			break
+		fi
+	done < $tmp_/tags
+
+	if [ -z "$tag_" ]; then
+		exit 1
+	fi
+
+	if [ $tag_ -lt 0 ]; then
+		exit 1
+	fi
+
+	#printf "\a\t\n" > $out_
+	printf "\a\t\n" > $out_
+	printf "\a\tcreate <name>\n" >> $out_
+
+	if [ $wcnt_ -eq 0 ]; then
+		printf "\a\tdelete [$name_]\n" >> $out_
+	fi
+
+	printf "\a\trename <newname>\n" >> $out_
+
+	startmenu -b -a -d $out_ |
+	while read icon item param cmd arg; do
+		case $item in
+		"create"*) create $arg;;
+		"delete"*) delete;;
+		"rename"*) rename $arg;;
+		esac
+	done
+}
+
+rc=1
+
+while [ $rc -gt 0 ]; do
+	topmenu
+	rc=$?
+
+	if [ $rc -eq 0 ]; then
+		break
+	fi
 done

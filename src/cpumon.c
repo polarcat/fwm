@@ -1,4 +1,4 @@
-/* cpumon.c: rudimental cpu load monitor
+/* cpumon.c: rudimentary cpu load monitor
  *
  * By Aliaksei Katovich <aliaksei.katovich at gmail.com>
  *

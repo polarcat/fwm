@@ -1,12 +1,12 @@
-/* yawm.h: yet another window manager header
+/* fwm.h: flatter window manager
  *
  * Copyright (c) 2015, Aliaksei Katovich <aliaksei.katovich at gmail.com>
  *
  * Released under the GNU General Public License, version 2
  */
 
-#ifndef YAWM_H
-#define YAWM_H
+#ifndef FWM_H
+#define FWM_H
 
 #include <stdint.h>
 
@@ -32,4 +32,4 @@
 #define MOUSE_BTN_FWD 4
 #define MOUSE_BTN_BACK 5
 
-#endif /* YAWM_H */
+#endif /* FWM_H */

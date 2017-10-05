@@ -19,25 +19,28 @@ else
 makecmd += $@
 endif
 
-.PHONY: FORCE all clean install
+.PHONY: FORCE bin all clean install
+
+bin:
+	@mkdir -p bin
 
 all:
-	@printf "\nUsage: make [clean|install] <yawm|menu|clock|cpumon|dock>\n\n"
+	@printf "\nUsage: make [clean|install] <fwm|menu|clock|cpumon|dock|netlink>\n\n"
 
-yawm: FORCE
+fwm: FORCE bin
 	$(makecmd)
 
-menu: FORCE
+menu: FORCE bin
 	$(makecmd)
 
-clock: FORCE
+clock: FORCE bin
 	$(makecmd)
 
-cpumon: FORCE
+cpumon: FORCE bin
 	$(makecmd)
 
-dock: FORCE
+dock: FORCE bin
 	$(makecmd)
 
-netlink: FORCE
+netlink: FORCE bin
 	$(makecmd)

@@ -1,9 +1,9 @@
 #!/bin/sh
 
 force_=0
-yawm_=$HOME/.yawm
-keys_=$yawm_/keys
-ctl_=$yawm_/.control$DISPLAY
+fwm_=$HOME/.fwm
+keys_=$fwm_/keys
+ctl_=$fwm_/.control$DISPLAY
 ifs_=$IFS
 
 help()
@@ -16,21 +16,21 @@ help()
 
 install_bin()
 { # $1:cmd
-	cp -v tools/$1 $yawm_/bin/
-	chmod 0755 $yawm_/bin/$1
+	cp -v tools/$1 $fwm_/bin/
+	chmod 0755 $fwm_/bin/$1
 }
 
 install_pos()
 { # $1:cmd $2:pos
 	if [ $# -ne 2 ]; then return; fi
-	mkdir -p $yawm_/$2
-	touch $yawm_/$2/$1
+	mkdir -p $fwm_/$2
+	touch $fwm_/$2/$1
 }
 
 install_pop()
 { # $1:cmd
-	mkdir -p $yawm_/popup
-	touch $yawm_/popup/$1
+	mkdir -p $fwm_/popup
+	touch $fwm_/popup/$1
 }
 
 install_key()
@@ -47,8 +47,9 @@ install_key()
 	echo "updated key $keys_/$2"
 }
 
-cp -v tools/main-menu $yawm_/panel/menu
-chmod 0755 $yawm_/panel/menu
+mkdir -p $fwm_/panel
+cp -v tools/main-menu $fwm_/panel/menu
+chmod 0755 $fwm_/panel/menu
 
 dock_=screens/0/dock
 
@@ -86,11 +87,11 @@ case $1 in
 -f|--force) force_=1;;
 esac
 
-mkdir -p $yawm_/bin
-mkdir -p $yawm_/lib
+mkdir -p $fwm_/bin
+mkdir -p $fwm_/lib
 mkdir -p $keys_
 
-cp -v tools/menu-utils $yawm_/lib
+cp -v tools/menu-utils $fwm_/lib
 
 parse() { key_="$1"; pos_="$2"; shift 2; cmd_="$@"; }
 
@@ -116,16 +117,16 @@ done
 
 # special cases
 
-touch $yawm_/center/menu # default for all menus
-touch $yawm_/popup/menu # default for all menus
-touch $yawm_/popup/popup # default for all popups
+touch $fwm_/center/menu # default for all menus
+touch $fwm_/popup/menu # default for all menus
+touch $fwm_/popup/popup # default for all popups
 
 pwd_=$PWD
-cd $yawm_/$dock_
+cd $fwm_/$dock_
 ln -sf clock-dock right-anchor
 ln -sf bat-dock left-anchor
 cd $pwd_
 
-if pidof yawm && [ -p $ctl_ ]; then
+if pidof fwm && [ -p $ctl_ ]; then
 	echo "reload-keys" > $ctl_
 fi

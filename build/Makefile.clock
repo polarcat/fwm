@@ -1,11 +1,11 @@
-out = clock
+out = fwm-clock
 src = src/clock.c
 cflags += $(xftcflags)
 ldflags += $(xftldflags) -lxcb -lX11 -lX11-xcb
 
 .PHONY: FORCE clean
 
-$(out): FORCE
+$(target): FORCE
 	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
 include $(common)

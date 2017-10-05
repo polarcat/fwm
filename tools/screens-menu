@@ -1,9 +1,9 @@
 #!/bin/sh
 
-. $YAWM_HOME/lib/menu-utils
+. $FWM_HOME/lib/menu-utils
 
-ctl_=$YAWM_HOME/.control$DISPLAY
-scr_=$YAWM_HOME/tmp/screens
+ctl_=$FWM_HOME/.control$DISPLAY
+scr_=$FWM_HOME/tmp/screens
 
 echo list-screens > $ctl_
 

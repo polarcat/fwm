@@ -1,13 +1,13 @@
 #!/bin/sh
 
-. $YAWM_HOME/lib/menu-utils
+. $FWM_HOME/lib/menu-utils
 
 normbg
 normfg
 notebg
 
 ifs_=$IFS
-tmp_=$YAWM_HOME/tmp/volume
+tmp_=$FWM_HOME/tmp/volume
 out_=$tmp_/menu
 inf_=$tmp_/info
 max_=0

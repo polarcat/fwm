@@ -1,10 +1,10 @@
-out = cpumon
+out = fwm-cpumon
 src = src/cpumon.c
 ldflags += -lm -lxcb
 
 .PHONY: FORCE clean
 
-$(out): FORCE
+$(target): FORCE
 	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
 include $(common)

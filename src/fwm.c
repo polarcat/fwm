@@ -1,4 +1,4 @@
-/* yawm.c: yet another window manager
+/* fwm.c: flatter window manager
  *
  * Copyright (c) 2015, Aliaksei Katovich <aliaksei.katovich at gmail.com>
  *
@@ -35,7 +35,7 @@
 #define USE_CRC32 /* use crc32 function from misc header */
 
 #include "misc.h"
-#include "yawm.h"
+#include "fwm.h"
 #include "list.h"
 
 /* defines */
@@ -446,7 +446,7 @@ static struct color defcolors[] = {
 	{ "alert-bg", &alert_bg, 0x90ae2b, COLOR_TYPE_INT, },
 	{ "notice-fg", &notice_fg, 0x101010, COLOR_TYPE_XFT, },
 	{ "notice-bg", &notice_bg, 0x90ae2b, COLOR_TYPE_INT, },
-	{ "border-fg", &border_fg, 0x888888, COLOR_TYPE_INT, },
+	{ "border-fg", &border_fg, 0x444444, COLOR_TYPE_INT, },
 	{ NULL, NULL, 0, 0, },
 };
 
@@ -4064,11 +4064,11 @@ static void init_panel(struct screen *scr)
 
 	xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, scr->panel.win,
 			    XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
-			    sizeof("yawmpanel") - 1, "yawmpanel");
+			    sizeof("panel") - 1, "panel");
 
 	xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, scr->panel.win,
 			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
-			    sizeof("yawmpanel") - 1, "yawmpanel");
+			    sizeof("panel") - 1, "panel");
 
 	scr->panel.gc = xcb_generate_id(dpy);
 	mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND;
@@ -5815,7 +5815,7 @@ static void init_homedir(void)
 {
 	int mode = S_IRWXU;
 
-	if (!(homedir = getenv("YAWM_HOME")))
+	if (!(homedir = getenv("FWM_HOME")))
 		homedir = ".";
 
 	homelen = strlen(homedir);
@@ -5888,7 +5888,7 @@ int main()
 	struct pollfd pfds[FD_MAX];
 	const char *logfile;
 
-	logfile = getenv("YAWM_LOG");
+	logfile = getenv("FWM_LOG");
 	if (logfile) {
 		if (!freopen(logfile, "a+", stdout)) {
 			ee("failed to reopen %s as stdout\n", logfile);

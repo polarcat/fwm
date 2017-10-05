@@ -1,9 +1,9 @@
-out = netlink
+out = fwm-netlink
 src = src/netlink.c
 
 .PHONY: FORCE clean
 
-$(out): FORCE
+$(target): FORCE
 	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
 include $(common)

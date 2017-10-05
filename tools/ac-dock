@@ -1,6 +1,6 @@
 #!/bin/sh
 
-. $YAWM_HOME/lib/menu-utils
+. $FWM_HOME/lib/menu-utils
 
 normbg
 normfg
@@ -31,7 +31,7 @@ startdock $name_ $icon_ $normbg_ $normfg_ $comm_
 update
 
 while :; do
-	if netlink; then
+	if fwm-netlink; then
 		update
 	else
 		sleep 1 # relax

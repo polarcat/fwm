@@ -1,10 +1,10 @@
 #!/bin/sh
 
-. $YAWM_HOME/lib/menu-utils
+. $FWM_HOME/lib/menu-utils
 
 ifs_=$IFS
 dir_=/usr/share
-tmp_=$YAWM_HOME/tmp
+tmp_=$FWM_HOME/tmp
 out_=$tmp_/menu
 val_=''
 
