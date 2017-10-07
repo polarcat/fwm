@@ -1,0 +1,34 @@
+#!/bin/sh
+
+ifs_=$IFS
+class_="
+backlight
+power_supply
+"
+
+chmodlink()
+{
+	while [ $# -gt 0 ]; do
+		if [ "$1" != ".." ]; then
+			chmod 0755 $1
+		fi
+
+		cd $1
+		shift 1
+	done
+}
+
+chmod 0755 /sys/class
+
+for class in $class_; do
+	chmod 0755 /sys/class/$class
+	cd /sys/class/$class
+
+	for dir in *; do
+		readlink $dir | while read link; do
+			if [ -d $link ]; then
+				IFS='/'; chmodlink $link; IFS=$ifs_
+			fi
+		done
+	done
+done
