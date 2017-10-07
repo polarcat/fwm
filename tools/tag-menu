@@ -16,17 +16,13 @@ mkdir -p $tmp_
 
 help()
 {
-	printf "Usage: $1 my-new-tag\n" > $out_
+	printf "Usage: $1 new-tag-name\n" > $out_
 	showinfo $out_
 }
 
 create()
 {
-	if [ -z "$1" ]; then
-		help c
-		return 1
-	fi
-
+	local name=$1
 	local tag=0
 	local path=''
 
@@ -35,15 +31,20 @@ create()
 
 		if [ ! -d $path ]; then
 			mkdir -p $path
-			printf "$1" > $path/.name
+
+			if [ -z "$name" ]; then
+				name=$tag
+			fi
+
+			printf "$name" > $path/.name
 			echo "refresh-panel $scr_" > $ctl_
 			return
 		fi
 
 		tag=$((tag + 1))
 
-		if [ $cnt -ge $maxtags_ ]; then
-			break
+		if [ $tag -ge $maxtags_ ]; then
+			return
 		fi
 	done
 }
