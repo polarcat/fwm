@@ -12,11 +12,13 @@ out_=$tmp_/menu
 inf_=$tmp_/info
 max_=0
 cur_=0
+pct_=''
 cid_=''
 icon_=""
 
 mkdir -p $tmp_
 
+setpct() { pct_=$(($cur_ * 100 / $max_)); }
 setmax() { max_=$1; }
 setcur() { cur_=$2; }
 volume() { amixer cset "$2" "$1,$1" >/dev/null; }
@@ -41,8 +43,20 @@ default()
 
 custom()
 {
-	volume "$1" "$cid_"
-	updatedock mixer-dock $icon_ $normfg_
+	local vol=$(($max_ * $1 / 100))
+
+	if [ $1 -ge 100 ]; then
+		color=$notebg_
+	elif [ $1 -le 0 ]; then
+		color=$(printf "0x%x" $((normbg_ + 0x202020)))
+	elif [ $1 -le 25 ]; then
+		color=$(printf "0x%x" $((normbg_ + 0x404040)))
+	else
+		color=$normfg_
+	fi
+
+	volume "$vol" "$cid_"
+	updatedock mixer-dock $icon_ $color
 }
 
 mute()
@@ -54,14 +68,26 @@ mute()
 
 low()
 {
-	volume "$((max_ / 3))" "$cid_"
+	local vol=$(($max_ * 25 / 100))
+
+	volume "$vol" "$cid_"
 	color=$(printf "0x%x" $((normbg_ + 0x404040)))
 	updatedock mixer-dock $icon_ $color
 }
 
 med()
 {
-	volume "$((max_ / 2))" "$cid_"
+	local vol=$(($max_ * 50 / 100))
+
+	volume "$vol" "$cid_"
+	updatedock mixer-dock $icon_ $normfg_
+}
+
+high()
+{
+	local vol=$(($max_ * 75 / 100))
+
+	volume "$vol" "$cid_"
 	updatedock mixer-dock $icon_ $normfg_
 }
 
@@ -102,10 +128,13 @@ while read v1 v2 v3 v4 v5 v6; do
 	esac
 done < $inf_
 
-printf "\a\t$cur_\n" > $out_
+setpct
+
+printf "\a\t$pct_\n" > $out_
 printf "\a\tmute\n" >> $out_
 printf "\a\tlow\n" >> $out_
 printf "\a\tmed\n" >> $out_
+printf "\a\thigh\n" >> $out_
 printf "\a\tmax\n" >> $out_
 
 # prompt user
@@ -113,14 +142,15 @@ printf "\a\tmax\n" >> $out_
 IFS=$ifs_
 
 startmenu -b -a -d $out_ | while read icon item arg; do
-	case $icon in
-	"") custom $item; exit 0;;
+	case $arg in
+	[0-9]*) custom $arg; exit 0;;
 	esac
 
 	case $item in
 	mute) mute;;
 	low) low;;
 	med) med;;
+	high) high;;
 	max) max;;
 	*) updatedock mixer-dock $icon_ $normfg_;;
 	esac
