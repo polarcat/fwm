@@ -3229,6 +3229,8 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 
 	if (!(flags & (CLI_FLG_DOCK | CLI_FLG_TRAY)))
 		crc = window_exclusive(win);
+	else
+		crc = 0;
 
 	cli = NULL;
 	a = NULL;
@@ -4617,7 +4619,6 @@ static void handle_user_request(int fd)
 {
 	char req[64] = {0};
 	struct sprop name;
-	size_t len;
 
 	if (fd < 0) {
 		get_sprop(&name, rootscr->root, XCB_ATOM_WM_NAME, UCHAR_MAX);
@@ -4627,17 +4628,17 @@ static void handle_user_request(int fd)
 				return;
 		}
 	} else {
-		if ((len = read(fd, req, sizeof(req))) < 1) {
+		if ((name.len = read(fd, req, sizeof(req))) < 1) {
 			ee("read(%d) failed, %s\n", fd, strerror(errno));
 			return;
 		}
 
-		req[len] = '\0';
+		req[name.len] = '\0';
 		name.str = req;
 		name.ptr = NULL;
 	}
 
-	ii("handle request '%s' len %zu\n", name.str, len);
+	ii("handle request '%s' len %u\n", name.str, name.len);
 
 	if (match(name.str, "reload-keys")) {
 		init_keys();
@@ -5088,7 +5089,7 @@ static void toolbar_key_press(xcb_key_press_event_t *e)
 		if (++focused_item == end)
 			focused_item = toolbar_items;
 	} else if (toolbar.kprev == e->detail) {
-		if (--focused_item == toolbar_items - 1)
+		if ((--focused_item) + 1 == toolbar_items)
 			focused_item = end - 1;
 	}
 
