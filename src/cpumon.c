@@ -309,15 +309,9 @@ static int init(struct ctx *ctx)
 	ctx->h = 16;
 	ctx->ms = 60;
 	ctx->fg = 0x8fb2d8;
-	ctx->bg = 0;
 	ctx->class = "cpumon";
-	ctx->line = NULL;
-	ctx->bars = NULL;
 	ctx->cpu = -1;
 	ctx->stat.filter = 60;
-	ctx->stat.count = 0;
-	ctx->stat.accload = 0.f;
-	ctx->stat.lastload = 0.f;
 
 	ctx->file = fopen(STATFILE, "r");
 
@@ -368,7 +362,7 @@ static xcb_atom_t getatom(xcb_connection_t *dpy, const char *str, uint8_t len)
 int main(int argc, char *argv[])
 {
 	struct timespec ts;
-	struct ctx ctx;
+	struct ctx ctx = {0};
 	uint32_t val[2], mask;
 	xcb_screen_t *scr;
 	int ret = 1;
