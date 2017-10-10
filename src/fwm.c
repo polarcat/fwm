@@ -3202,9 +3202,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	if (window_status(win) == WIN_STATUS_UNKNOWN) {
 		ww("ignore unknown window 0x%x\n", win);
 		flags |= CLI_FLG_IGNORED;
-	}
-
-	if ((grav = special(win, "dock", sizeof("dock"))))
+	} else if ((grav = special(win, "dock", sizeof("dock"))))
 		flags |= grav;
 	else if (special(win, "center", sizeof("center")))
 		flags |= CLI_FLG_CENTER;
