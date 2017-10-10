@@ -9,44 +9,46 @@ selfg() { read selfg_ < $FWM_HOME/colors/notice-fg; }
 notebg() { read notebg_ < $FWM_HOME/colors/notice-bg; }
 notefg() { read notefg_ < $FWM_HOME/colors/notice-fg; }
 
-stoptool()
-{ # $1:prog $2:name
-	ps -opid,args | while read pid cmd; do
-		if [ $$ = "$pid" ]; then
-			continue
-		fi
-		case $cmd in
-		$1*$2*) kill -9 $pid 2>&1;;
-		esac
-	done
-}
-
-dockpid_=''
-
-dockpid()
-{ # $1:name
+getpid()
+{ # for dock $1:name for tool $1:prog $2:name
 	local pwd=$PWD
 
-	dockpid_=''
+	pid_=''
 	cd /proc
 
 	for pid in *; do
 		if [ -f $pid/cmdline ]; then
 			read cmd < $pid/cmdline
-			case $cmd in
-			fwm-dock*$1*) dockpid_="$dockpid_ $pid";;
-			esac
+
+			if [ $# -eq 1 ]; then
+				case $cmd in
+				fwm-dock*$1*) pid_="$pid_ $pid";;
+				esac
+			else
+				case $cmd in
+				$1*$2*) pid_="$pid_ $pid";;
+				esac
+			fi
 		fi
 	done
 
 	cd $pwd
 }
 
-stopdock()
-{ # $1:name $2:icon
-	dockpid $1
+stoptool()
+{ # $1:prog $2:name
+	getpid $@
 
-	for pid in $dockpid_; do
+	for pid in $pid_; do
+		kill -9 $pid
+	done
+}
+
+stopdock()
+{ # $1:name
+	getpid $1
+
+	for pid in $pid_; do
 		kill -9 $pid
 	done
 }
@@ -59,9 +61,9 @@ startdock()
 
 updatedock()
 { # $1:name $2:icon $3:color $4:text
-	dockpid $1
+	getpid $1
 
-	for pid in $dockpid_; do
+	for pid in $pid_; do
 		printf "update-dock $pid $2 $3 $4" > $ctl_
 	done
 }
