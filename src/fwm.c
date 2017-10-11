@@ -1135,8 +1135,9 @@ static void focus_window(xcb_window_t win)
 	else
 		border_color(win, active_bg);
 
-	xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, rootscr->root,
-			    a_active_win, XCB_ATOM_WINDOW, 32, 1, &win);
+	xcb_change_property_checked(dpy, XCB_PROP_MODE_REPLACE,
+				    rootscr->root, a_active_win,
+				    XCB_ATOM_WINDOW, 32, 1, &win);
 	xcb_set_input_focus_checked(dpy, XCB_NONE, win, XCB_CURRENT_TIME);
 	print_title(curscr, win);
 }
@@ -3245,8 +3246,9 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		 */
 		ww("ignore tiny window 0x%x geo %ux%u%+d%+d\n", win, g->width,
 		   g->height, g->x, g->y);
-		xcb_change_property(dpy, XCB_PROP_MODE_APPEND, rootscr->root,
-				    a_client_list, XCB_ATOM_WINDOW, 32, 1, &win);
+		xcb_change_property_checked(dpy, XCB_PROP_MODE_APPEND,
+					    rootscr->root, a_client_list,
+					    XCB_ATOM_WINDOW, 32, 1, &win);
 		xcb_flush(dpy);
 		goto out;
 	}
@@ -3310,9 +3312,9 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 
 	if (!(flags & CLI_FLG_TRAY) && a->override_redirect) {
 		ww("ignore redirected window 0x%x\n", win);
-		xcb_change_property(dpy, XCB_PROP_MODE_APPEND, rootscr->root,
-				    a_client_list, XCB_ATOM_WINDOW, 32, 1,
-				    &win);
+		xcb_change_property_checked(dpy, XCB_PROP_MODE_APPEND,
+					    rootscr->root, a_client_list,
+					    XCB_ATOM_WINDOW, 32, 1, &win);
 		xcb_flush(dpy);
 		goto out;
 	}
