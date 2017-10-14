@@ -9,13 +9,13 @@ icon_=""
 name_=ac-dock
 comm_=/dev/null
 dimfg_=$(printf "0x%x" $((normbg_ + 0x202020)))
-online_=0
+online_=''
 
 update()
 {
 	read online < /sys/class/power_supply/AC/online
 
-	if [ $online_ != $online ]; then
+	if [ "$online_" != "$online" ]; then
 		if [ $online -eq 1 ]; then
 			updatedock $name_ $icon_ $normfg_
 		else
@@ -28,6 +28,7 @@ update()
 
 initmon $name_ $comm_
 startdock $name_ $icon_ $normbg_ $normfg_ $comm_
+sleep 0.5 # give window some time to settle
 update
 
 while :; do
