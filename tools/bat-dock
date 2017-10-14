@@ -12,7 +12,7 @@ capacity_=0
 
 update()
 {
-	local rc=0
+	local rc=1
 
 	read capacity < /sys/class/power_supply/BAT0/capacity
 
@@ -27,7 +27,7 @@ update()
 		else
 			icon_="" # low
 		fi
-		rc=1
+		rc=0
 	fi
 
 	capacity_=$capacity
@@ -43,6 +43,6 @@ while :; do
 	sleep 60
 
 	if update; then
-		updatedock $icon_ $normfg_ $capacity_%%
+		updatedock $name_ $icon_ $normfg_ $capacity_%%
 	fi
 done
