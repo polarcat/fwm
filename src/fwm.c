@@ -1292,6 +1292,65 @@ static void focus_any(pid_t pid)
 		     curscr->top + curscr->h / 2);
 }
 
+static int16_t adjust_x(struct screen *scr, int16_t x, uint16_t w)
+{
+	if (x < scr->x || x > scr->x + scr->w || x + w > scr->x + scr->w)
+		return scr->x;
+	return x;
+}
+
+static int16_t adjust_y(struct screen *scr, int16_t y, uint16_t h)
+{
+	if (y < scr->top || y > scr->top + scr->h || y + h > scr->top + scr->h)
+		return scr->top;
+	else
+		return y;
+}
+
+static uint16_t adjust_w(struct screen *scr, uint16_t w)
+{
+	if (w > scr->w)
+		return scr->w - 2 * BORDER_WIDTH;
+	else if (w < WIN_WIDTH_MIN)
+		return scr->w / 2 - 2 * BORDER_WIDTH;
+	return w;
+}
+
+static uint16_t adjust_h(struct screen *scr, uint16_t h)
+{
+	if (h > scr->h)
+		return scr->h - 2 * BORDER_WIDTH;
+	else if (h < WIN_HEIGHT_MIN)
+		return scr->h / 2 - 2 * BORDER_WIDTH;
+	return h;
+}
+
+static void client_moveresize(struct client *cli, int16_t x, int16_t y,
+			      uint16_t w, uint16_t h)
+{
+	uint32_t val[4];
+	uint16_t mask;
+
+	if (!(cli->flags & CLI_FLG_DOCK)) {
+		/* fit into monitor space */
+		x = adjust_x(cli->scr, x, w);
+		y = adjust_y(cli->scr, y, h);
+		w = adjust_w(cli->scr, w);
+		h = adjust_h(cli->scr, h);
+	}
+
+	val[0] = cli->x = x;
+	val[1] = cli->y = y;
+	val[2] = cli->w = w;
+	val[3] = cli->h = h;
+	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
+	xcb_configure_window_checked(dpy, cli->win, mask, val);
+
+	dd("scr %d, cli %p, win 0x%x, geo %ux%u+%d+%d", cli->scr->id, cli,
+	   cli->win, cli->w, cli->h, cli->x, cli->y);
+}
+
 static void hide_toolbox()
 {
 	toolbox.visible = 0;
@@ -1376,6 +1435,9 @@ static int find_toolbox(struct client *cli, uint32_t *xy)
 		dd("BOT LEFT is OK win 0x%x\n", cli->win);
 	} else {
 		ww("window 0x%x is out of view\n", cli->win);
+		client_moveresize(cli, 0, 0, cli->w, cli->h);
+		struct arg arg = { .cli = cli, .kmap = NULL, };
+		raise_client(&arg);
 		return 0;
 	}
 
@@ -2356,65 +2418,6 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 	xcb_flush(dpy);
 
 	return arg.cli;
-}
-
-static int16_t adjust_x(struct screen *scr, int16_t x, uint16_t w)
-{
-	if (x < scr->x || x > scr->x + scr->w || x + w > scr->x + scr->w)
-		return scr->x;
-	return x;
-}
-
-static int16_t adjust_y(struct screen *scr, int16_t y, uint16_t h)
-{
-	if (y < scr->top || y > scr->top + scr->h || y + h > scr->top + scr->h)
-		return scr->top;
-	else
-		return y;
-}
-
-static uint16_t adjust_w(struct screen *scr, uint16_t w)
-{
-	if (w > scr->w)
-		return scr->w - 2 * BORDER_WIDTH;
-	else if (w < WIN_WIDTH_MIN)
-		return scr->w / 2 - 2 * BORDER_WIDTH;
-	return w;
-}
-
-static uint16_t adjust_h(struct screen *scr, uint16_t h)
-{
-	if (h > scr->h)
-		return scr->h - 2 * BORDER_WIDTH;
-	else if (h < WIN_HEIGHT_MIN)
-		return scr->h / 2 - 2 * BORDER_WIDTH;
-	return h;
-}
-
-static void client_moveresize(struct client *cli, int16_t x, int16_t y,
-			      uint16_t w, uint16_t h)
-{
-	uint32_t val[4];
-	uint16_t mask;
-
-	if (!(cli->flags & CLI_FLG_DOCK)) {
-		/* fit into monitor space */
-		x = adjust_x(cli->scr, x, w);
-		y = adjust_y(cli->scr, y, h);
-		w = adjust_w(cli->scr, w);
-		h = adjust_h(cli->scr, h);
-	}
-
-	val[0] = cli->x = x;
-	val[1] = cli->y = y;
-	val[2] = cli->w = w;
-	val[3] = cli->h = h;
-	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
-	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
-	xcb_configure_window_checked(dpy, cli->win, mask, val);
-
-	dd("scr %d, cli %p, win 0x%x, geo %ux%u+%d+%d", cli->scr->id, cli,
-	   cli->win, cli->w, cli->h, cli->x, cli->y);
 }
 
 #define GRIDCELL_MIN_WIDTH 100
