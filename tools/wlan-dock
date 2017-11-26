@@ -37,9 +37,9 @@ oldstat=$?
 newstat=0
 
 if [ $oldstat -eq 1 ]; then
-	updatedock $icon_ $normfg_
+	updatedock $name_ $icon_ $normfg_
 elif [ $oldstat -eq 0 ]; then
-	updatedock $icon_ $dimfg_
+	updatedock $name_ $icon_ $dimfg_
 fi
 
 while :; do
@@ -50,9 +50,9 @@ while :; do
 		sleep 2
 		continue
 	elif [ $newstat -eq 1 ]; then
-		updatedock $icon_ $normfg_
+		updatedock $name_ $icon_ $normfg_
 	elif [ $newstat -eq 0 ]; then
-		updatedock $icon_ $dimfg_
+		updatedock $name_ $icon_ $dimfg_
 	fi
 
 	oldstat=$newstat

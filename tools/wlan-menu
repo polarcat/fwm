@@ -14,6 +14,7 @@ mainmenu_=$0
 etc_=/etc/wpa_supplicant
 tmp_=/tmp/$USER/wlan
 out_=$tmp_/menu
+inf_=$tmp_/info
 
 mkdir -p $tmp_
 
@@ -104,7 +105,7 @@ connected()
 		esac
 	done
 
-	if ! ping -c 1 google.com >/dev/null 2>&1; then
+	if ! ping -c 1 $pinghost_ >/dev/null 2>&1; then
 		printf "\a\tno internet connection\n" >> $out_
 	fi
 
@@ -113,8 +114,8 @@ connected()
 
 connect()
 {
-	printf "\a\tconnecting to $ssid ...\n" > $out_
-	showinfo -d $out_ &
+	printf "\a\tconnecting to $ssid ...\n" > $inf_
+	showinfo -d $inf_ &
 
 	sudo iwup $1 | while read status message; do
 		if [ -z "$message" ]; then
@@ -227,16 +228,31 @@ status()
 	done
 }
 
+disconnect()
+{
+	while read iface dest rest; do
+		case $dest in
+		"00000000")
+			if [ -d /sys/class/net/$iface/wireless ]; then
+				sudo ifdown $iface
+			fi
+			;;
+		esac
+	done < /proc/net/route
+}
+
 printf "\a\t\n" > $out_
 printf "\a\tconnect\n" >> $out_
 printf "\a\tadd\n" >> $out_
 printf "\a\tforget\n" >> $out_
 printf "\a\tstatus\n" >> $out_
+printf "\a\tdisconnect\n" >> $out_
 
 startmenu -b -a -d $out_ |
 while read icon item cmd arg; do
 	case $item in
 	"connect") manage;;
+	"disconnect") disconnect;;
 	"add") add;;
 	"forget") manage del;;
 	"status") status;;

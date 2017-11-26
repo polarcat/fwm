@@ -1,6 +1,7 @@
 #!/bin/sh
 
 ctl_=$FWM_HOME/.control$DISPLAY
+pinghost_=alpinelinux.org
 
 normbg() { read normbg_ < $FWM_HOME/colors/normal-bg; }
 normfg() { read normfg_ < $FWM_HOME/colors/normal-fg; }

@@ -17,6 +17,7 @@ $1 ALL=NOPASSWD: /usr/sbin/pm-hibernate, /usr/sbin/pm-suspend
 $1 ALL=NOPASSWD: /sbin/wpa_cli scan, /sbin/wpa_cli scan_results
 $1 ALL=NOPASSWD: /usr/sbin/iwlist *
 $1 ALL=NOPASSWD: /sbin/brightness *
+$1 ALL=NOPASSWD: /sbin/ifdown *
 $1 ALL=NOPASSWD: /sbin/iwup *, /sbin/iwadd *, /sbin/iwdel *" > $out_
 	echo "$out_ updated"
 }
