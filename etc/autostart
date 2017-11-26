@@ -6,10 +6,25 @@ spawn()
 	sleep 0.3 # FIXME: have to delay or wm will miss window creation event
 }
 
-iwconfig 2>/dev/null | while read line; do
-	case $line in
-	*IEEE*ESSID*) spawn wlan-dock; break;;
-	esac
+wlan=0
+lan=0
+
+for iface in /sys/class/net/*; do
+	read type < $iface/type
+
+	if [ -d $iface/wireless ]; then
+		if [ $wlan -eq 0 ]; then
+			spawn wlan-dock
+			wlan=1
+		fi
+	elif [ "$type" = "1" ]; then
+		if [ $lan -eq 0 ]; then
+			spawn lan-dock
+			lan=1
+		fi
+	elif [ $lan -eq 1 -a $wlan -eq 1 ]; then
+		break
+	fi
 done
 
 for power in /sys/class/power_supply/*; do

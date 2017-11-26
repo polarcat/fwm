@@ -1,0 +1,97 @@
+#!/bin/sh
+
+. $FWM_HOME/lib/menu-utils
+
+normbg
+normfg
+selbg
+selfg
+
+menu_="-0 $normfg_ -1 $normbg_ -2 $selfg_ -3 $selbg_"
+info_="-0 $normfg_ -1 $normbg_ -2 $normfg_ -3 $normbg_"
+
+mainmenu_=$0
+tmp_=/tmp/$USER/lan
+out_=$tmp_/menu
+inf_=$tmp_/info
+pwd_=$PWD
+
+mkdir -p $tmp_
+
+connect()
+{
+	printf "\a\tbringing up $iface_...\n" > $inf_
+	showinfo -d $inf_ &
+	printf "" > $out_
+
+	while read iface dest; do
+		if [ "$iface" = "$iface_" ]; then
+			sudo ifdown $iface_
+		fi
+	done < /proc/net/route
+
+	sudo ifup $iface_ 2>&1 | while read line; do
+		echo "$line" >> $out_
+	done
+
+	showinfo -d $out_
+}
+
+status()
+{
+	ifconfig $iface_ > $out_
+	showinfo -d $out_
+}
+
+disconnect()
+{
+	sudo ifdown $iface_
+}
+
+printf "\a\t\t\n" > $out_
+
+class=/sys/class/net
+
+cd $class
+for iface in *; do
+	if [ ! -d $class/$iface/wireless ]; then
+		read state < $class/$iface/operstate
+		case $state in
+		up) flag="";;
+		down) flag="";;
+		esac
+		read type < $class/$iface/type
+
+		# for type see /usr/include/net/if_arp.h
+
+		if [ "$type" = "1" ]; then
+			printf "\a\t$iface\t\a$flag\n" >> $out_
+		fi
+	fi
+done
+cd $pwd_
+
+startmenu -b -a -d $out_ |
+while read icon item cmd arg; do
+	if [ -z "$item" ]; then
+		break
+	fi
+
+	iface_=$item
+
+	printf "\a\t$iface_\n" > $out_
+	printf "\a\tconnect\n" >> $out_
+	printf "\a\tstatus\n" >> $out_
+	printf "\a\tdisconnect\n" >> $out_
+
+	startmenu -b -a -d $out_ |
+	while read icon item cmd arg; do
+		case $item in
+		"connect") connect;;
+		"status") status;;
+		"disconnect") disconnect;;
+		esac
+	done
+
+	break
+done

@@ -70,10 +70,12 @@ mod_v:center:clip-menu
 :center:suspend-menu
 :center:restart-menu
 :center:wlan-menu
+:center:lan-menu
 :center:mixer-menu
 :center:bat-info
 dock:$dock_/left-gravity:display-dock
 dock:$dock_/left-gravity:wlan-dock
+dock:$dock_/left-gravity:lan-dock
 dock:$dock_/left-gravity:clock-dock
 dock:$dock_/left-gravity:mixer-dock
 dock:$dock_/left-gravity:ac-dock

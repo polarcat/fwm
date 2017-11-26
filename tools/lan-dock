@@ -1,0 +1,69 @@
+#!/bin/sh
+
+. $FWM_HOME/lib/menu-utils
+
+normbg
+normfg
+
+dimfg_=$(printf "0x%x" $((normbg_ + 0x202020)))
+icon_=""
+name_=lan-dock
+comm_=lan-menu
+level_=0
+
+ifstatus()
+{
+	ifconfig $1 | while read line; do
+		case $line in
+		*inet*addr:[0-9]*) return 1;;
+		esac
+	done
+}
+
+class=/sys/class/net
+
+status()
+{
+	while read iface dest; do
+		if [ -d $class/$iface/wireless ]; then
+			continue
+		elif [ "$iface" = "Iface" ]; then
+			continue
+		fi
+
+		read type < $class/$iface/type
+
+		if [ "$type" = "1" ]; then
+			return 1
+		fi
+	done < /proc/net/route
+}
+
+initmon $name_ $comm_
+startdock $name_ $icon_ $normbg_ $normfg_ $comm_
+status
+oldstat=$?
+newstat=0
+
+if [ $oldstat -eq 1 ]; then
+	updatedock $name_ $icon_ $normfg_
+elif [ $oldstat -eq 0 ]; then
+	updatedock $name_ $icon_ $dimfg_
+fi
+
+while :; do
+	status
+	newstat=$?
+
+	if [ $newstat -eq $oldstat ]; then
+		sleep 2
+		continue
+	elif [ $newstat -eq 1 ]; then
+		updatedock $name_ $icon_ $normfg_
+	elif [ $newstat -eq 0 ]; then
+		updatedock $name_ $icon_ $dimfg_
+	fi
+
+	oldstat=$newstat
+	sleep 2
+done
