@@ -26,10 +26,6 @@ setup()
 
 	startmenu -b -a -d $out_ |
 	while read icon ssid key; do
-		if [ -z "$key" ]; then
-			break
-		fi
-
 		echo "$1 $key" | sudo iwadd | while read error; do
 			err=1
 
@@ -105,7 +101,7 @@ connected()
 		esac
 	done
 
-	if ! ping -c 1 $pinghost_ >/dev/null 2>&1; then
+	if ! ping -c 2 $pinghost_ >/dev/null 2>&1; then
 		printf "\a\tno internet connection\n" >> $out_
 	fi
 
