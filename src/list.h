@@ -47,10 +47,8 @@ static inline void list_add(struct list_head *head, struct list_head *item)
 
 static inline void list_del(struct list_head *item)
 {
-	if (item->next) {
-		item->prev->next = item->next;
-		item->next->prev = item->prev;
-	}
+	item->prev->next = item->next;
+	item->next->prev = item->prev;
 }
 
 static inline struct list_head *list_next(struct list_head *item,
