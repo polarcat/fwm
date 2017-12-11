@@ -284,6 +284,10 @@ struct tag {
 
 #define list2tag(item) list_entry(item, struct tag, head)
 
+#ifndef WIN_INC_STEP
+#define WIN_INC_STEP 20
+#endif
+
 #ifndef POS_DIV_MAX
 #define POS_DIV_MAX 9
 #endif
@@ -294,6 +298,7 @@ struct client {
 	int16_t x, y;
 	uint16_t w, h;
 	uint8_t div; /* for position calculation */
+	uint16_t inc; /* window size increment */
 	xcb_window_t win;
 	pid_t pid;
 	struct screen *scr;
@@ -2711,6 +2716,9 @@ static void place_window(struct arg *arg)
 	ii("scr %d, win 0x%x, where %d, div %d\n", curscr->id, arg->cli->win,
 	   pos, arg->cli->div);
 
+	arg->cli->flags &= ~CLI_FLG_CENTER;
+	arg->cli->flags &= ~CLI_FLG_FULLSCREEN;
+
 	switch (pos) {
 	case WIN_POS_FILL:
 		tt("WIN_POS_FILL\n");
@@ -2727,6 +2735,16 @@ static void place_window(struct arg *arg)
 		x = curscr->x + curscr->w / 2 - curscr->w / 4;
 		y = curscr->top + curscr->h / 2 - curscr->h / 4;
 		window_halfwh(&w, &h);
+		x -= arg->cli->inc;
+		y -= arg->cli->inc;
+		w += 2 * arg->cli->inc;
+		h += 2 * arg->cli->inc;
+
+		if (w > arg->cli->scr->w || h > arg->cli->scr->h)
+			arg->cli->inc = 0;
+		else
+			arg->cli->inc += WIN_INC_STEP;
+
 		break;
 	case WIN_POS_LEFT_FILL:
 		tt("WIN_POS_LEFT_FILL\n");
@@ -2813,6 +2831,9 @@ static void place_window(struct arg *arg)
 
 	if (arg->cli != toolbar.cli)
 		center_pointer(arg->cli);
+
+	if (!(arg->cli->flags & CLI_FLG_CENTER))
+		arg->cli->inc = 0;
 
 	store_client(arg->cli, 0);
 	xcb_flush(dpy);
@@ -3372,6 +3393,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	}
 
 	cli->div = 1;
+	cli->inc = 0;
 	cli->scr = scr;
 	cli->win = win;
 	cli->crc = crc;
