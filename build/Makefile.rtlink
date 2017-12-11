@@ -1,0 +1,9 @@
+out = fwm-rtlink
+src = src/rtlink.c
+
+.PHONY: FORCE clean
+
+$(target): FORCE
+	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
+
+include $(common)

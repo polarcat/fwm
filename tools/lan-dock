@@ -41,6 +41,7 @@ status()
 
 initmon $name_ $comm_
 startdock $name_ $icon_ $normbg_ $normfg_ $comm_
+sleep 0.5 # give window some time to settle
 status
 oldstat=$?
 newstat=0
@@ -52,18 +53,16 @@ elif [ $oldstat -eq 0 ]; then
 fi
 
 while :; do
-	status
-	newstat=$?
+	if fwm-rtlink; then
+		status
+		newstat=$?
+	fi
 
-	if [ $newstat -eq $oldstat ]; then
-		sleep 2
-		continue
-	elif [ $newstat -eq 1 ]; then
+	if [ $newstat -eq 1 ]; then
 		updatedock $name_ $icon_ $normfg_
 	elif [ $newstat -eq 0 ]; then
 		updatedock $name_ $icon_ $dimfg_
 	fi
 
 	oldstat=$newstat
-	sleep 2
 done

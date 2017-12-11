@@ -25,7 +25,7 @@ bin:
 	@mkdir -p bin
 
 all:
-	@printf "\nUsage: make [clean|install] <fwm|menu|clock|cpumon|dock|netlink>\n\n"
+	@printf "\nUsage: make [clean|install] <fwm|menu|clock|cpumon|dock|netlink|rtlink>\n\n"
 
 fwm: FORCE bin
 	$(makecmd)
@@ -43,4 +43,7 @@ dock: FORCE bin
 	$(makecmd)
 
 netlink: FORCE bin
+	$(makecmd)
+
+rtlink: FORCE bin
 	$(makecmd)

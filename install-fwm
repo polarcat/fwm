@@ -25,6 +25,7 @@ cp -v bin/fwm-clock $bin_/
 cp -v bin/fwm-dock $bin_/
 cp -v bin/fwm-cpumon $bin_/
 cp -v bin/fwm-netlink $bin_/
+cp -v bin/fwm-rtlink $bin_/
 cp -v tools/main-menu $panel_/menu
 
 cd $HOME

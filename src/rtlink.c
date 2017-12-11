@@ -1,4 +1,4 @@
-/* netlink.c: wait for NETLINK_KOBJECT_UEVENT event and exit.
+/* rtlink.c: wait for NETLINK_ROUTE event and exit.
  * Retrun 0 if event occured or 1 otherwise
  *
  * Copyright (c) 2017, Aliaksei Katovich <aliaksei.katovich at gmail.com>
@@ -12,6 +12,7 @@
 #include <poll.h>
 #include <net/if.h>
 #include <linux/netlink.h>
+#include <linux/rtnetlink.h>
 
 #include "misc.h"
 
@@ -23,7 +24,7 @@ int main(void)
 	struct sockaddr_nl sa = {0};
 	struct pollfd fds;
 
-	fds.fd = socket(PF_NETLINK, SOCK_DGRAM, NETLINK_KOBJECT_UEVENT);
+	fds.fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
 
 	if (fds.fd < 0) {
 		ee("socket() failed\n");
@@ -32,7 +33,7 @@ int main(void)
 
 	sa.nl_family = AF_NETLINK;
 	sa.nl_pid = getpid();
-	sa.nl_groups = 1;
+	sa.nl_groups = RTMGRP_LINK;
 
 	setsockopt(fds.fd, SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
 
