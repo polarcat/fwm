@@ -15,10 +15,11 @@
 
 #include "misc.h"
 
-#define MAX_BUF 1
+#define MAX_BUF 256
 
 int main(void)
 {
+        char msg[MAX_BUF] = {0};
 	int32_t size = MAX_BUF;
 	struct sockaddr_nl sa = {0};
 	struct pollfd fds;
@@ -47,8 +48,11 @@ int main(void)
 	if (poll(&fds, 1, -1) < 0)
 		return 1;
 
-	if (fds.revents & POLLIN)
+	if (fds.revents & POLLIN) {
+		recv(fds.fd, msg, sizeof(msg), MSG_DONTWAIT);
+		printf("%s\n", msg);
 		return 0;
+	}
 
 	return 1;
 }
