@@ -24,8 +24,7 @@ endif
 bin:
 	@mkdir -p bin
 
-all:
-	@printf "\nUsage: make [clean|install] <fwm|menu|clock|cpumon|dock|netlink|rtlink>\n\n"
+all: fwm menu clock cpumon dock netlink rtlink
 
 fwm: FORCE bin
 	$(makecmd)

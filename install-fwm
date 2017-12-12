@@ -6,26 +6,45 @@ bin_=$fwm_/bin
 keys_=$fwm_/keys
 panel_=$fwm_/panel
 
-mkdir -p $fwm_
-mkdir -p $HOME/bin
-mkdir -p $bin_
-mkdir -p $keys_
-mkdir -p $panel_
+dirs_="
+$fwm_
+$HOME/bin
+$bin_
+$keys_
+$panel_
+"
 
-unlink $HOME/bin/fwm
+for dir in $dirs_; do
+	mkdir -p $dir
+done
 
-cp -v bin/fwm $HOME/bin/
+installbin()
+{
+	for prog in $@; do
+		if [ "$prog" = "all:" ]; then
+			continue
+		fi
+
+		if [ "$prog" = "fwm" ]; then
+			unlink $HOME/bin/$prog
+			cp -v bin/$prog $HOME/bin/
+		else
+			unlink $bin_/fwm-$prog
+			cp -v bin/fwm-$prog $bin_/
+		fi
+	done
+}
+
+while read line; do
+	case $line in
+	"all: "*) installbin $line ;;
+	esac
+done < Makefile
+
 cp -v etc/startfwm $HOME/bin/
 cp -v etc/xinitrc $HOME/.xinitrc-fwm
 cp -v etc/fwmrc $HOME/.fwmrc
 cp -v etc/autostart $fwm_/
-
-cp -v bin/fwm-menu $bin_/
-cp -v bin/fwm-clock $bin_/
-cp -v bin/fwm-dock $bin_/
-cp -v bin/fwm-cpumon $bin_/
-cp -v bin/fwm-netlink $bin_/
-cp -v bin/fwm-rtlink $bin_/
 cp -v tools/main-menu $panel_/menu
 
 cd $HOME
