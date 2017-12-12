@@ -4,6 +4,7 @@ ifs_=$IFS
 class_="
 backlight
 power_supply
+net
 "
 
 chmodlink()
@@ -32,3 +33,5 @@ for class in $class_; do
 		done
 	done
 done
+
+# for /proc/net/route add user to 'readproc' group
