@@ -1,0 +1,24 @@
+#!/bin/sh
+
+. $FWM_HOME/lib/menu-utils
+
+normbg
+normfg
+
+icon_=""
+name_=usb-dock
+comm_=/dev/null
+dimfg_=$(printf "0x%x" $((normbg_ + 0x202020)))
+
+initmon $name_ $comm_
+startdock $name_ $icon_ $normbg_ $dimfg_ $comm_
+sleep 0.5 # give window some time to settle
+
+while :; do
+	fwm-netlink | while read msg; do
+		case $msg in
+		add@*usb*) updatedock $name_ $icon_ $normfg_;;
+		remove@*usb*) updatedock $name_ $icon_ $dimfg_;;
+		esac
+	done
+done

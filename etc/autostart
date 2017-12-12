@@ -41,6 +41,7 @@ for sound in /dev/snd/*; do
 	esac
 done
 
+spawn usb-dock
 spawn display-dock
 spawn cpu-dock
 spawn clock-dock
