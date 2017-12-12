@@ -32,9 +32,10 @@ sleep 0.5 # give window some time to settle
 update
 
 while :; do
-	if fwm-netlink; then
-		update
-	else
-		sleep 1 # relax
-	fi
+	fwm-netlink | while read msg; do
+		case $msg in
+		change@*power_supply*AC*) online_=1; update;;
+		change@*power_supply*BAT*) online_=0; update;;
+		esac
+	done
 done
