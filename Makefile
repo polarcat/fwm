@@ -6,6 +6,17 @@ ldflags = $(LDFLAGS)
 xftcflags = $(shell pkg-config --cflags xft)
 xftldflags = $(shell pkg-config --libs xft)
 target = $@
+basedir = $(HOME)/.fwm
+bindir = $(basedir)/bin
+keysdir = $(basedir)/keys
+
+ifdef $(SCREEN)
+defscr = $(SCREEN)
+else
+defscr = 0
+endif
+
+dockdir = $(basedir)/screens/$(defscr)/dock
 
 export
 
@@ -19,30 +30,40 @@ else
 makecmd += $@
 endif
 
-.PHONY: FORCE bin all clean install
+.PHONY: FORCE dirs all clean install
 
-bin:
+dirs:
 	@mkdir -p bin
+	@mkdir -p $(basedir)
+	@mkdir -p $(bindir)
+	@mkdir -p $(keysdir)
+	@mkdir -p $(dockdir)
 
-all: fwm menu clock cpumon dock netlink rtlink
+all: fwm menu clock cpumon dock netlink rtlink tools icons
 
-fwm: FORCE bin
+fwm: FORCE dirs
 	$(makecmd)
 
-menu: FORCE bin
+menu: FORCE dirs
 	$(makecmd)
 
-clock: FORCE bin
+clock: FORCE dirs
 	$(makecmd)
 
-cpumon: FORCE bin
+cpumon: FORCE dirs
 	$(makecmd)
 
-dock: FORCE bin
+dock: FORCE dirs
 	$(makecmd)
 
-netlink: FORCE bin
+netlink: FORCE dirs
 	$(makecmd)
 
-rtlink: FORCE bin
+rtlink: FORCE dirs
+	$(makecmd)
+
+tools: FORCE dirs
+	$(makecmd)
+
+icons: FORCE dirs
 	$(makecmd)

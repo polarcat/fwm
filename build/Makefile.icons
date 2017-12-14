@@ -1,0 +1,13 @@
+# original font repo https://github.com/FortAwesome/Font-Awesome.git
+
+font = fontawesome-webfont.ttf
+
+.PHONY: FORCE clean install
+
+$(target): FORCE install
+
+install:
+	@mkdir -p $(HOME)/.fonts/fontawesome
+	@cp -v icons/$(font) $(HOME)/.fonts/fontawesome/
+	@fc-cache
+	@(if fc-list | grep fontawesome; then echo "fontawesome icons installed OK"; fi)

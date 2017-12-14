@@ -1,0 +1,49 @@
+userkeys = build/Makefile.keys
+
+# tool: <key>:<pos>:<type>:<cmd>
+
+tools = null:center:popup:display-menu
+tools += null:center:popup:brightness-menu
+tools += null:center:popup:randr-menu
+tools += null:center:popup:suspend-menu
+tools += null:center:popup:restart-menu
+tools += null:center:popup:wlan-menu
+tools += null:center:popup:lan-menu
+tools += null:center:popup:mixer-menu
+tools += null:center:popup:bat-info
+tools += null:left-gravity:dock:display-dock
+tools += null:left-gravity:dock:wlan-dock
+tools += null:left-gravity:dock:lan-dock
+tools += null:left-gravity:dock:clock-dock
+tools += null:left-gravity:dock:mixer-dock
+tools += null:left-gravity:dock:ac-dock
+tools += null:left-gravity:dock:usb-dock
+tools += null:null:dock:bat-dock
+tools += null:null:dock:clock-dock
+tools += null:null:dock:cpu-dock
+
+ifneq ("$(wildcard $(userkeys))","")
+include $(userkeys)
+else # defaults
+tools += ctrl_alt_delete:null:null:lock
+tools += mod_m:center:popup:main-menu
+tools += mod_t:center:sys:xterm
+tools += mod_e:center:popup:tag-menu
+tools += mod_k:center:popup:keys-menu
+tools += mod_l:center:popup:clients-menu
+tools += mod_o:center:popup:screens-menu
+tools += mod_p:center:popup:apps-menu
+tools += mod_r:center:popup:run-menu
+tools += mod_v:center:popup:clip-menu
+endif
+
+.PHONY: FORCE clean install
+
+$(target): FORCE install
+
+install:
+	@mkdir -p $(basedir)/lib; \
+	cp -v tools/menu-utils $(basedir)/lib; \
+	for tool in $(tools); do \
+		make -f build/Makefile.tool target="$$tool"; \
+	done

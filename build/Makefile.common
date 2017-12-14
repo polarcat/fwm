@@ -7,8 +7,8 @@ endif
 install: FORCE
 	-mkdir -p $(bin)
 	-unlink $(bin)/$(out)
-	-cp -v bin/$(out) $(bin)/$(out)
+	@cp -v bin/$(out) $(bin)/$(out)
 	-chmod 755 $(bin)/$(out)
 
 clean:
-	-rm -f bin/$(out)
+	@rm -fv bin/$(out)

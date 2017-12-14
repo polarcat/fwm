@@ -3,10 +3,27 @@ src = src/fwm.c
 cflags += $(xftcflags)
 ldflags += -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms -lpthread
 ldflags += -lX11 -lX11-xcb $(xftldflags)
+note = \033[0;31mdo not forget to rename .xinitrc-fwm -> .xinitrc\033[0m\n
 
-.PHONY: FORCE clean
+.PHONY: FORCE
 
 $(target): FORCE
 	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
-include $(common)
+install: FORCE
+	@unlink $(HOME)/bin/$(out); \
+	cp -v bin/$(out) $(HOME)/bin/; \
+	cp -v etc/startfwm $(HOME)/bin/; \
+	mkdir -p $(basedir)/screens/$(defscr)/tags/0; \
+	touch $(basedir)/panel/top; \
+	cp -v etc/xinitrc $(HOME)/.xinitrc-fwm; \
+	printf "$(note)"; \
+	cp -v etc/fwmrc $(HOME)/.fwmrc; \
+	cp -v etc/autostart $(basedir)/; \
+	mkdir -p $(basedir)/panel; \
+	touch $(basedir)/panel/top; \
+	cp -v tools/main-menu $(basedir)/panel/menu; \
+	mkdir -p $(basedir)/tmp; \
+
+clean:
+	-rm -f bin/$(out)
