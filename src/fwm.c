@@ -4139,9 +4139,6 @@ static void init_panel(struct screen *scr)
 
 	xcb_map_window(dpy, scr->panel.win);
 
-	/* now correct screen height */
-	scr->h -= panel_height + PANEL_SCREEN_GAP;
-
 	scr->panel.draw = XftDrawCreate(xdpy, scr->panel.win,
 					DefaultVisual(xdpy, xscr),
 					DefaultColormap(xdpy, xscr));
@@ -4399,10 +4396,11 @@ static void init_outputs(void)
 	if (!curscr)
 		curscr = defscr;
 
-	/* force refresh all panels */
+	/* force refresh all panels and correct each screen height */
 	list_walk(cur, &screens) {
 		scr = list2screen(cur);
 		reinit_panel(scr);
+		scr->h -= panel_height + PANEL_SCREEN_GAP;
 	}
 
 	trace_screens();
