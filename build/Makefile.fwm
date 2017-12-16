@@ -15,6 +15,9 @@ install: FORCE
 	cp -v bin/$(out) $(HOME)/bin/; \
 	cp -v etc/startfwm $(HOME)/bin/; \
 	mkdir -p $(basedir)/screens/$(defscr)/tags/0; \
+	mkdir -p $(basedir)/screens/$(defscr)/tags/1; \
+	mkdir -p $(basedir)/screens/$(defscr)/tags/2; \
+	mkdir -p $(basedir)/screens/$(defscr)/tags/3; \
 	touch $(basedir)/panel/top; \
 	cp -v etc/xinitrc $(HOME)/.xinitrc-fwm; \
 	printf "$(note)"; \
