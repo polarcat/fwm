@@ -828,7 +828,7 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 	struct list_head *cur;
 	FILE *f;
 	char path[homelen + sizeof("/.session/0xffffffffffffffff")];
-	uint8_t buf[2];
+	uint8_t data[2];
 
 	*scr = NULL;
 	*tag = NULL;
@@ -839,13 +839,13 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 		return;
 	}
 
-	buf[0] = buf[1] = 0;
-	fread(buf, sizeof(buf), 1, f); /* continue with 0,0 upon failure */
+	data[0] = data[1] = 0;
+	fread(data, sizeof(data), 1, f); /* continue with 0,0 upon failure */
 	fclose(f);
 
 	list_walk(cur, &screens) {
 		struct screen *tmp = list2screen(cur);
-		if (buf[0] == tmp->id) {
+		if (data[0] == tmp->id) {
 			*scr = tmp;
 			break;
 		}
@@ -856,7 +856,7 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 
 	list_walk(cur, &(*scr)->tags) {
 		struct tag *tmp = list2tag(cur);
-		if (buf[1] == tmp->id) {
+		if (data[1] == tmp->id) {
 			*tag = tmp;
 			ii("restore win 0x%x scr %d tag %d '%s'\n", win,
 			   (*scr)->id, (*tag)->id, (*tag)->name);
@@ -865,21 +865,12 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 	}
 }
 
-static void store_client(struct client *cli, uint8_t clean)
+static void store_window(xcb_window_t win, uint8_t *data, uint8_t size, uint8_t clean)
 {
 	FILE *f;
 	char path[homelen + sizeof("/.session/0xffffffffffffffff")];
-	uint8_t buf[2];
 
-	if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
-		clean = 1;
-	} else if (!cli->scr || !cli->tag) {
-		clean = 1;
-	} else if (cli->flags & (CLI_FLG_POPUP | CLI_FLG_IGNORED)) {
-		return;
-	}
-
-	sprintf(path, "%s/.session/0x%x", homedir, cli->win);
+	sprintf(path, "%s/.session/0x%x", homedir, win);
 
 	if (clean) {
 		errno = 0;
@@ -893,13 +884,33 @@ static void store_client(struct client *cli, uint8_t clean)
 		return;
 	}
 
-	buf[0] = cli->scr->id;
-	buf[1] = cli->tag->id;
 	errno = 0;
-	fwrite(buf, sizeof(buf), 1, f);
-	ii("store win 0x%x scr %d tag %d '%s', errno=%d\n", cli->win,
-	   cli->scr->id, cli->tag->id, cli->tag->name, errno);
+	fwrite(data, size, 1, f); /* ignore errors */
 	fclose(f);
+}
+
+static void store_client(struct client *cli, uint8_t clean)
+{
+	uint8_t data[2];
+
+	if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
+		clean = 1;
+	} else if (!cli->scr || !cli->tag) {
+		clean = 1;
+	} else if (cli->flags & (CLI_FLG_POPUP | CLI_FLG_IGNORED)) {
+		return;
+	}
+
+	if (clean) {
+		store_window(cli->win, NULL, 0, clean);
+		ii("clean win 0x%x\n", cli->win);
+	} else {
+		data[0] = cli->scr->id;
+		data[1] = cli->tag->id;
+		store_window(cli->win, data, sizeof(data), clean);
+		ii("store win 0x%x scr %d tag %d '%s'\n", cli->win,
+		   cli->scr->id, cli->tag->id, cli->tag->name);
+	}
 }
 
 static void space_halfh(struct screen *scr, uint16_t y, uint8_t div)
@@ -3257,15 +3268,44 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
 
-	if (win == rootscr->root || win == toolbar.panel.win)
+	if (win == rootscr->root || win == toolbar.panel.win ||
+	    win == toolbox.win || panel_window(win))
 		return NULL;
 
-	ignore_panel = 0;
+	cli = NULL;
+	a = NULL;
+	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
+
+	if (!g) { /* could not get initial geometry */
+		ee("xcb_get_geometry() failed\n");
+		store_window(win, NULL, 0, 1);
+		goto out;
+	}
+
+	c = xcb_get_window_attributes(dpy, win);
+	a = xcb_get_window_attributes_reply(dpy, c, NULL);
+
+	if (!a) {
+		ee("xcb_get_window_attributes() failed\n");
+		store_window(win, NULL, 0, 1);
+		goto out;
+	}
+
+	if (!g->depth && !a->colormap) {
+		tt("win %p, root %p, colormap=%p, class=%u, depth=%u\n",
+				win, g->root, a->colormap, a->_class, g->depth);
+		xcb_destroy_window_checked(dpy, win);
+		store_window(win, NULL, 0, 1);
+		ww("zombie window 0x%x destroyed\n", win);
+		goto out;
+	}
+
 	flags = 0;
 
 	if (window_status(win) == WIN_STATUS_UNKNOWN) {
 		ww("ignore unknown window 0x%x\n", win);
-		flags |= CLI_FLG_IGNORED;
+		store_window(win, NULL, 0, 1);
+		goto out;
 	} else if ((grav = special(win, "dock", sizeof("dock"))))
 		flags |= grav;
 	else if (special(win, "center", sizeof("center")))
@@ -3294,15 +3334,6 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	else
 		crc = 0;
 
-	cli = NULL;
-	a = NULL;
-	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
-
-	if (!g) { /* could not get initial geometry */
-		ee("xcb_get_geometry() failed\n");
-		goto out;
-	}
-
 	if (g->width <= WIN_WIDTH_MIN || g->height <= WIN_HEIGHT_MIN) {
 		/* FIXME: current assumption is that window is not supposed
 		 * to be shown
@@ -3330,18 +3361,14 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		restore_window(win, &scr, &tag);
 
 	if (!scr && !(scr = pointer2scr())) {
-		if (panel_window(win)) {
-			goto out;
-		} else if ((cli = win2cli(win))) {
+		if ((cli = win2cli(win))) {
 			ii("win 0x%x already on clients list\n", win);
 			list_del(&cli->head);
 			list_del(&cli->list);
 		}
 		scr = defscr;
 	} else {
-		if (scr->panel.win == win) {
-			goto out; /* don't handle it here */
-		} else if ((cli = dock2cli(scr, win))) {
+		if ((cli = dock2cli(scr, win))) {
 			dd("destroy dock win 0x%x", win);
 			close_client(&cli);
 		} else if ((cli = tag2cli(scr->tag, win))) {
@@ -3356,21 +3383,6 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	   g->height, g->x, g->y);
 
 	scr->flags &= ~SCR_FLG_SWITCH_WINDOW;
-
-	c = xcb_get_window_attributes(dpy, win);
-	a = xcb_get_window_attributes_reply(dpy, c, NULL);
-	if (!a) {
-		ee("xcb_get_window_attributes() failed\n");
-		goto out;
-	}
-
-	if (!g->depth && !a->colormap) {
-		tt("win %p, root %p, colormap=%p, class=%u, depth=%u\n",
-		   win, g->root, a->colormap, a->_class, g->depth);
-		xcb_destroy_window_checked(dpy, win);
-		ww("zombie window 0x%x destroyed\n", win);
-		goto out;
-	}
 
 	if (!(flags & CLI_FLG_TRAY) && a->override_redirect) {
 		ww("ignore redirected window 0x%x\n", win);
@@ -3413,6 +3425,8 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	    !(flags & DONT_CENTER)) {
 		cli->flags |= CLI_FLG_CENTER; /* show such windows in center */
 	}
+
+	ignore_panel = 0;
 
 	if (cli->flags & CLI_FLG_CENTER) {
 		g->x = scr->x + scr->w / 2 - g->width / 2;
@@ -3849,14 +3863,36 @@ static int init_tags(struct screen *scr)
 	return pos;
 }
 
+static void move_panel(struct screen *scr)
+{
+	uint32_t val[3];
+	uint16_t mask;
+
+	val[0] = scr->x;
+
+	if (panel_top)
+		val[1] = scr->y;
+	else
+		val[1] = scr->h + scr->y;
+
+	val[2] = scr->w;
+
+	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+	mask |= XCB_CONFIG_WINDOW_WIDTH;
+	xcb_configure_window(dpy, scr->panel.win, mask, val);
+	redraw_panel(scr, NULL, 1);
+	xcb_flush(dpy);
+}
+
 static void reinit_panel(struct screen *scr)
 {
 	int16_t x = 0;
 	uint16_t h, w;
 
 	/* clean panel */
-	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG), scr->x,
-		  0, scr->w, panel_height);
+	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG), 0, 0,
+		  scr->w, panel_height);
+	move_panel(scr);
 
 	text_exts(menu_icon, menu_icon_len, &w, &h, menu_font);
 
@@ -4147,27 +4183,6 @@ static void init_panel(struct screen *scr)
 	   scr->w, panel_height, scr->x, scr->panel.y);
 }
 
-static void move_panel(struct screen *scr)
-{
-	uint32_t val[3];
-	uint16_t mask;
-
-	val[0] = scr->x;
-
-	if (panel_top)
-		val[1] = scr->y;
-	else
-		val[1] = scr->h + scr->y;
-
-	val[2] = scr->w;
-
-	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
-	mask |= XCB_CONFIG_WINDOW_WIDTH;
-	xcb_configure_window(dpy, scr->panel.win, mask, val);
-	redraw_panel(scr, NULL, 1);
-	xcb_flush(dpy);
-}
-
 static void tray_notify(xcb_atom_t atom)
 {
 	xcb_client_message_event_t e = { 0 };
@@ -4297,7 +4312,6 @@ static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 			scr->w = r->width;
 			scr->y = r->y;
 			scr->h = r->height;
-			move_panel(scr);
 			free(scr->name);
 			scr->name = strdup(name);
 			goto out;
@@ -4364,6 +4378,8 @@ static void init_outputs(void)
 	out = xcb_randr_get_screen_resources_current_outputs(r);
 	ii("found %d screens\n", len);
 
+	chdir(homedir);
+
 	if (stat("panel/top", &st) == 0) {
 		panel_top = 1;
 		menu_icon = MENU_ICON_DOWN;
@@ -4396,11 +4412,11 @@ static void init_outputs(void)
 	if (!curscr)
 		curscr = defscr;
 
-	/* force refresh all panels and correct each screen height */
+	/* force refresh all panels and adjust each screen height */
 	list_walk(cur, &screens) {
 		scr = list2screen(cur);
-		reinit_panel(scr);
 		scr->h -= panel_height + PANEL_SCREEN_GAP;
+		reinit_panel(scr);
 	}
 
 	trace_screens();
