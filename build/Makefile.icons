@@ -4,7 +4,7 @@ font = fontawesome-webfont.ttf
 
 .PHONY: FORCE clean install
 
-$(target): FORCE install
+$(target): # do nothing
 
 install:
 	@mkdir -p $(HOME)/.fonts/fontawesome

@@ -39,7 +39,7 @@ endif
 
 .PHONY: FORCE clean install
 
-$(target): FORCE install
+$(target): # do nothing
 
 install:
 	@mkdir -p $(basedir)/lib; \
