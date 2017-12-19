@@ -39,7 +39,7 @@ dirs:
 	@mkdir -p $(keysdir)
 	@mkdir -p $(dockdir)
 
-all: fwm menu clock cpumon dock netlink rtlink tools icons
+all: fwm menu clock cpumon dock netlink rtlink tools icons sudoers
 
 fwm: FORCE dirs
 	$(makecmd)
@@ -66,4 +66,7 @@ tools: FORCE dirs
 	$(makecmd)
 
 icons: FORCE dirs
+	$(makecmd)
+
+sudoers: FORCE dirs
 	$(makecmd)
