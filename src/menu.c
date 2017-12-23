@@ -862,7 +862,11 @@ static int init_rows(void)
 				cols_px_[i] = w;
 
 			if (*ptr == '\t') {
-				i++;
+				if (++i >= cols_per_row_) {
+					ww("excpected %u columns in row %u\n",
+					   cols_per_row_, rows_num_ + 1);
+					break;
+				}
 			} else if (*ptr == '\n') {
 				rows_num_++;
 				if (i == cols_per_row_ - 1) {
