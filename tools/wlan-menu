@@ -224,17 +224,33 @@ status()
 	done
 }
 
+ssid() { printf "\a\t$2\t$3\n" >> $out_; }
+
 disconnect()
 {
-	while read iface dest rest; do
-		case $dest in
-		"00000000")
-			if [ -d /sys/class/net/$iface/wireless ]; then
-				sudo ifdown $iface
-			fi
-			;;
+	printf "\a\t\t\n" > $out_
+
+	iwconfig 2>/dev/null | while read dev str0 str1 ssid rest; do
+		case $ssid in
+		ESSID:*) ssid=$ssid:$dev; IFS=':'; ssid $ssid; IFS=$ifs_;;
 		esac
-	done < /proc/net/route
+	done
+
+	startmenu -d $out_ |
+	while read icon ssid dev; do
+		sudo ifdown $dev
+		break
+	done
+
+#	while read iface dest rest; do
+#		case $dest in
+#		"00000000")
+#			if [ -d /sys/class/net/$iface/wireless ]; then
+#				sudo ifdown $iface
+#			fi
+#			;;
+#		esac
+#	done < /proc/net/route
 }
 
 printf "\a\t\n" > $out_
