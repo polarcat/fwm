@@ -238,22 +238,48 @@ disconnect()
 
 	startmenu -d $out_ |
 	while read icon ssid dev; do
-		sudo ifdown $dev
+		if [ -n "$dev" ]; then
+			sudo ifdown $dev
+		fi
 		break
 	done
-
-#	while read iface dest rest; do
-#		case $dest in
-#		"00000000")
-#			if [ -d /sys/class/net/$iface/wireless ]; then
-#				sudo ifdown $iface
-#			fi
-#			;;
-#		esac
-#	done < /proc/net/route
 }
 
-printf "\a\t\n" > $out_
+activessid_=$out_.ssid
+printf "" > $activessid_
+
+activessid()
+{
+	local dev=0
+
+	while read iface dest rest; do
+		case $dest in
+		"00000000")
+			if [ -d /sys/class/net/$iface/wireless ]; then
+				dev=$iface
+				break
+			fi
+			;;
+		esac
+	done < /proc/net/route
+
+	iwconfig 2>/dev/null | while read dev str0 str1 ssid rest; do
+		echossid() { echo $2 > $activessid_; }
+		case $ssid in
+		ESSID:*)
+			if [ "$dev" = "$dev" ]; then
+				IFS=':'; echossid $ssid; IFS=$ifs
+				return
+			fi
+			;;
+		esac
+	done
+}
+
+activessid
+read ssid < $activessid_
+
+printf "\a\t$ssid\n" > $out_
 printf "\a\tconnect\n" >> $out_
 printf "\a\tadd\n" >> $out_
 printf "\a\tforget\n" >> $out_
