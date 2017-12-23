@@ -37,10 +37,10 @@ connect()
 	showinfo -d $out_
 }
 
-status()
+info()
 {
 	ifconfig $iface_ > $out_
-	showinfo -d $out_
+	showinfo $out_
 }
 
 disconnect()
@@ -81,15 +81,15 @@ while read icon item cmd arg; do
 
 	printf "\a\t$iface_\n" > $out_
 	printf "\a\tconnect\n" >> $out_
-	printf "\a\tstatus\n" >> $out_
 	printf "\a\tdisconnect\n" >> $out_
+	printf "\a\tinfo\n" >> $out_
 
 	startmenu -b -a -d $out_ |
 	while read icon item cmd arg; do
 		case $item in
 		"connect") connect;;
-		"status") status;;
 		"disconnect") disconnect;;
+		"info") info;;
 		esac
 	done
 

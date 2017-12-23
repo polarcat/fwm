@@ -179,9 +179,9 @@ level()
 	IFS=' '; getsignal $3; IFS=$ifs
 	if [ $sig_ -gt -50 ]; then
 		lvl="||||||||||||---"
-	elif [ $sig_ -le -50 -a $sig -ge -60 ]; then
+	elif [ $sig_ -le -50 -a $sig_ -ge -60 ]; then
 		lvl="|||||||||------"
-	elif [ $sig_ -lt -60 -a $sig -ge -70 ]; then
+	elif [ $sig_ -lt -60 -a $sig_ -ge -70 ]; then
 		lvl="||||||---------"
 	else
 		lvl="|||------------"
@@ -215,11 +215,11 @@ devstat()
 	showinfo $out_
 }
 
-status()
+info()
 {
 	iwconfig 2>/dev/null | while read line; do
 		case $line in
-		*IEEE*ESSID*) devstat $line;;
+		*IEEE*ESSID:*) devstat $line;;
 		esac
 	done
 }
@@ -232,7 +232,7 @@ disconnect()
 
 	iwconfig 2>/dev/null | while read dev str0 str1 ssid rest; do
 		case $ssid in
-		ESSID:*) ssid=$ssid:$dev; IFS=':'; ssid $ssid; IFS=$ifs_;;
+		*ESSID:*) ssid=$ssid:$dev; IFS=':'; ssid $ssid; IFS=$ifs_;;
 		esac
 	done
 
@@ -245,18 +245,12 @@ disconnect()
 	done
 }
 
-activessid_=$out_.ssid
-printf "" > $activessid_
-
 activessid()
 {
-	local dev=0
-
 	while read iface dest rest; do
 		case $dest in
 		"00000000")
 			if [ -d /sys/class/net/$iface/wireless ]; then
-				dev=$iface
 				break
 			fi
 			;;
@@ -264,10 +258,10 @@ activessid()
 	done < /proc/net/route
 
 	iwconfig 2>/dev/null | while read dev str0 str1 ssid rest; do
-		echossid() { echo $2 > $activessid_; }
+		echossid() { echo $2 > $out_; }
 		case $ssid in
-		ESSID:*)
-			if [ "$dev" = "$dev" ]; then
+		*ESSID:*)
+			if [ "$dev" = "$iface" ]; then
 				IFS=':'; echossid $ssid; IFS=$ifs
 				return
 			fi
@@ -276,15 +270,16 @@ activessid()
 	done
 }
 
+printf "" > $out_
 activessid
-read ssid < $activessid_
+read ssid < $out_
 
 printf "\a\t$ssid\n" > $out_
 printf "\a\tconnect\n" >> $out_
+printf "\a\tdisconnect\n" >> $out_
 printf "\a\tadd\n" >> $out_
 printf "\a\tforget\n" >> $out_
-printf "\a\tstatus\n" >> $out_
-printf "\a\tdisconnect\n" >> $out_
+printf "\a\tinfo\n" >> $out_
 
 startmenu -b -a -d $out_ |
 while read icon item cmd arg; do
@@ -293,6 +288,6 @@ while read icon item cmd arg; do
 	"disconnect") disconnect;;
 	"add") add;;
 	"forget") manage del;;
-	"status") status;;
+	"info") info;;
 	esac
 done
