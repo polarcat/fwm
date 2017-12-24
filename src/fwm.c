@@ -5963,6 +5963,11 @@ int main()
 	struct pollfd pfds[FD_MAX];
 	const char *logfile;
 
+	if (setsid() < 0) {
+		ee("setsid failed\n");
+		return 1;
+	}
+
 	logfile = getenv("FWM_LOG");
 	if (logfile) {
 		if (!freopen(logfile, "a+", stdout)) {
