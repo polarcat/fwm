@@ -5956,8 +5956,9 @@ static inline void handle_control_event(struct pollfd *pfd)
 	if (pfd->revents & POLLIN) {
 		handle_user_request(pfd->fd);
 		pfd->fd = open_control(pfd->fd); /* and reset pipe */
-		pfd->revents = 0;
 	}
+
+	pfd->revents = 0;
 }
 
 static uint8_t getdisplay(void)
@@ -5982,8 +5983,13 @@ int main()
 		return 1;
 	}
 
+	close(STDIN_FILENO);
 	logfile = getenv("FWM_LOG");
+
 	if (logfile) {
+		close(STDOUT_FILENO);
+		close(STDERR_FILENO);
+
 		if (!freopen(logfile, "a+", stdout)) {
 			ee("failed to reopen %s as stdout\n", logfile);
 		} else {
