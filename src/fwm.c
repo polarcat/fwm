@@ -92,6 +92,7 @@ typedef uint8_t strlen_t;
 
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
+#define SCR_FLG_CLIENT_RETAG (1 << 3)
 
 #define TAG_NAME_MAX 32
 
@@ -2947,7 +2948,8 @@ static void focus_tag(struct screen *scr, struct tag *tag)
 	scr->tag = tag;
 	print_tag(scr, scr->tag, ITEM_FLG_ACTIVE);
 
-	show_windows(tag, 1);
+	if (!(scr->flags & SCR_FLG_CLIENT_RETAG))
+		show_windows(tag, 1);
 }
 
 static void switch_tag(struct screen *scr, enum dir dir)
@@ -5178,6 +5180,19 @@ static void toolbar_key_press(xcb_key_press_event_t *e)
 	draw_toolbar_text(focused_item, flg);
 }
 
+static void handle_key_release(xcb_key_release_event_t *e)
+{
+	te("XCB_KEY_RELEASE: root 0x%x, win 0x%x, child 0x%x, key %d\n",
+	  e->root, e->event, e->child, e->detail);
+
+	curscr->flags &= ~SCR_FLG_SWITCH_WINDOW;
+
+	if (curscr->flags & SCR_FLG_CLIENT_RETAG) {
+		curscr->flags &= ~SCR_FLG_CLIENT_RETAG;
+		show_windows(curscr->tag, 1);
+	}
+}
+
 static void handle_key_press(xcb_key_press_event_t *e)
 {
 	struct list_head *cur;
@@ -5207,6 +5222,10 @@ static void handle_key_press(xcb_key_press_event_t *e)
 
 			curscr = coord2scr(e->root_x, e->root_y);
 			curscr->tag->front = arg.cli;
+
+			if (kmap->action == retag_client)
+				curscr->flags |= SCR_FLG_CLIENT_RETAG;
+
 			kmap->action(&arg);
 			return;
 		}
@@ -5682,12 +5701,7 @@ static int handle_events(void)
 		handle_key_press((xcb_key_press_event_t *) e);
 		break;
 	case XCB_KEY_RELEASE:
-		te("XCB_KEY_RELEASE: root 0x%x, win 0x%x, child 0x%x, key %d\n",
-		   ((xcb_key_release_event_t *) e)->root,
-		   ((xcb_key_release_event_t *) e)->event,
-		   ((xcb_key_release_event_t *) e)->child,
-		   ((xcb_key_release_event_t *) e)->detail);
-		curscr->flags &= ~SCR_FLG_SWITCH_WINDOW;
+		handle_key_release((xcb_key_release_event_t *) e);
 		break;
 	case XCB_CREATE_NOTIFY:
 		te("XCB_CREATE_NOTIFY: parent 0x%x, window 0x%x, "
