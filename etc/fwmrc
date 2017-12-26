@@ -12,5 +12,6 @@ fwm
 restart-menu
 
 if [ $? -eq 0 ]; then
+	fwm-cleanup
 	exit 0
 fi

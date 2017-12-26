@@ -27,6 +27,8 @@ install: FORCE
 	touch $(basedir)/panel/top; \
 	cp -v tools/main-menu $(basedir)/panel/menu; \
 	mkdir -p $(basedir)/tmp; \
+	mkdir -p $(basedir)/bin; \
+	cp -v bin/fwm-cleanup $(basedir)/bin/; \
 
 clean:
 	-rm -f bin/$(out)

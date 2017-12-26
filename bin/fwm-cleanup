@@ -1,0 +1,29 @@
+#!/bin/sh
+
+pwd=$PWD
+
+for scr in $HOME/.fwm/screens/*; do
+	cd $scr/dock/
+	for dock in *; do
+		if [ -f $dock -a ! -L $dock ]; then
+			killall -9 $dock
+		fi
+	done
+	cd $pwd
+	cd $scr/dock/left-gravity
+	for dock in *; do
+		if [ -f $dock ]; then
+			killall -9 $dock
+		fi
+	done
+	cd $pwd
+done
+
+tools="fwm-clock \
+fwm-menu \
+fwm-dock \
+fwm-cpumon \
+fwm-rtlink \
+fwm-netlink"
+
+killall -9 $tools
