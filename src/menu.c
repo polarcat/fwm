@@ -1418,10 +1418,14 @@ int main(int argc, char *argv[])
 
 	xcb_atom_t atom = get_atom("_NET_WM_PID", sizeof("_NET_WM_PID") - 1);
 	uint32_t data = getpid();
-	xcb_change_property_checked(dpy_, XCB_PROP_MODE_REPLACE, win_,
-				    atom, XCB_ATOM_CARDINAL, 32, 1, &data);
+	xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_, atom,
+			    XCB_ATOM_CARDINAL, 32, 1, &data);
 
 	xcb_map_window(dpy_, win_);
+	atom = get_atom("_NET_ACTIVE_WINDOW", sizeof("_NET_ACTIVE_WINDOW") - 1);
+	xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, scr->root, atom,
+			    XCB_ATOM_WINDOW, 32, 1, &win_);
+	xcb_set_input_focus_checked(dpy_, XCB_NONE, win_, XCB_CURRENT_TIME);
 	xcb_flush(dpy_);
 
 	if (!(syms_ = xcb_key_symbols_alloc(dpy_)))
