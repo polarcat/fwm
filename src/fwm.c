@@ -3264,7 +3264,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	struct client *cli;
 	uint32_t val[1];
 	uint32_t crc;
-	uint16_t grav;
+	uint32_t grav;
 	xcb_window_t leader;
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
@@ -3304,11 +3304,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 
 	flags = 0;
 
-	if (window_status(win) == WIN_STATUS_UNKNOWN) {
-		ww("ignore unknown window 0x%x\n", win);
-		store_window(win, NULL, 0, 1);
-		goto out;
-	} else if ((grav = special(win, "dock", sizeof("dock"))))
+	if ((grav = special(win, "dock", sizeof("dock"))))
 		flags |= grav;
 	else if (special(win, "center", sizeof("center")))
 		flags |= CLI_FLG_CENTER;
