@@ -2203,7 +2203,7 @@ static uint32_t dock_window(char *path, const char *name, uint8_t len)
 	struct list_head *cur;
 	const char *userhome = getenv("HOME");
 
-	if (!name[0])
+	if (!name[0] || !len)
 		return 0;
 
 	list_walk(cur, &screens) {
