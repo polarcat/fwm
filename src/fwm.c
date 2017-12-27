@@ -1675,6 +1675,9 @@ static void init_toolbox(void)
 	uint32_t val[2];
 	uint32_t mask;
 
+	if (toolbox.win != XCB_WINDOW_NONE)
+		return;
+
 	toolbox.size = panel_height;
 	toolbox.win = xcb_generate_id(dpy);
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
