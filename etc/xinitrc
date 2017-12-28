@@ -1,8 +1,6 @@
 #!/bin/sh
 
 xset -b
-setxkbmap -model pc105 -variant nodeadkeys -option grp:alt_shift_toggle \
-	-layout "fi(nodeadkeys),ru"
 xsetroot -solid black -cursor_name left_ptr
 xscreensaver -no-splash &
 
