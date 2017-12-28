@@ -1,32 +1,36 @@
-usr = $(USER)
-tmp = tmp/etc/sudoers.d
+dir = $(destdir)/etc/sudoers.d
+bin = /usr/sbin
+etc = $(destdir)/etc/local.d
 out = \# generated $(shell date)\n
 out += Defaults env_keep += \"ftp_proxy\"\n
 out += Defaults env_keep += \"http_proxy\"\n
 out += Defaults env_keep += \"https_proxy\"\n
-out += $(usr) ALL=PASSWD: ALL\n
-out += $(usr) ALL=NOPASSWD: /usr/sbin/pm-hibernate, /usr/sbin/pm-suspend\n
-out += $(usr) ALL=NOPASSWD: /sbin/wpa_cli scan, /sbin/wpa_cli scan_results\n
-out += $(usr) ALL=NOPASSWD: /usr/sbin/iwlist *\n
-out += $(usr) ALL=NOPASSWD: /sbin/brightness *\n
-out += $(usr) ALL=NOPASSWD: /sbin/ifup *, /sbin/ifdown *\n
-out += $(usr) ALL=NOPASSWD: /sbin/iwup *, /sbin/iwadd *, /sbin/iwdel *\n
+out += %%fwm ALL=PASSWD: ALL\n
+out += %%fwm ALL=NOPASSWD: /usr/sbin/pm-hibernate, /usr/sbin/pm-suspend\n
+out += %%fwm ALL=NOPASSWD: /sbin/wpa_cli scan, /sbin/wpa_cli scan_results\n
+out += %%fwm ALL=NOPASSWD: /usr/sbin/iwlist *\n
+out += %%fwm ALL=NOPASSWD: /sbin/brightness *\n
+out += %%fwm ALL=NOPASSWD: /sbin/ifup *, /sbin/ifdown *\n
+out += %%fwm ALL=NOPASSWD: $(bin)/iwup *, $(bin)/iwadd *, $(bin)/iwdel *\n
 
-tools = \#!/bin/sh\n
-tools += sudo cp -v sbin/iwadd /sbin/\n
-tools += sudo cp -v sbin/iwup /sbin/\n
-tools += sudo cp -v sbin/iwdel /sbin/\n
-tools += sudo cp -v sbin/brightness /sbin/\n
-tools += sudo cp -v etc/sysfs.start /etc/local.d/\n
+cmd = "cp -v sbin/iwadd $(destdir)$(bin)/"
+cmd += "cp -v sbin/iwup $(destdir)$(bin)/"
+cmd += "cp -v sbin/iwdel $(destdir)$(bin)/"
+cmd += "cp -v sbin/brightness $(destdir)$(bin)/"
+cmd += "cp -v etc/sysfs.start $(etc)"
+
+note = \033[1;32mdo not forget to add user to fwm group\033[0m\n
 
 .PHONY: FORCE clean install
 
 $(target): # do nothing
 
 install:
-	@mkdir -p $(tmp); \
-	printf "$(out)" > $(tmp)/$(usr); \
-	printf "\033[1;32m$(tmp)/$(usr)\033[0m is ready\n"; \
-	printf "$(tools)" > tmp/install-system-tools; \
-	chmod 0755 tmp/install-system-tools; \
-	printf "\033[1;32mtmp/install-system-tools\033[0m is ready\n"; \
+	@mkdir -p $(dir); \
+	printf "$(out)" > $(dir)/fwm; \
+	mkdir -p $(destdir)$(bin); \
+	mkdir -p $(etc); \
+	for run in $(cmd); do \
+		$$run; \
+	done; \
+	printf "$(note)"; \

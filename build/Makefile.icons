@@ -7,7 +7,7 @@ font = fontawesome-webfont.ttf
 $(target): # do nothing
 
 install:
-	@mkdir -p $(HOME)/.fonts/fontawesome
-	@cp -v icons/$(font) $(HOME)/.fonts/fontawesome/
+	@mkdir -p $(homedir)/.fonts/fontawesome
+	@cp -v icons/$(font) $(homedir)/.fonts/fontawesome/
 	@fc-cache
 	@(if fc-list | grep fontawesome; then echo "fontawesome icons installed OK"; fi)

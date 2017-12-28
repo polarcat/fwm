@@ -6,7 +6,9 @@ ldflags = $(LDFLAGS)
 xftcflags = $(shell pkg-config --cflags xft)
 xftldflags = $(shell pkg-config --libs xft)
 target = $@
-basedir = $(HOME)/.fwm
+destdir = $(DESTDIR)
+homedir = $(DESTDIR)$(HOME)
+basedir = $(homedir)/.fwm
 bindir = $(basedir)/bin
 keysdir = $(basedir)/keys
 
@@ -30,7 +32,9 @@ else
 makecmd += $@
 endif
 
-.PHONY: FORCE dirs all clean install
+second = $(word 2,$(MAKECMDGOALS))
+
+.PHONY: FORCE dirs all install
 
 dirs:
 	@mkdir -p bin
@@ -39,7 +43,16 @@ dirs:
 	@mkdir -p $(keysdir)
 	@mkdir -p $(dockdir)
 
-all: fwm menu clock cpumon dock netlink rtlink tools icons sudoers
+ifeq ($(second),)
+install: dirs
+	@for target in $(all); do \
+		make -f build/Makefile.$$target install; \
+	done
+endif
+
+all = fwm menu clock cpumon dock netlink rtlink tools icons sudoers
+
+all: $(all)
 
 fwm: FORCE dirs
 	$(makecmd)

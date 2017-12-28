@@ -1,0 +1,35 @@
+ver = 0.1.0
+dir = alpine
+out = \# Contributor: Aliaksei Katovich <aliaksei.katovich at gmail.com>\n
+out += \# Maintainer:\n
+out += pkgname=fwm\n
+out += pkgver=$(ver)\n
+out += pkgrel=0\n
+out += pkgdesc=\"Flatter window manager\"\n
+out += url=\"https://github.com/polarcat/fwm\"\n
+out += arch=\"all\"\n
+out += license=\"GPL2\"\n
+out += depends=\"\"\n
+out += xcbdeps=\"libxcb-dev xcb-util-dev xcb-util-keysyms-dev\"\n
+out += x11deps=\"libx11-dev\"\n
+out += xftdeps=\"libxft-dev\"\n
+out += pkgdeps=\"pkgconf\"\n
+out += makedepends=\"\$$xcbdeps \$$x11deps \$$xftdeps \$$pgkdeps\"\n
+out += install=\"\"\n
+out += subpackages=\"\"\n
+out += source=\"\$$pkgname-\$$pkgver.tar.gz::\$$url/archive/v\$$pkgver.tar.gz\"\n
+out += builddir=\"\$$srcdir/\"\n
+out += build() { cd \"\$$builddir/\$$pkgname-\$$pkgver\"; make all; }\n
+out += package() { cd \"\$$builddir/\$$pkgname-\$$pkgver\"; make HOME=/etc/fwm DESTDIR=\$$pkgdir install; }\n
+
+.PHONY: FORCE
+
+all:
+	@mkdir -p $(dir); \
+	printf "$(out)" > $(dir)/APKBUILD; \
+	cd $(dir); \
+	echo "PWD: $$PWD"; \
+	abuild checksum && abuild -r; \
+
+clean:
+	rm -f /var/cache/distfiles/fwm-$(ver).tar.gz
