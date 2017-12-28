@@ -33,10 +33,10 @@ startmenu -b -d $out_ | while read icon item; do
 	case $item in
 	"run..."*) exec run-menu &;;
 	"terminal"*) exec xterm &;;
-	"firefox"*) exec firefox;;
-	"chrome"*) exec chromium-browser;;
-	"files"*) exec pcmanfm;;
-	"clipboard"*) exec clip-menu;;
+	"firefox"*) exec firefox &;;
+	"chrome"*) exec chromium-browser &;;
+	"files"*) exec pcmanfm &;;
+	"clipboard"*) exec clip-menu &;;
 	"applications"*) exec apps-menu &;;
 	"windows"*) exec clients-menu &;;
 	"shortcuts"*) exec keys-menu &;;
@@ -48,4 +48,5 @@ startmenu -b -d $out_ | while read icon item; do
 	"suspend"*) suspend-menu &;;
 	"exit"*) killall fwm;;
 	esac
+	break
 done

@@ -3,6 +3,9 @@
 ctl_=$FWM_HOME/.control$DISPLAY
 pinghost_=alpinelinux.org
 
+sighandler() { echo "$0 exited"; exit 0; }
+trap sighandler SIGINT SIGTERM
+
 normbg() { read normbg_ < $FWM_HOME/colors/normal-bg; }
 normfg() { read normfg_ < $FWM_HOME/colors/normal-fg; }
 selbg() { read selbg_ < $FWM_HOME/colors/active-bg; }
@@ -41,7 +44,7 @@ stoptool()
 	getpid $@
 
 	for pid in $pid_; do
-		kill -9 $pid
+		kill $pid
 	done
 }
 
@@ -50,7 +53,7 @@ stopdock()
 	getpid $1
 
 	for pid in $pid_; do
-		kill -9 $pid
+		kill $pid
 	done
 }
 
@@ -76,7 +79,7 @@ stopmon()
 			continue
 		fi
 		case $cmd in
-		*$1*bin*sh*$1*) kill -9 $pid 2>&1;;
+		*$1*bin*sh*$1*) kill $pid 2>&1;;
 		esac
 	done
 }
