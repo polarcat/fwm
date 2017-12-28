@@ -1,0 +1,39 @@
+pkg = fwm
+ver = 0.1.0
+dir = tmp
+apk = \# Contributor: Aliaksei Katovich <aliaksei.katovich at gmail.com>\n
+apk += \# Maintainer: Aliaksei Katovich <aliaksei.katovich@gmail.com>\n
+apk += pkgname=$(pkg)\n
+apk += pkgver=$(ver)\n
+apk += pkgrel=0\n
+apk += pkgdesc=\"Flatter window manager\"\n
+apk += url=\"https://github.com/polarcat/fwm\"\n
+apk += arch=\"all\"\n
+apk += license=\"GPL2\"\n
+apk += xcbdeps=\"libxcb-dev xcb-util-dev xcb-util-keysyms-dev\"\n
+apk += x11deps=\"libx11-dev\"\n
+apk += xftdeps=\"libxft-dev\"\n
+apk += pkgdeps=\"pkgconf\"\n
+apk += makedepends=\"\$$xcbdeps \$$x11deps \$$xftdeps \$$pgkdeps\"\n
+apk += source=\"\$$pkgname-\$$pkgver.tar.gz::\$$url/archive/v\$$pkgver.tar.gz\"\n
+apk += builddir=\"\$$srcdir/\"\n
+apk += check() { echo \"check ok\"; }\n
+apk += build() { cd \"\$$builddir/\$$pkgname-\$$pkgver\"; make all; }\n
+apk += package() { cd \"\$$builddir/\$$pkgname-\$$pkgver\"; make HOME=/etc/fwm DESTDIR=\$$pkgdir install; }\n
+
+scr = \#!/bin/sh\n
+scr += addgroup -S fwm 2>/dev/null\n
+scr += exit 0\n
+
+.PHONY: FORCE
+
+all:
+	@mkdir -p $(dir); \
+	printf "$(apk)" > $(dir)/APKBUILD; \
+	printf "$(scr)" > $(dir)/$(pkg).post-install; \
+	chmod 0755 $(dir)/$(pkg).post-install; \
+	cd $(dir); \
+	abuild checksum && abuild -r; \
+
+clean:
+	@rm -fv /var/cache/distfiles/$(pkg)-$(ver).tar.gz

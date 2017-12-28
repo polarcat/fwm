@@ -11,17 +11,18 @@ $(target): FORCE
 	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
 install: FORCE
-	@unlink $(HOME)/bin/$(out); \
-	cp -v bin/$(out) $(HOME)/bin/; \
-	cp -v etc/startfwm $(HOME)/bin/; \
+	@unlink $(homedir)/bin/$(out); \
+	mkdir -p $(homedir)/bin; \
+	cp -v bin/$(out) $(homedir)/bin/; \
+	cp -v bin/startfwm $(homedir)/bin/; \
 	mkdir -p $(basedir)/screens/$(defscr)/tags/0; \
 	mkdir -p $(basedir)/screens/$(defscr)/tags/1; \
 	mkdir -p $(basedir)/screens/$(defscr)/tags/2; \
 	mkdir -p $(basedir)/screens/$(defscr)/tags/3; \
 	touch $(basedir)/panel/top; \
-	cp -v etc/xinitrc $(HOME)/.xinitrc-fwm; \
+	cp -v etc/xinitrc $(homedir)/.xinitrc-fwm; \
 	printf "$(note)"; \
-	cp -v etc/fwmrc $(HOME)/.fwmrc; \
+	cp -v etc/fwmrc $(homedir)/.fwmrc; \
 	cp -v etc/autostart $(basedir)/; \
 	mkdir -p $(basedir)/panel; \
 	touch $(basedir)/panel/top; \

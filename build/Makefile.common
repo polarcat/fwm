@@ -1,7 +1,7 @@
 ifeq ($(target),fwm)
-bin = $(HOME)/bin
+bin = $(homedir)/bin
 else
-bin = $(HOME)/.fwm/bin
+bin = $(homedir)/.fwm/bin
 endif
 
 install: FORCE
