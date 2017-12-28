@@ -3500,7 +3500,8 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 
 	if (scan) {
 		timestamp(cli);
-		curscr->tag->front = cli;
+		if (cli->tag == curscr->tag)
+			curscr->tag->front = cli;
 	} else if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)) && !scan) {
 		struct arg arg = { .cli = cli, .kmap = NULL, };
 		raise_client(&arg);
