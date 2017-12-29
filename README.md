@@ -125,23 +125,32 @@ Build dependencies
 Installation
 ------------
 
-From _fwm_'s source directory run:
+From fwm's source directory run:
 
 ```
-./make all && make install all
+make all && make install all
 ```
 
-Pay attention to some highlighted printouts during make run, e.g.:
+Pay attention to some highlighted printouts during make run, e.g.
+auto-generated _.xinitrc-fwm_ should replace _.xinitrc_ manually etc.
 
-* auto-generated _.xinitrc-fwm_ should replace _.xinitrc_ manually
-* _make_ auto-generates _tmp/etc/sudoers.d/$USER_ file; check its content and if
-  you consider it safe from security perspective then either copy file to
-  _/etc/sudoers.d/_ or selectively copy/paste its entries to existing
-  _/etc/sudoers.d/$USER_ file; this will enable a possibility to maintain e.g.
-  WiFi and LAN settings with help of _fwm_ utilities
-* _make_ also auto-generates _tmp/install-system-tools_ file that is needed for
-  deployment of some system tools into system directories; if you are OK
-  with the content of the script then just run it :)
+To make it possibile to maintain e.g. WiFi and LAN settings with help of fwm
+utilities run:
+
+```
+sudo make install sudoers
+```
+
+The command above does following:
+
+* creates _/etc/sudoers.d/fwm_ file with rules for __fwm__ group to which
+  desired user should be added
+* copies some system utilities to _/usr/sbin_ directory
+
+Please note that some utilities need access to procfs and on some systems it
+is disabled by default. E.g. Alpine Linux requires user to be part of
+__readproc__ group in order to get such permissions. Sysfs access also could
+be limited so check your distro for related security policies.
 
 Running
 -------
@@ -155,7 +164,7 @@ From the console run:
 This will perform two actions:
 
 1) lock current console (if _vlock_ utility is installed)
-2) start _fwm_ session
+2) start fwm session
 
 Customizations
 --------------
@@ -179,7 +188,7 @@ Customizations
 Credits
 -------
 
-Despite the fact that _fwm_ is written from scratch the work has been heavily
+Despite the fact that fwm is written from scratch the work has been heavily
 inspired by ideas behind [_dwm_](http://dwm.suckless.org/)
 
 Another credit goes to [_Font Awesome_](http://fontawesome.io) creators: it
