@@ -1,10 +1,11 @@
 #!/bin/sh
 
 ctl_=$FWM_HOME/.control$DISPLAY
+tmpdir_=$FWM_HOME/tmp
+rundir_=$FWM_HOME/run
+dirset_=0
+dockpid_=''
 pinghost_=alpinelinux.org
-
-sighandler() { echo "$0 exited"; exit 0; }
-trap sighandler SIGINT SIGTERM
 
 normbg() { read normbg_ < $FWM_HOME/colors/normal-bg; }
 normfg() { read normfg_ < $FWM_HOME/colors/normal-fg; }
@@ -12,6 +13,9 @@ selbg() { read selbg_ < $FWM_HOME/colors/active-bg; }
 selfg() { read selfg_ < $FWM_HOME/colors/notice-fg; }
 notebg() { read notebg_ < $FWM_HOME/colors/notice-bg; }
 notefg() { read notefg_ < $FWM_HOME/colors/notice-fg; }
+
+stoppid() { kill $@ >/dev/null 2>&1; kill -9 $@ >/dev/null 2>&1; }
+stopcmd() { killall $@ >/dev/null 2>&1; killall -9 $@ >/dev/null 2>&1; }
 
 getpid()
 { # for dock $1:name for tool $1:prog $2:name
@@ -21,22 +25,33 @@ getpid()
 	cd /proc
 
 	for pid in *; do
-		if [ -f $pid/cmdline ]; then
-			read cmd < $pid/cmdline
+		if [ ! -f $pid/cmdline ]; then
+			continue
+		fi
 
-			if [ $# -eq 1 ]; then
-				case $cmd in
-				fwm-dock*$1*) pid_="$pid_ $pid";;
-				esac
-			else
-				case $cmd in
-				$1*$2*) pid_="$pid_ $pid";;
-				esac
-			fi
+		read cmd < $pid/cmdline
+
+		if [ $# -eq 1 ]; then
+			case $cmd in
+			fwm-dock*$1*) pid_="$pid_ $pid";;
+			esac
+		else
+			case $cmd in
+			$1*$2*) pid_="$pid_ $pid";;
+			esac
 		fi
 	done
 
 	cd $pwd
+}
+
+initdirs()
+{
+	rundir_=$rundir_/$1
+	run_=$rundir_/$$
+	mkdir -p $tmpdir_
+	mkdir -p $rundir_
+	dirset_=1
 }
 
 stoptool()
@@ -44,52 +59,85 @@ stoptool()
 	getpid $@
 
 	for pid in $pid_; do
-		kill $pid
-	done
-}
-
-stopdock()
-{ # $1:name
-	getpid $1
-
-	for pid in $pid_; do
-		kill $pid
+		stoppid $pid
 	done
 }
 
 startdock()
 { # $1:name $2:icon $3:bg $4:fg $5:comm $6:text
-	stopdock $1
+	if [ $dirset_ -eq 0 ]; then
+		initdirs $1
+		stopmon 0
+	fi
+	stoptool $1
 	exec fwm-dock -n $1 -i $2 -bg $3 -fg $4 -c $5 $6 &
+	dockpid_=$!
+	echo "$1 $dockpid_" >> $run_
+	printf "(ii) \033[0;32mstarted\033[0m $1:$dockpid_ dock\n"
 }
 
 updatedock()
 { # $1:name $2:icon $3:color $4:text
-	getpid $1
-
-	for pid in $pid_; do
+	for pid in $dockpid_; do
 		printf "update-dock $pid $2 $3 $4" > $ctl_
 	done
 }
 
 stopmon()
-{ # $1:name
-	ps -opid,args | while read pid cmd; do
-		if [ $$ = "$pid" ]; then
+{
+	# stop helpers
+	for cmd in fwm-menu $tool_; do
+		stopcmd $cmd
+	done
+
+	cd $rundir_
+	for file in *; do
+		if [ $1 -eq 0 -a "$file" = "$$" ]; then
+			continue
+		elif [ -d $file ]; then
 			continue
 		fi
-		case $cmd in
-		*$1*bin*sh*$1*) kill $pid 2>&1;;
-		esac
+
+		while read name pid; do
+			if [ -z "$name" -o -z "$pid" ]; then
+				continue
+			elif [ $1 -eq 0 -a "$pid" = "$$" ]; then
+				continue
+			elif [ ! -f /proc/$pid/cmdline ]; then
+				continue
+			fi
+
+			read cmd < /proc/$pid/cmdline
+			case "$cmd" in
+			*"$name"*)
+				stoppid $pid
+				printf "(ii) \033[0;33mstopped\033[0m $name $pid\n"
+				;;
+			esac
+		done < $file
+		rm -f $file
 	done
 }
 
-signalmon() { stopdock $name_ $comm_; exit 0; }
+dummytrap() { echo "dummy trap"; }
+
+signalmon()
+{
+	echo "(ii) $name_ signalled..."
+	trap dummytrap SIGINT SIGTERM SIGKILL
+	stopmon 1
+	exit 0;
+}
 
 initmon()
-{ # $1:name $2:comm
+{
+	if [ $dirset_ -eq 0 ]; then
+		initdirs $name_
+	fi
+	echo "$name_ $$ " >> $run_
 	trap signalmon SIGINT SIGTERM SIGKILL
-	stopmon $name_
+	stopmon 0
+	printf "(ii) \033[0;32mstarted\033[0m $name_:$$ monitor\n"
 }
 
 startmenu()

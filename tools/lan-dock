@@ -9,6 +9,7 @@ dimfg_=$(printf "0x%x" $((normbg_ + 0x202020)))
 icon_=""
 name_=lan-dock
 comm_=lan-menu
+tool_=fwm-rtlink
 level_=0
 
 ifstatus()
@@ -39,7 +40,7 @@ status()
 	done < /proc/net/route
 }
 
-initmon $name_ $comm_
+initmon
 startdock $name_ $icon_ $normbg_ $normfg_ $comm_
 sleep 0.5 # give window some time to settle
 status
@@ -52,7 +53,7 @@ elif [ $oldstat -eq 0 ]; then
 	updatedock $name_ $icon_ $dimfg_
 fi
 
-while :; do
+while [ -f $run_ ]; do
 	if fwm-rtlink; then
 		status
 		newstat=$?

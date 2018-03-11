@@ -7,14 +7,15 @@ normfg
 
 icon_=""
 name_=usb-dock
-comm_=/dev/null
+comm_=/bin/true
+tool_=fwm-netlink
 dimfg_=$(printf "0x%x" $((normbg_ + 0x202020)))
 
-initmon $name_ $comm_
+initmon
 startdock $name_ $icon_ $normbg_ $dimfg_ $comm_
 sleep 0.5 # give window some time to settle
 
-while :; do
+while [ -f $run_ ]; do
 	fwm-netlink | while read msg; do
 		case $msg in
 		add@*usb*) updatedock $name_ $icon_ $normfg_;;

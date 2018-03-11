@@ -7,7 +7,8 @@ normfg
 
 icon_=""
 name_=ac-dock
-comm_=/dev/null
+comm_=/bin/true
+tool_=fwm-netlink
 dimfg_=$(printf "0x%x" $((normbg_ + 0x202020)))
 online_=''
 
@@ -26,12 +27,12 @@ update()
 	online_=$online
 }
 
-initmon $name_ $comm_
+initmon
 startdock $name_ $icon_ $normbg_ $normfg_ $comm_
 sleep 0.5 # give window some time to settle
 update
 
-while :; do
+while [ -f $run_ ]; do
 	fwm-netlink | while read msg; do
 		case $msg in
 		change@*power_supply*AC*) online_=1; update;;
