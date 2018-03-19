@@ -83,6 +83,13 @@ updatedock()
 	done
 }
 
+showmenu()
+{
+	killall fwm-menu >/dev/null
+	sleep 0.1
+	fwm-menu -n menu $@
+}
+
 stopmon()
 {
 	# stop helpers
@@ -150,7 +157,7 @@ startmenu()
 	selfg
 
 	colors="-0 $normfg_ -1 $normbg_ -2 $selfg_ -3 $selbg_"
-	fwm-menu -n menu $colors $@
+	showmenu $colors $@
 }
 
 showinfo()
@@ -161,5 +168,5 @@ showinfo()
 	normfg
 
 	colors="-0 $normfg_ -1 $normbg_ -2 $normfg_ -3 $normbg_"
-	fwm-menu -n menu $colors $@ >/dev/null
+	showmenu $colors $@ >/dev/null
 }
