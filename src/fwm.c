@@ -2543,7 +2543,7 @@ static void make_grid(struct arg *arg)
 
 		if (tag->anchor == cli)
 			continue;
-		else if (cli->win & (CLI_FLG_IGNORED | CLI_FLG_POPUP))
+		else if (cli->flags & (CLI_FLG_IGNORED | CLI_FLG_POPUP))
 			continue;
 		else if (window_status(cli->win) == WIN_STATUS_VISIBLE)
 			n++;
@@ -2606,7 +2606,7 @@ static void make_grid(struct arg *arg)
 
 		if (tag->anchor == cli)
 			continue;
-		else if (cli->win & (CLI_FLG_IGNORED | CLI_FLG_POPUP))
+		else if (cli->flags & (CLI_FLG_IGNORED | CLI_FLG_POPUP))
 			continue;
 		if (window_status(cli->win) != WIN_STATUS_VISIBLE)
 			continue;
