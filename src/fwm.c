@@ -5997,7 +5997,9 @@ int main()
 				ee("failed to reopen %s as stderr\n", logfile);
 			}
 		}
-		ii("logfile: %s\n", logfile);
+
+		time_t t = time(NULL);
+		ii("logfile %s, session %s", logfile, asctime(localtime(&t)));
 	}
 
 	init_homedir();
