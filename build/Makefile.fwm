@@ -15,10 +15,12 @@ install: FORCE
 	mkdir -p $(homedir)/bin; \
 	cp -v bin/$(out) $(homedir)/bin/; \
 	cp -v bin/startfwm $(homedir)/bin/; \
-	mkdir -p $(basedir)/screens/$(defscr)/tags/0; \
-	mkdir -p $(basedir)/screens/$(defscr)/tags/1; \
-	mkdir -p $(basedir)/screens/$(defscr)/tags/2; \
-	mkdir -p $(basedir)/screens/$(defscr)/tags/3; \
+	if [ ! -d $(basedir)/screens/$(defscr)/tags/0 ]; then \
+		mkdir -p $(basedir)/screens/$(defscr)/tags/0; \
+		mkdir -p $(basedir)/screens/$(defscr)/tags/1; \
+		mkdir -p $(basedir)/screens/$(defscr)/tags/2; \
+		mkdir -p $(basedir)/screens/$(defscr)/tags/3; \
+	fi; \
 	touch $(basedir)/panel/top; \
 	cp -v etc/xinitrc $(homedir)/.xinitrc-fwm; \
 	printf "$(note)"; \
