@@ -996,8 +996,8 @@ static void update_dock(pid_t pid, char *msg)
 		len = sizeof(e.data.data8) - 1;
 
 	memcpy(e.data.data8, msg, len);
-	xcb_send_event(dpy, 0, cli->win, XCB_EVENT_MASK_NO_EVENT,
-		       (const char *) &e);
+	xcb_send_event_checked(dpy, 0, cli->win, XCB_EVENT_MASK_NO_EVENT,
+			       (const char *) &e);
 	xcb_flush(dpy);
 
 	ii("win 0x%x message '%s' len %zu\n", cli->win, msg, len);
@@ -1017,7 +1017,7 @@ static void ping_window(xcb_window_t win, xcb_timestamp_t time)
 	e.data.data32[2] = win;
 
 	ii("> ping win 0x%x time %u (%d)\n", win, time, a_ping);
-	xcb_send_event(dpy, 0, win, XCB_EVENT_MASK_NO_EVENT, (const char *) &e);
+	xcb_send_event_checked(dpy, 0, win, XCB_EVENT_MASK_NO_EVENT, (const char *) &e);
 	xcb_flush(dpy);
 }
 #endif
@@ -1441,7 +1441,7 @@ static void hide_toolbox()
 	toolbox.visible = 0;
 
 	if (toolbox.win != XCB_WINDOW_NONE)
-		xcb_unmap_window(dpy, toolbox.win);
+		xcb_unmap_window_checked(dpy, toolbox.win);
 }
 
 static void draw_toolbox(const char *str, uint8_t len)
@@ -1474,7 +1474,7 @@ static void show_toolbox(struct client *cli)
 	raise_window(toolbox.win);
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	xcb_configure_window(dpy, toolbox.win, mask, val);
-	xcb_map_window(dpy, toolbox.win);
+	xcb_map_window_checked(dpy, toolbox.win);
 
 	if (motion_cli && (motion_cli->flags & CLI_FLG_MOVE)) {
 		str = BTN_MOVE;
@@ -1660,7 +1660,7 @@ static void show_hintbox(uint8_t pos)
 	if (hintbox_pos_ != pos) {
 		uint32_t mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 		xcb_configure_window(dpy, toolbox.win, mask, val);
-		xcb_map_window(dpy, toolbox.win);
+		xcb_map_window_checked(dpy, toolbox.win);
 		draw_hintbox(x, y, w, h);
 	}
 
@@ -2390,7 +2390,7 @@ static void show_toolbar(struct arg *arg)
 
 	ii("toolbar 0x%x on scr %d, tag %s\n", toolbar.panel.win,
 	   toolbar.scr->id, toolbar.scr->tag->name);
-	xcb_map_window(dpy, toolbar.panel.win);
+	xcb_map_window_checked(dpy, toolbar.panel.win);
 	draw_toolbar();
 	toolbar.title_x = toolbar.scr->items[PANEL_AREA_TITLE].x;
 	toolbar.scr->items[PANEL_AREA_TITLE].x = toolbar.x + toolbar.panel.w;
@@ -3183,7 +3183,7 @@ static void add_dock(struct client *cli, uint8_t bw)
 
 	arrange_dock(cli->scr);
 	raise_window(cli->win);
-	xcb_map_window(dpy, cli->win);
+	xcb_map_window_checked(dpy, cli->win);
 	xcb_flush(dpy);
 }
 
@@ -4175,7 +4175,7 @@ static void init_panel(struct screen *scr)
 	val[0] = val[1] = color2int(NORMAL_BG);
 	xcb_create_gc(dpy, scr->panel.gc, scr->panel.win, mask, val);
 
-	xcb_map_window(dpy, scr->panel.win);
+	xcb_map_window_checked(dpy, scr->panel.win);
 
 	scr->panel.draw = XftDrawCreate(xdpy, scr->panel.win,
 					DefaultVisual(xdpy, xscr),
@@ -4197,7 +4197,7 @@ static void tray_notify(xcb_atom_t atom)
 	e.data.data32[1] = atom;
 	e.data.data32[2] = defscr->panel.win;
 
-	xcb_send_event(dpy, 0, rootscr->root, 0xffffff, (void *) &e);
+	xcb_send_event_checked(dpy, 0, rootscr->root, 0xffffff, (void *) &e);
 }
 
 static void init_tray(void)
