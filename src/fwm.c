@@ -73,6 +73,10 @@ typedef uint8_t strlen_t;
 #define WIN_HEIGHT_MIN 10
 #endif
 
+#define WIN_FLG_SCAN (1 << 0)
+#define WIN_FLG_TRAY (1 << 1)
+#define WIN_FLG_USER (1 << 2)
+
 #define CLI_FLG_DOCK (1 << 0)
 #define CLI_FLG_TRAY (1 << 1)
 #define CLI_FLG_BORDER (1 << 2)
@@ -85,7 +89,6 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_MOVE (1 << 9)
 #define CLI_FLG_FULLSCREEN (1 << 10)
 #define CLI_FLG_POPUP (1 << 11)
-#define CLI_FLG_IGNORED (1 << 12)
 #define CLI_FLG_LANCHOR (1 << 13)
 #define CLI_FLG_RANCHOR (1 << 14)
 #define CLI_FLG_LDOCK (1 << 15)
@@ -301,6 +304,7 @@ struct client {
 	uint8_t div; /* for position calculation */
 	uint16_t inc; /* window size increment */
 	xcb_window_t win;
+	xcb_window_t leader;
 	pid_t pid;
 	struct screen *scr;
 	struct tag *tag;
@@ -315,6 +319,15 @@ struct client {
 #define glob2client(item) list_entry(item, struct client, list)
 
 struct list_head clients; /* keep track of all clients */
+
+struct config {
+	xcb_window_t win;
+	struct list_head head;
+};
+
+#define list2cfg(item) list_entry(item, struct config, head)
+
+struct list_head configs; /* keep track of configured but not mapped windows */
 
 /* config */
 
@@ -898,7 +911,7 @@ static void store_client(struct client *cli, uint8_t clean)
 		clean = 1;
 	} else if (!cli->scr || !cli->tag) {
 		clean = 1;
-	} else if (cli->flags & (CLI_FLG_POPUP | CLI_FLG_IGNORED)) {
+	} else if (cli->flags & CLI_FLG_POPUP) {
 		return;
 	}
 
@@ -1342,8 +1355,8 @@ static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
 	xcb_configure_window_checked(dpy, cli->win, mask, val);
 
-	dd("scr %d, cli %p, win 0x%x, geo %ux%u+%d+%d", cli->scr->id, cli,
-	   cli->win, cli->w, cli->h, cli->x, cli->y);
+	dd("win %#x new geo %ux%u+%d+%d scr %d cli %p\n", cli->win, cli->w,
+	   cli->h, cli->x, cli->y, cli->scr->id, cli);
 }
 
 static void move_toolbox(struct client *cli)
@@ -1421,7 +1434,9 @@ static int find_toolbox(struct client *cli, uint32_t *xy)
 		xy[1] = cli->y + cli->h - d - 2 * BORDER_WIDTH;
 		dd("BOT LEFT is OK win 0x%x\n", cli->win);
 	} else {
-		ww("win 0x%x is out of view\n", cli->win);
+		ww("win 0x%x geo %ux%u+%d+%d scr %u tag '%s' is out of view\n",
+		   cli->win, cli->x, cli->y, cli->w, cli->h, cli->scr->id,
+		   cli->scr->tag->name);
 
 		if (window_status(cli->win) != WIN_STATUS_UNKNOWN) {
 			client_moveresize(cli, 0, 0, cli->w, cli->h);
@@ -2543,7 +2558,7 @@ static void make_grid(struct arg *arg)
 
 		if (tag->anchor == cli)
 			continue;
-		else if (cli->flags & (CLI_FLG_IGNORED | CLI_FLG_POPUP))
+		else if (cli->flags & CLI_FLG_POPUP)
 			continue;
 		else if (window_status(cli->win) == WIN_STATUS_VISIBLE)
 			n++;
@@ -2606,7 +2621,7 @@ static void make_grid(struct arg *arg)
 
 		if (tag->anchor == cli)
 			continue;
-		else if (cli->flags & (CLI_FLG_IGNORED | CLI_FLG_POPUP))
+		else if (cli->flags & CLI_FLG_POPUP)
 			continue;
 		if (window_status(cli->win) != WIN_STATUS_VISIBLE)
 			continue;
@@ -2865,39 +2880,6 @@ static void prev_window(unused(struct arg *arg))
 	switch_window(curscr, DIR_PREV);
 }
 
-static void raise_client(struct arg *arg)
-{
-	if (!arg->cli) {
-		if ((arg->cli = front_client(curscr->tag)))
-			unfocus_window(arg->cli->win);
-
-		if (!(arg->cli = pointer2cli()))
-			return;
-	}
-
-	if (curscr->tag->front)
-		unfocus_window(curscr->tag->front->win);
-
-	if (curscr->tag->visited)
-		unfocus_window(curscr->tag->visited->win);
-
-	curscr->tag->visited = arg->cli;
-	curscr->tag->front = arg->cli;
-	raise_window(arg->cli->win);
-	focus_window(arg->cli->win);
-	timestamp(arg->cli);
-
-	if (!(curscr->flags & SCR_FLG_SWITCH_WINDOW))
-		resort_client(arg->cli);
-
-	store_client(arg->cli, 0);
-
-	if (arg->kmap && arg->kmap->arg == 1)
-		toolbox.visible ? hide_toolbox() : show_toolbox(arg->cli);
-	else
-		show_toolbox(arg->cli);
-}
-
 static void show_windows(struct tag *tag, uint8_t focus)
 {
 	struct arg arg;
@@ -2917,7 +2899,6 @@ static void show_windows(struct tag *tag, uint8_t focus)
 	}
 
 	if (!focus || !(arg.cli = front_client(tag)) ||
-	    (arg.cli->flags & CLI_FLG_IGNORED) ||
 	    window_status(arg.cli->win) != WIN_STATUS_VISIBLE) {
 		focus_root();
 		return;
@@ -3209,7 +3190,7 @@ static void del_window(xcb_window_t win)
 	scr = curscr;
 
 	if (!(cli = win2cli(win))) {
-		ii("unmanaged win 0x%x\n", win);
+		ii("deleted unmanaged win 0x%x\n", win);
 		xcb_unmap_subwindows_checked(dpy, win);
 		goto flush;
 	}
@@ -3259,8 +3240,27 @@ static uint32_t window_exclusive(xcb_window_t win)
 	return crc;
 }
 
-static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
+static void map_window(xcb_window_t win)
 {
+	xcb_get_geometry_reply_t *g;
+
+	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
+
+	if (g) {
+		warp_pointer(win, g->width / 2, g->height / 2);
+		ii("map win %#x geo %ux%u+%d+%d\n", win, g->width, g->height,
+		   g->x, g->y);
+	}
+
+	xcb_map_window_checked(dpy, win);
+	raise_window(win);
+	focus_window(win);
+	xcb_flush(dpy);
+}
+
+static struct client *add_window(xcb_window_t win, uint8_t winflags)
+{
+	struct list_head *cur, *tmp;
 	uint32_t flags;
 	struct tag *tag;
 	struct screen *scr;
@@ -3320,7 +3320,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	else if (special(win, "bottom-right", sizeof("bottom-right")))
 		flags |= CLI_FLG_BOTRIGHT;
 
-	if (tray_window(win) || tray) {
+	if (tray_window(win) || winflags & WIN_FLG_TRAY) {
 		ii("win 0x%x provides embed info\n", win);
 		flags |= CLI_FLG_TRAY;
 	}
@@ -3350,15 +3350,17 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 
 	leader = window_leader(win);
 
-	if (leader != XCB_WINDOW_NONE && !win2cli(leader)) {
+	if (leader != XCB_WINDOW_NONE && !win2cli(leader) &&
+	    !(winflags & WIN_FLG_USER)) {
 		ww("ignore win 0x%x with hidden leader 0x%x\n", win, leader);
-		flags |= CLI_FLG_IGNORED;
+		map_window(win);
+		goto out;
 	}
 
 	scr = NULL;
 	tag = NULL;
 
-	if (scan && !(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
+	if ((winflags & WIN_FLG_SCAN) && !(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
 		restore_window(win, &scr, &tag);
 
 	if (!scr && !(scr = pointer2scr())) {
@@ -3387,9 +3389,6 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 
 	if (!(flags & CLI_FLG_TRAY) && a->override_redirect) {
 		ww("ignore redirected window 0x%x\n", win);
-		xcb_change_property_checked(dpy, XCB_PROP_MODE_APPEND,
-					    rootscr->root, a_client_list,
-					    XCB_ATOM_WINDOW, 32, 1, &win);
 		xcb_flush(dpy);
 		goto out;
 	}
@@ -3409,6 +3408,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	cli->inc = 0;
 	cli->scr = scr;
 	cli->win = win;
+	cli->leader = leader;
 	cli->crc = crc;
 	cli->flags = flags;
 	cli->pid = win2pid(win);
@@ -3422,7 +3422,8 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 	CLI_FLG_DOCK\
 )
 
-	if (!scan && g->width < scr->w / 2 && g->height < scr->h / 2 &&
+	if (!(winflags & WIN_FLG_SCAN) &&
+	    g->width < scr->w / 2 && g->height < scr->h / 2 &&
 	    !(flags & DONT_CENTER)) {
 		cli->flags |= CLI_FLG_CENTER; /* show such windows in center */
 	}
@@ -3451,7 +3452,7 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		add_dock(cli, g->border_width);
 		ignore_panel = 1; /* do not handle panel visibility */
 		goto out;
-	} else if (!scan) {
+	} else if (!(winflags & WIN_FLG_SCAN)) {
 		g->x += scr->x;
 		g->y += scr->y;
 	}
@@ -3494,15 +3495,27 @@ static struct client *add_window(xcb_window_t win, uint8_t tray, uint8_t scan)
 		center_pointer(cli);
 	}
 
-	ii("screen %d tag '%s' win 0x%x pid %d geo %ux%u%+d%+d cli %p\n",
-	   scr->id, cli->tag->name, cli->win, cli->pid, cli->w, cli->h,
-	   cli->x, cli->y, cli);
+	list_walk_safe(cur, tmp, &configs) {
+		struct config *cfg = list2cfg(cur);
 
-	if (scan) {
+		if (!cfg || !cfg->win || cfg->win != cli->win)
+			continue;
+
+		ii("remove win %#x from config list\n", cli->win);
+		list_del(&cfg->head);
+		free(cfg);
+	}
+
+	ii("added win %#x scr %d tag '%s' pid %d geo %ux%u%+d%+d cli %p leader %#x\n",
+	   cli->win, scr->id, cli->tag->name, cli->pid, cli->w, cli->h,
+	   cli->x, cli->y, cli, cli->leader);
+
+	if (winflags & WIN_FLG_SCAN) {
 		timestamp(cli);
 		if (cli->tag == curscr->tag)
 			curscr->tag->front = cli;
-	} else if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)) && !scan) {
+	} else if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)) &&
+		   !(winflags & WIN_FLG_SCAN)) {
 		struct arg arg = { .cli = cli, .kmap = NULL, };
 		raise_client(&arg);
 	}
@@ -3513,6 +3526,44 @@ out:
 	free(a);
 	free(g);
 	return cli;
+}
+
+static void raise_client(struct arg *arg)
+{
+	if (!arg->cli && arg->kmap) {
+		xcb_window_t win = pointer2win();
+		if (win)
+			add_window(win, WIN_FLG_USER);
+		return;
+	} else if (!arg->cli) {
+		if ((arg->cli = front_client(curscr->tag)))
+			unfocus_window(arg->cli->win);
+
+		if (!(arg->cli = pointer2cli()))
+			return;
+	}
+
+	if (curscr->tag->front)
+		unfocus_window(curscr->tag->front->win);
+
+	if (curscr->tag->visited)
+		unfocus_window(curscr->tag->visited->win);
+
+	curscr->tag->visited = arg->cli;
+	curscr->tag->front = arg->cli;
+	raise_window(arg->cli->win);
+	focus_window(arg->cli->win);
+	timestamp(arg->cli);
+
+	if (!(curscr->flags & SCR_FLG_SWITCH_WINDOW))
+		resort_client(arg->cli);
+
+	store_client(arg->cli, 0);
+
+	if (arg->kmap && arg->kmap->arg == 1)
+		toolbox.visible ? hide_toolbox() : show_toolbox(arg->cli);
+	else
+		show_toolbox(arg->cli);
 }
 
 static int screen_panel(xcb_window_t win)
@@ -3568,7 +3619,7 @@ static void scan_clients(void)
 		else if (wins[i] == toolbar.panel.win)
 			continue;
 
-		add_window(wins[i], 0, 1);
+		add_window(wins[i], WIN_FLG_SCAN | WIN_FLG_USER);
 		/* gotta do this otherwise empty windows are being shown
 		 * in certain situations e.g. when adding systray clients
 		 */
@@ -3826,6 +3877,7 @@ static int init_tags(struct screen *scr)
 	list_init(&scr->tags);
 	list_init(&scr->dock);
 	list_init(&clients);
+	list_init(&configs);
 
 	pos = scr->items[PANEL_AREA_TAGS].x;
 
@@ -4511,11 +4563,6 @@ static void focus_window_req(xcb_window_t win)
 		if (arg.cli->win == win) {
 			struct screen *scr;
 
-			if (arg.cli->flags & CLI_FLG_IGNORED) {
-				ww("win 0x%x is ignored\n", arg.cli->win);
-				return;
-			}
-
 			if (!(scr = cli2scr(arg.cli))) {
 				ww("cannot focus offscreen win 0x%x\n", win);
 				return;
@@ -4644,11 +4691,6 @@ static void dump_clients(uint8_t all)
 		enum winstatus status;
 		const char *tag;
 		char current;
-
-		if (cli->flags & CLI_FLG_IGNORED) {
-			ww("win 0x%x is ignored\n", cli->win);
-			continue;
-		}
 
 		cli->win == win ? (current = '*') : (current = ' ');
 		status = window_status(cli->win);
@@ -5086,7 +5128,7 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	trace_screen_metrics(curscr);
 	cli = win2cli(e->child); /* window is being moved so search in global list */
 
-	if (cli && cli->flags & (CLI_FLG_DOCK | CLI_FLG_TRAY | CLI_FLG_IGNORED)) {
+	if (cli && cli->flags & (CLI_FLG_DOCK | CLI_FLG_TRAY)) {
 		ww("win 0x%x is not moveable\n", cli->win);
 		return;
 	} else if (curscr && curscr->panel.win == e->child) {
@@ -5253,9 +5295,26 @@ static void handle_visibility(xcb_window_t win)
 
 static void handle_unmap_notify(xcb_unmap_notify_event_t *e)
 {
+	struct list_head *cur;
+	xcb_window_t leader;
+
 	if (window_status(e->window) == WIN_STATUS_UNKNOWN) {
 		ii("window 0x%x gone\n", e->window);
 		del_window(e->window);
+		return;
+	}
+
+	if (!(leader = window_leader(e->window)))
+		return;
+
+	list_walk(cur, &configs) {
+		struct config *cfg = list2cfg(cur);
+
+		if (!cfg || !cfg->win || window_leader(cfg->win) != leader)
+			continue;
+
+		add_window(cfg->win, WIN_FLG_USER);
+		break;
 	}
 }
 
@@ -5311,7 +5370,6 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	if (!cli) {
 		focus_window(e->event);
 	} else {
-		cli->flags &= ~CLI_FLG_IGNORED;
 		focus_window(cli->win);
 		resort_client(cli);
 	}
@@ -5428,7 +5486,7 @@ static void tray_add(xcb_window_t win)
 	ii("%s: win 0x%x\n", __func__, win);
 
 	if (!(cli = win2cli(win))) {
-		if (!(cli = add_window(win, 1, 0))) {
+		if (!(cli = add_window(win, WIN_FLG_TRAY))) {
 			ee("add_window(0x%x) failed\n", win);
 			return;
 		}
@@ -5539,6 +5597,7 @@ static void print_configure_request(xcb_configure_request_event_t *e)
 
 static void handle_configure_request(xcb_configure_request_event_t *e)
 {
+	struct config *cfg;
 	struct list_head *cur;
 	struct client *cli = NULL;
 	uint32_t val[7] = { 0 };
@@ -5572,7 +5631,7 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 		mask |= XCB_CONFIG_WINDOW_X;
 	}
 	if (e->value_mask & XCB_CONFIG_WINDOW_Y || e->y != y) {
-		val[i++] = e->y;
+		val[i++] = y;
 		mask |= XCB_CONFIG_WINDOW_Y;
 	}
 	if (e->value_mask & XCB_CONFIG_WINDOW_WIDTH || e->width != w) {
@@ -5595,10 +5654,21 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 		mask |= XCB_CONFIG_WINDOW_SIBLING;
 	}
 	if (e->value_mask & XCB_CONFIG_WINDOW_STACK_MODE) {
-		val[i++] = e->stack_mode;
-		mask |= XCB_CONFIG_WINDOW_STACK_MODE;
+		add_window(e->window, WIN_FLG_USER);
+		return;
 	}
 
+	if (!(cfg = calloc(1, sizeof(*cfg)))) {
+		ee("failed to track win %#x\n", e->window);
+	} else {
+		cfg->win = e->window;
+		list_add(&configs, &cfg->head);
+	}
+
+	tt("config win %#x geo orig %ux%u+%d+%d ? new %ux%u+%d+%d\n",
+	   e->window,
+	   e->width, e->height, e->x, e->y,
+	   w, h, x, y);
 	xcb_configure_window_checked(dpy, e->window, mask, val);
 	xcb_flush(dpy);
 }
@@ -5725,7 +5795,7 @@ static int handle_events(void)
 		te("XCB_MAP_REQUEST: parent 0x%x, win 0x%x\n",
 		   ((xcb_map_request_event_t *) e)->parent,
 		   ((xcb_map_request_event_t *) e)->window);
-		add_window(((xcb_map_notify_event_t *) e)->window, 0, 0);
+		add_window(((xcb_map_notify_event_t *) e)->window, 0);
 		break;
 	case XCB_PROPERTY_NOTIFY:
 		te("XCB_PROPERTY_NOTIFY: win 0x%x, atom %d\n",
