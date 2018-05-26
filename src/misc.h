@@ -68,8 +68,14 @@
 }
 
 #ifdef DEBUG
-#define dd(fmt, ...) \
-	printf("(dd) " fmt " | %s:%d\n", ##__VA_ARGS__, __func__, __LINE__)
+#define VERBOSE
+#define TRACE
+#define TRACE_ATOM
+#define TRACE_EVENTS
+#define dd(fmt, ...) {\
+	printf("(dd) " fmt, ##__VA_ARGS__);\
+	printf("(dd) ^^^ %s:%d\n", __func__, __LINE__);\
+}
 #else
 #define dd(fmt, ...) do {} while(0)
 #endif
