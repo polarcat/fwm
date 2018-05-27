@@ -1434,17 +1434,9 @@ static int find_toolbox(struct client *cli, uint32_t *xy)
 		xy[1] = cli->y + cli->h - d - 2 * BORDER_WIDTH;
 		dd("BOT LEFT is OK win %#x\n", cli->win);
 	} else {
-		ww("win %#x geo %ux%u+%d+%d scr %u tag '%s' is out of view\n",
+		ww("no toolbox for win %#x geo %ux%u+%d+%d scr %u tag '%s'\n",
 		   cli->win, cli->x, cli->y, cli->w, cli->h, cli->scr->id,
 		   cli->scr->tag->name);
-
-		if (window_status(cli->win) != WIN_STATUS_UNKNOWN) {
-			client_moveresize(cli, 0, 0, cli->w, cli->h);
-		} else {
-			ii("cli %p win %#x has gone\n", cli, cli->win);
-			ww("FIXME: orphaned client?\n");
-		}
-
 		return 0;
 	}
 
