@@ -3291,9 +3291,8 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	if (!g->depth && !a->colormap) {
 		tt("win %#x, root %#x, colormap=%#x, class=%u, depth=%u\n", win,
 		   g->root, a->colormap, a->_class, g->depth);
-		xcb_destroy_window_checked(dpy, win);
 		store_window(win, NULL, 0, 1);
-		ww("zombie window %#x destroyed\n", win);
+		ww("ignore window %#x with unknown colormap\n", win);
 		goto out;
 	}
 
