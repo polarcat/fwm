@@ -9,7 +9,7 @@ out += %%fwm ALL=PASSWD: ALL\n
 out += %%fwm ALL=NOPASSWD: /usr/sbin/pm-hibernate, /usr/sbin/pm-suspend\n
 out += %%fwm ALL=NOPASSWD: /sbin/wpa_cli scan, /sbin/wpa_cli scan_results\n
 out += %%fwm ALL=NOPASSWD: /usr/sbin/iwlist *\n
-out += %%fwm ALL=NOPASSWD: /sbin/brightness *\n
+out += %%fwm ALL=NOPASSWD: $(bin)/brightness *\n
 out += %%fwm ALL=NOPASSWD: /sbin/ifup *, /sbin/ifdown *\n
 out += %%fwm ALL=NOPASSWD: $(bin)/iwup *, $(bin)/iwadd *, $(bin)/iwdel *\n
 
