@@ -26,7 +26,7 @@ setup()
 
 	startmenu -b -a -d $out_ |
 	while read icon ssid key; do
-		echo "$1 $key" | sudo iwadd | while read error; do
+		echo "$1 $key" | jedi iwadd | while read error; do
 			err=1
 
 			case $error in
@@ -50,12 +50,12 @@ add()
 	printf "\a\tscanning...\n" > $out_
 	showinfo -d $out_ &
 
-	run sudo iwlist wlan0 scan
-	run sudo wpa_cli scan
+	run jedi iwlist wlan0 scan
+	run jedi wpa_cli scan
 
 	printf "\a\t\n" > $out_
 
-	sudo wpa_cli scan_results | while read bssid freq sig flags ssid; do
+	jedi wpa_cli scan_results | while read bssid freq sig flags ssid; do
 		case $bssid in
 		OK|Selected|bssid) continue;;
 		esac
@@ -113,7 +113,7 @@ connect()
 	printf "\a\tconnecting to $ssid ...\n" > $inf_
 	showinfo -d $inf_ &
 
-	sudo iwup $1 | while read status message; do
+	jedi iwup $1 | while read status message; do
 		if [ -z "$message" ]; then
 			printf "\a\t$1: unknown status\n" > $out_
 			showinfo -d $out_
@@ -160,7 +160,7 @@ manage()
 		if [ -z "$ssid" ]; then
 			break
 		elif [ "$1" = "del" ]; then
-			sudo iwdel $ssid
+			jedi iwdel $ssid
 		else
 			connect $ssid
 		fi
@@ -239,7 +239,7 @@ disconnect()
 	startmenu -d $out_ |
 	while read icon ssid dev; do
 		if [ -n "$dev" ]; then
-			sudo ifdown $dev
+			jedi ifdown $dev
 		fi
 		break
 	done

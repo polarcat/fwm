@@ -26,11 +26,11 @@ connect()
 
 	while read iface dest; do
 		if [ "$iface" = "$iface_" ]; then
-			sudo ifdown $iface_
+			jedi ifdown $iface_
 		fi
 	done < /proc/net/route
 
-	sudo ifup $iface_ 2>&1 | while read line; do
+	jedi ifup $iface_ 2>&1 | while read line; do
 		echo "$line" >> $out_
 	done
 
@@ -45,7 +45,7 @@ info()
 
 disconnect()
 {
-	sudo ifdown $iface_
+	jedi ifdown $iface_
 }
 
 printf "\a\t\t\n" > $out_

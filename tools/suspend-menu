@@ -19,7 +19,7 @@ suspend()
 #	xdotool key Alt+Control+F1
 	xscreensaver-command --lock
 #	sleep 2
-	sudo pm-suspend >$log_ 2>&1
+	jedi pm-suspend >$log_ 2>&1
 }
 
 if [ ! -f $out_ ]; then

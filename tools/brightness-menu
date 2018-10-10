@@ -25,7 +25,7 @@ brightness()
 		level=$1
 	fi
 
-	sudo brightness $level
+	jedi brightness $level
 }
 
 val_=10

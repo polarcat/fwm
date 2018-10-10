@@ -170,3 +170,5 @@ showinfo()
 	colors="-0 $normfg_ -1 $normbg_ -2 $normfg_ -3 $normbg_"
 	showmenu $colors $@ >/dev/null
 }
+
+jedi() { sudo -n $@; }
