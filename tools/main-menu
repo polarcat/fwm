@@ -35,7 +35,7 @@ startmenu -b -d $out_ | while read icon item; do
 	"terminal"*) exec xterm &;;
 	"firefox"*) exec firefox &;;
 	"chrome"*) exec chromium-browser &;;
-	"files"*) exec pcmanfm &;;
+	"files"*) exec spacefm &;;
 	"clipboard"*) exec clip-menu &;;
 	"applications"*) exec apps-menu &;;
 	"windows"*) exec clients-menu &;;
