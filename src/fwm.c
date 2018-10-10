@@ -421,6 +421,10 @@ static struct keymap kmap_def[] = {
 	  show_toolbar, },
 	{ MOD, XK_F2, 0, "mod_f2", "flag window",
 	  flag_window, },
+	{ MOD, XK_Delete, 0, "mod_delete", "retag next",
+	  retag_client, DIR_NEXT, },
+	{ MOD, XK_Insert, 0, "mod_insert", "retag prev",
+	  retag_client, DIR_PREV, },
 };
 
 #define list2keymap(item) list_entry(item, struct keymap, head)
