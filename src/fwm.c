@@ -3603,7 +3603,7 @@ static void hide_leader(xcb_window_t win)
 
 static void scan_clients(uint8_t rescan)
 {
-	int i, n;
+	int i, n, nn;
 	xcb_query_tree_cookie_t c;
 	xcb_query_tree_reply_t *tree;
 	xcb_window_t *wins;
@@ -3616,7 +3616,7 @@ static void scan_clients(uint8_t rescan)
 	if (!tree)
 		panic("xcb_query_tree_reply() failed\n");
 
-	n = xcb_query_tree_children_length(tree);
+	nn = xcb_query_tree_children_length(tree);
 	wins = xcb_query_tree_children(tree);
 
 	if (rescan)
@@ -3624,10 +3624,9 @@ static void scan_clients(uint8_t rescan)
 	else
 		flags = WIN_FLG_SCAN | WIN_FLG_USER;
 
-
 	/* map clients onto the current screen */
-	ii("%d clients found\n", n);
-	for (i = 0; i < n; i++) {
+
+	for (i = 0, n = 0; i < nn; i++) {
 		if (screen_panel(wins[i]))
 			continue;
 		else if (wins[i] == toolbox.win)
@@ -3638,6 +3637,7 @@ static void scan_clients(uint8_t rescan)
 			continue;
 
 		add_window(wins[i], flags);
+		n++;
 
 		if (rescan)
 			continue;
@@ -3647,6 +3647,8 @@ static void scan_clients(uint8_t rescan)
 		 */
 		hide_leader(wins[i]);
 	}
+
+	ii("%d/%d windows added\n", n, nn);
 
 	if (!rescan && (cli = front_client(curscr->tag))) {
 		struct arg arg = { .cli = cli, .kmap = NULL, };
