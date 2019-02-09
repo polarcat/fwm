@@ -626,6 +626,9 @@ static struct client *front_client(struct tag *tag)
 	return list2cli(tag->clients.prev);
 }
 
+#ifndef TRACE
+#define trace_tag_windows(tag) ;
+#else
 #define trace_tag_windows(tag) {\
 	struct list_head *cur__;\
 	struct client *front__ = front_client(tag);\
@@ -641,6 +644,7 @@ static struct client *front_client(struct tag *tag)
 		}\
 	}\
 }
+#endif
 
 static void text_exts(const char *text, int len, uint16_t *w, uint16_t *h,
 		      XftFont *font)
@@ -878,7 +882,7 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 		struct tag *tmp = list2tag(cur);
 		if (data[1] == tmp->id) {
 			*tag = tmp;
-			ii("restore win %#x scr %d tag %d '%s'\n", win,
+			tt("restore win %#x scr %d tag %d '%s'\n", win,
 			   (*scr)->id, (*tag)->id, (*tag)->name);
 			return;
 		}
@@ -895,7 +899,7 @@ static void store_window(xcb_window_t win, uint8_t *data, uint8_t size, uint8_t 
 	if (clean) {
 		errno = 0;
 		unlink(path);
-		ii("clean %s, errno=%d\n", path, errno);
+		tt("clean %s, errno=%d\n", path, errno);
 		return;
 	}
 
@@ -923,12 +927,12 @@ static void store_client(struct client *cli, uint8_t clean)
 
 	if (clean) {
 		store_window(cli->win, NULL, 0, clean);
-		ii("clean win %#x\n", cli->win);
+		tt("clean win %#x\n", cli->win);
 	} else {
 		data[0] = cli->scr->id;
 		data[1] = cli->tag->id;
 		store_window(cli->win, data, sizeof(data), clean);
-		ii("store win %#x scr %d tag %d '%s'\n", cli->win,
+		tt("store win %#x scr %d tag %d '%s'\n", cli->win,
 		   cli->scr->id, cli->tag->id, cli->tag->name);
 	}
 }
@@ -2458,10 +2462,10 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 	hide_toolbar();
 
 	if ((arg.cli = pointer2cli())) {
-		ii("scr %u tag '%s' prev cli %p, win %#x (pointer)\n",
+		tt("scr %u tag '%s' prev cli %p, win %#x (pointer)\n",
 		   scr->id, scr->tag->name, arg.cli, arg.cli->win);
 	} else if ((arg.cli = front_client(scr->tag))) {
-		ii("scr %u tag '%s' prev cli %p, win %#x\n",
+		tt("scr %u tag '%s' prev cli %p, win %#x\n",
 		   scr->id, scr->tag->name, arg.cli, arg.cli->win);
 	} else {
 		ee("no front windows found\n");
@@ -2480,7 +2484,7 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 	if (!arg.cli)
 		return NULL;
 
-	ii("scr %u tag '%s' next cli %p, win %#x\n",
+	tt("scr %u tag '%s' next cli %p, win %#x\n",
 	   scr->id, scr->tag->name, arg.cli, arg.cli->win);
 
 	arg.kmap = NULL;
@@ -2741,7 +2745,7 @@ static void place_window(struct arg *arg)
 	else
 		pos = (enum winpos) arg->cli->pos;
 
-	ii("scr %d, win %#x, where %d, div %d\n", curscr->id, arg->cli->win,
+	tt("scr %d, win %#x, where %d, div %d\n", curscr->id, arg->cli->win,
 	   pos, arg->cli->div);
 
 	arg->cli->flags &= ~CLI_FLG_CENTER;
@@ -3024,7 +3028,7 @@ static struct tag *lookup_tag(struct screen *scr, xcb_window_t win)
 		return NULL;
 	}
 
-	ii("scr %d win %#x class '%s'\n", scr->id, win, class.str);
+	tt("scr %d win %#x class '%s'\n", scr->id, win, class.str);
 
 	tag = NULL;
 	class.len += homelen + sizeof("/screens/255/tags/255/");
@@ -3308,7 +3312,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		tt("win %#x, root %#x, colormap=%#x, class=%u, depth=%u\n", win,
 		   g->root, a->colormap, a->_class, g->depth);
 		store_window(win, NULL, 0, 1);
-		ww("ignore window %#x with unknown colormap\n", win);
+		tt("ignore window %#x with unknown colormap\n", win);
 		goto out;
 	}
 
@@ -3346,7 +3350,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		/* FIXME: current assumption is that window is not supposed
 		 * to be shown
 		 */
-		ww("ignore tiny window %#x geo %ux%u%+d%+d\n", win, g->width,
+		tt("ignore tiny window %#x geo %ux%u%+d%+d\n", win, g->width,
 		   g->height, g->x, g->y);
 		xcb_change_property_checked(dpy, XCB_PROP_MODE_APPEND,
 					    rootscr->root, a_client_list,
@@ -3393,7 +3397,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	scr->flags &= ~SCR_FLG_SWITCH_WINDOW;
 
 	if (!(flags & CLI_FLG_TRAY) && a->override_redirect) {
-		ww("ignore redirected window %#x\n", win);
+		tt("ignore redirected window %#x\n", win);
 		xcb_flush(dpy);
 		goto out;
 	}
@@ -3506,7 +3510,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		if (!cfg || !cfg->win || cfg->win != cli->win)
 			continue;
 
-		ii("remove win %#x from config list\n", cli->win);
+		tt("remove win %#x from config list\n", cli->win);
 		list_del(&cfg->head);
 		free(cfg);
 	}
@@ -5263,7 +5267,7 @@ static void handle_key_press(xcb_key_press_event_t *e)
 		return;
 	}
 
-	ii("screen %d, event %#x, child %#x, key %#x, state %#x, pos %d,%d\n",
+	tt("screen %d, event %#x, child %#x, key %#x, state %#x, pos %d,%d\n",
 	   curscr->id, e->event, e->child,
 	   e->detail, e->state, e->root_x, e->root_y);
 
@@ -5317,7 +5321,7 @@ static void handle_unmap_notify(xcb_unmap_notify_event_t *e)
 	xcb_window_t leader;
 
 	if (window_status(e->window) == WIN_STATUS_UNKNOWN) {
-		ii("window %#x gone\n", e->window);
+		tt("window %#x gone\n", e->window);
 		del_window(e->window);
 		return;
 	}
