@@ -535,6 +535,8 @@ static uint8_t ignore_panel;
 
 static uint8_t randrbase;
 
+static void scan_clients(uint8_t rescan);
+
 /* ... and the mess begins */
 
 static void get_sprop(struct sprop *ret, xcb_window_t win,
@@ -3164,6 +3166,8 @@ static void add_dock(struct client *cli, uint8_t bw)
 	xcb_flush(dpy);
 }
 
+static uint8_t rescan_;
+
 static void del_window(xcb_window_t win)
 {
 	struct screen *scr;
@@ -3195,6 +3199,9 @@ static void del_window(xcb_window_t win)
 		del_dock(cli);
 		goto out;
 	}
+
+	if (cli->leader != XCB_WINDOW_NONE)
+		rescan_ = 1;
 
 	scr = cli2scr(cli); /* do it before client is freed */
 	free_client(&cli);
@@ -3292,6 +3299,11 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		goto out;
 	}
 
+	leader = window_leader(win);
+
+	if (leader != XCB_WINDOW_NONE)
+		rescan_ = 1;
+
 	if (!g->depth && !a->colormap) {
 		tt("win %#x, root %#x, colormap=%#x, class=%u, depth=%u\n", win,
 		   g->root, a->colormap, a->_class, g->depth);
@@ -3342,8 +3354,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		xcb_flush(dpy);
 		goto out;
 	}
-
-	leader = window_leader(win);
 
 	if (leader != XCB_WINDOW_NONE && !win2cli(leader) &&
 	    !(winflags & WIN_FLG_USER)) {
@@ -3587,13 +3597,14 @@ static void hide_leader(xcb_window_t win)
 	}
 }
 
-static void scan_clients(void)
+static void scan_clients(uint8_t rescan)
 {
 	int i, n;
 	xcb_query_tree_cookie_t c;
 	xcb_query_tree_reply_t *tree;
 	xcb_window_t *wins;
 	struct client *cli;
+	uint8_t flags;
 
 	/* walk through windows tree */
 	c = xcb_query_tree(dpy, rootscr->root);
@@ -3604,6 +3615,12 @@ static void scan_clients(void)
 	n = xcb_query_tree_children_length(tree);
 	wins = xcb_query_tree_children(tree);
 
+	if (rescan)
+		flags = WIN_FLG_USER;
+	else
+		flags = WIN_FLG_SCAN | WIN_FLG_USER;
+
+
 	/* map clients onto the current screen */
 	ii("%d clients found\n", n);
 	for (i = 0; i < n; i++) {
@@ -3613,15 +3630,21 @@ static void scan_clients(void)
 			continue;
 		else if (wins[i] == toolbar.panel.win)
 			continue;
+		else if (rescan && win2cli(wins[i]))
+			continue;
 
-		add_window(wins[i], WIN_FLG_SCAN | WIN_FLG_USER);
+		add_window(wins[i], flags);
+
+		if (rescan)
+			continue;
+
 		/* gotta do this otherwise empty windows are being shown
 		 * in certain situations e.g. when adding systray clients
 		 */
 		hide_leader(wins[i]);
 	}
 
-	if ((cli = front_client(curscr->tag))) {
+	if (!rescan && (cli = front_client(curscr->tag))) {
 		struct arg arg = { .cli = cli, .kmap = NULL, };
 		raise_client(&arg);
 		center_pointer(cli);
@@ -3976,7 +3999,7 @@ static void refresh_panel(uint8_t id)
 		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
 		hide_windows(scr->tag);
 		reinit_panel(scr);
-		scan_clients();
+		scan_clients(0);
 		break;
 	}
 }
@@ -4472,7 +4495,7 @@ static void init_outputs(void)
 	init_tray();
 	init_toolbox();
 	focus_root();
-	scan_clients();
+	scan_clients(0);
 }
 
 static void load_color(const char *path, struct color *color)
@@ -6144,6 +6167,15 @@ int main()
 		if (logfile) {
 			fflush(stdout);
 			fflush(stderr);
+		}
+
+		/* FIXME: since ICCCM is not supported by intention this HACK
+		 * allows to discover clients that were created by group leaders;
+		 * for some reason xcb does not catch such events explicitly */
+
+		if (rescan_) {
+			scan_clients(1);
+			rescan_ = 0;
 		}
 	}
 
