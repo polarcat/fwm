@@ -2884,7 +2884,7 @@ static void prev_window(unused(struct arg *arg))
 
 static void show_windows(struct tag *tag, uint8_t focus)
 {
-	struct arg arg;
+	struct arg arg = {0};
 	struct list_head *cur;
 
 	print_title(curscr, XCB_WINDOW_NONE); /* empty titlebar */
