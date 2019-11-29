@@ -3224,7 +3224,7 @@ flush:
 
 static uint32_t window_exclusive(xcb_window_t win)
 {
-	uint32_t crc;
+	uint32_t crc = 0;
 	struct client *cli;
 	struct list_head *cur, *tmp;
 
