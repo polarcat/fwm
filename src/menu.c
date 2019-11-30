@@ -1304,6 +1304,7 @@ static uint8_t events(uint8_t wait)
 
 int main(int argc, char *argv[])
 {
+	uint8_t ret = 1;
 	struct pollfd pfd;
 	int fd;
 	uint32_t mask;
@@ -1330,7 +1331,7 @@ int main(int argc, char *argv[])
 
 	if (!(font1_ = load_font(font1_name_, font1_size_))) {
 		ee("XftFontOpen(%s) failed\n", font1_name_);
-		return 255;
+		goto err;
 	}
 
 	if (!(font2_ = load_font(font2_name_, font2_size_))) {
@@ -1375,11 +1376,11 @@ int main(int argc, char *argv[])
 
 	if (!draw_) {
 		ee("XftDrawCreate() failed\n");
-		return 255;
+		goto err;
 	}
 
 	if ((fd = init_menu()) < 0)
-		return 255;
+		goto err;
 
 	dd("padding %u,%u\n", x_pad_, y_pad_);
 
@@ -1432,7 +1433,7 @@ int main(int argc, char *argv[])
 		ww("xcb_key_symbols_alloc() failed\n");
 
 	if (init_xkb() < 0)
-		return 255;
+		goto err;
 
 	while (!done_)
 		events(1);
@@ -1460,5 +1461,12 @@ int main(int argc, char *argv[])
 		pfd.revents = 0;
 	}
 
-	return 0;
+	ret = 0;
+err:
+	if (font1_)
+		XftFontClose(xdpy_, font1_);
+	if (font2_)
+		XftFontClose(xdpy_, font2_);
+
+	return ret;
 }
