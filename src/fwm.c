@@ -2161,14 +2161,14 @@ static uint8_t dock_left(char *path, uint8_t offs,
 	struct stat st = {0};
 	char *file;
 
-	if (MAX_PATH - offs - sizeof("left-gravity") < len) {
+	if (MAX_PATH - offs - sizeof("left-gravity/") < len) {
 		ww("path exceeds maximum length %u\n", MAX_PATH);
 		return 0;
 	}
 
 	file = &path[offs];
 	*file = '\0';
-	file = strncat(file, "left-gravity/", sizeof("left-gravity"));
+	file = strcat(file, "left-gravity/");
 	strncat(file, name, len);
 	return (stat(path, &st) == 0 && S_ISREG(st.st_mode));
 }
