@@ -3531,6 +3531,16 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 
 	update_client_list();
 	xcb_flush(dpy);
+
+	/* workaround for some windows being not mapped at once */
+	if (!cli->pid) {
+		ww("== remap win %#x ==\n", cli->win);
+		xcb_map_window_checked(dpy, cli->win);
+		raise_window(cli->win);
+		focus_window(cli->win);
+		xcb_flush(dpy);
+	}
+
 out:
 	free(a);
 	free(g);
