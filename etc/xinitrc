@@ -3,6 +3,7 @@
 xset -b
 xsetroot -solid black -cursor_name left_ptr
 xscreensaver -no-splash &
+rm -f ~/.fwm/.session/*
 
 while :; do
 	. ~/.fwmrc

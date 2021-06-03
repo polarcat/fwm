@@ -8,6 +8,10 @@ case $PATH in
 *) export PATH=$PATH:$FWM_HOME/bin;;
 esac
 
+if [ -f $HOME/bin/xkbmap ]; then
+	$HOME/bin/xkbmap
+fi
+
 fwm
 restart-menu
 
