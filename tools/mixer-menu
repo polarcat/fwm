@@ -6,6 +6,17 @@ normbg
 normfg
 notebg
 
+if [ -f $FWM_HOME/soundrc ]; then
+	# soundrc defines custom card and mixer ids, e.g.
+	# card_=1
+	# mixer_="PGA3.1"
+	. $FWM_HOME/soundrc
+
+	if [ -n "$card_" ]; then
+		card_="-c $card_"
+	fi
+fi
+
 ifs_=$IFS
 tmp_=$FWM_HOME/tmp/volume
 out_=$tmp_/menu
@@ -21,13 +32,13 @@ mkdir -p $tmp_
 setpct() { pct_=$(($cur_ * 100 / $max_)); }
 setmax() { max_=$1; }
 setcur() { cur_=$2; }
-volume() { amixer cset "$2" "$1,$1" >/dev/null; }
+volume() { amixer $card_ cset "$2" "$1,$1" >/dev/null; }
 
 default()
 {
 	local cid="$1"
 
-	amixer cget $cid | while read line; do
+	amixer $card_ cget $cid | while read line; do
 		setmax0() { max=$1; }
 		setmax() { IFS=','; setmax0 $6; }
 		case $line in
@@ -99,13 +110,37 @@ max()
 
 # max out pcm and speaker and read master info
 
-amixer controls | while read cid; do
-	case $cid in
-	*PCM*Playback*Volume*) default "$cid" ;;
-	*Speaker*Playback*Volume*) default "$cid";;
-	*Master*Playback*Volume*) amixer cget "$cid" > $inf_;;
-	esac
+echo -n > $inf_
+cardfound_=0
+amixer $card_ controls | while read cid; do
+	if [ -n "$mixer_" ]; then
+		case $cid in
+		*"$mixer_"*Master*Playback*Volume*) amixer $card_ cget "$cid" > $inf_
+		  cardfound_=1
+		  ;;
+		esac
+	else
+		case $cid in
+		*PCM*Playback*Volume*) default "$cid"
+		  cardfound_=1
+		  ;;
+		*Speaker*Playback*Volume*) default "$cid"
+		  cardfound_=1
+		  ;;
+		*Master*Playback*Volume*) amixer $card_ cget "$cid" > $inf_
+		  cardfound_=1
+		  ;;
+		esac
+	fi
+
+	if [ $cardfound_ -eq 1 ]; then
+		break
+	fi
 done
+
+if [ ! -s $inf_ ]; then
+	exit 1
+fi
 
 # find out master playback
 
