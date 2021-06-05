@@ -5513,6 +5513,7 @@ static void handle_configure_notify(xcb_configure_notify_event_t *e)
 	}
 }
 
+#ifdef HANDLE_SYSTRAY_REQ
 static void tray_add(xcb_window_t win)
 {
 	struct client *cli;
@@ -5526,6 +5527,7 @@ static void tray_add(xcb_window_t win)
 		}
 	}
 }
+#endif
 
 #define SYSTEM_TRAY_REQUEST_DOCK 0
 #define SYSTEM_TRAY_BEGIN_MESSAGE 1
@@ -5563,9 +5565,11 @@ static void handle_client_message(xcb_client_message_event_t *e)
 		   e->data.data32[0] == a_ping) {
 		tt("pong win %#x time %u\n", e->data.data32[2],
 		   e->data.data32[1]);
+#ifdef HANDLE_SYSTRAY_REQ
 	} else if (e->type == a_systray && e->format == 32 &&
 		   e->data.data32[1] == SYSTEM_TRAY_REQUEST_DOCK) {
 		tray_add(e->data.data32[2]);
+#endif
 	} else if (e->type == a_active_win && e->format == 32) {
 		arg.cli = win2cli(e->window);
 
