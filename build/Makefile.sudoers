@@ -26,7 +26,8 @@ note = \033[1;32mdo not forget to add user to fwm group\033[0m\n
 $(target): # do nothing
 
 install:
-	@mkdir -p $(dir); \
+	@umask o-rwx; \
+	mkdir -p $(dir); \
 	printf "$(out)" > $(dir)/fwm; \
 	mkdir -p $(destdir)$(bin); \
 	mkdir -p $(etc); \

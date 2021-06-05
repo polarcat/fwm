@@ -55,6 +55,7 @@ paste()
 
 # copy
 
+umask og-rwx
 mkdir -p $dir_/data
 
 for sel in clipboard secondary primary; do
