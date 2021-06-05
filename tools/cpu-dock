@@ -2,6 +2,10 @@
 
 . $FWM_HOME/lib/menu-utils
 
+if [ -f $FWM_HOME/screenrc ]; then
+	. $FWM_HOME/screenrc
+fi
+
 name_=cpu-dock
 
 stoptool fwm-cpumon $name_

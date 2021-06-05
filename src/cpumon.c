@@ -303,10 +303,14 @@ static inline void plot(struct ctx *ctx)
 static int init(struct ctx *ctx)
 {
 	int cpucnt;
+	char *env = getenv("FWM_SCALE");
+	float scale;
+
+	env ? (scale = atof(env)) : (scale = 1);
 
 	ctx->dpy = NULL;
-	ctx->w = 32;
-	ctx->h = 16;
+	ctx->w = 32 * scale;
+	ctx->h = 16 * scale;
 	ctx->ms = 60;
 	ctx->fg = 0x8fb2d8;
 	ctx->class = "cpumon";
