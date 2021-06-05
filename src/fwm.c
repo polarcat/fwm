@@ -269,6 +269,7 @@ static uint8_t focus_root_;
 static struct client *motion_cli;
 static int16_t motion_init_x;
 static int16_t motion_init_y;
+static uint8_t space_width = 1;
 
 struct tag {
 	struct list_head head;
@@ -701,7 +702,7 @@ static void title_width(struct screen *scr)
 		i++;
 	}
 
-	title->w = x - ITEM_H_MARGIN;
+	title->w = x - space_width;
 }
 
 static void print_title(struct screen *scr, xcb_window_t win)
@@ -740,7 +741,7 @@ static void print_title(struct screen *scr, xcb_window_t win)
 			color2ptr(NORMAL_BG),
 			scr->items[PANEL_AREA_TITLE].x,
 			scr->items[PANEL_AREA_TITLE].w,
-			title.str, title.len, font1, ITEM_H_MARGIN);
+			title.str, title.len, font1, space_width);
 out:
 	free(title.ptr);
 }
@@ -1236,7 +1237,7 @@ static void print_menu(struct screen *scr)
 
 	draw_panel_text(&scr->panel, color2ptr(NORMAL_FG),
 			color2ptr(NORMAL_BG), x, w, menu_icon, menu_icon_len,
-			menu_font, ITEM_H_MARGIN);
+			menu_font, space_width);
 }
 
 static void print_tag(struct screen *scr, struct tag *tag, uint8_t flag)
@@ -1260,7 +1261,7 @@ static void print_tag(struct screen *scr, struct tag *tag, uint8_t flag)
 
 	tag->flags |= flag;
 	draw_panel_text(&scr->panel, fg, bg, tag->x, tag->w, tag->name,
-			tag->nlen, font1, ITEM_H_MARGIN);
+			tag->nlen, font1, space_width);
 }
 
 static void print_div(struct screen *scr)
@@ -1272,7 +1273,7 @@ static void print_div(struct screen *scr)
 
 	draw_panel_text(&scr->panel, color2ptr(NORMAL_FG),
 			color2ptr(NORMAL_BG), x, w, DIV_ICON,
-			sizeof(DIV_ICON) - 1, font1, ITEM_H_MARGIN);
+			sizeof(DIV_ICON) - 1, font1, space_width);
 }
 
 static void raise_panel(struct screen *scr)
@@ -3110,7 +3111,7 @@ static void arrange_dock(struct screen *scr)
 	list_walk(cur, &scr->dock) {
 		struct client *cli = list2cli(cur);
 
-		x -= (cli->w + ITEM_H_MARGIN + 2 * BORDER_WIDTH);
+		x -= (cli->w + space_width + space_width * BORDER_WIDTH);
 		client_moveresize(cli, x, y, cli->w, cli->h);
 	}
 
@@ -3840,7 +3841,7 @@ static int add_tag(struct screen *scr, const char *name, uint8_t id,
 		return 0;
 
 	text_exts(name, tag->nlen, &tag->w, &h, font1);
-	tag->w += ITEM_H_MARGIN * 2;
+	tag->w += space_width * 2;
 	ii("tag '%s' len %u width %u\n", name, tag->nlen, tag->w);
 
 	if (pos != scr->items[PANEL_AREA_TAGS].x) {
@@ -3985,7 +3986,7 @@ static void reinit_panel(struct screen *scr)
 	text_exts(menu_icon, menu_icon_len, &w, &h, menu_font);
 
 	scr->items[PANEL_AREA_MENU].x = TAG_GAP;
-	scr->items[PANEL_AREA_MENU].w = w + 2 * ITEM_H_MARGIN;
+	scr->items[PANEL_AREA_MENU].w = w + 2 * space_width;
 	x += scr->items[PANEL_AREA_MENU].w + 2 * TAG_GAP;
 	print_menu(scr);
 
@@ -3994,7 +3995,7 @@ static void reinit_panel(struct screen *scr)
 
 	scr->items[PANEL_AREA_DIV].x = scr->items[PANEL_AREA_TAGS].w;
 	text_exts(DIV_ICON, sizeof(DIV_ICON) - 1, &w, &h, font1);
-	w += scr->items[PANEL_AREA_DIV].x + 2 * ITEM_H_MARGIN;
+	w += scr->items[PANEL_AREA_DIV].x + 2 * space_width;
 	scr->items[PANEL_AREA_DIV].w = w;
 	print_div(scr);
 
@@ -5438,7 +5439,7 @@ static void handle_wmname(xcb_property_notify_event_t *e)
 		bg = color2ptr(NOTICE_BG);
 		draw_panel_text(&cli->scr->panel, fg, bg, cli->tag->x,
 				cli->tag->w, cli->tag->name, cli->tag->nlen,
-				font1, ITEM_H_MARGIN);
+				font1, space_width);
 		xcb_flush(dpy);
 	}
 }
@@ -5878,9 +5879,16 @@ static int handle_events(void)
 
 static void init_font(void)
 {
+	char *env = getenv("FWM_SCALE");
+	float font_scale;
+
+	env ? (font_scale = atof(env)) : (font_scale = 1);
+	space_width = ITEM_H_MARGIN * font_scale;
+	ii("space width %u font scale %f\n", space_width, font_scale);
+
 	font1 = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
 			    FONT1_NAME, XFT_SIZE, XftTypeDouble,
-			    FONT1_SIZE, NULL);
+			    FONT1_SIZE * font_scale, NULL);
 	if (!font1)
 		panic("XftFontOpen(%s)\n", FONT1_NAME);
 
@@ -5888,7 +5896,7 @@ static void init_font(void)
 
 	font2 = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
 			    FONT2_NAME, XFT_SIZE, XftTypeDouble,
-			    FONT2_SIZE, NULL);
+			    FONT2_SIZE * font_scale, NULL);
 	if (font2) {
 		menu_font = font2;
 	} else {
