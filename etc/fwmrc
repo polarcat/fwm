@@ -3,6 +3,16 @@
 export FWM_HOME=$HOME/.fwm
 export FWM_LOG=$HOME/fwm${DISPLAY}.log
 
+if [ -f $FWM_HOME/screenrc ]; then
+	# provides screen specific variables in order to maintain readable
+	# font size for hight resolution displays, e.g. for 4K displays:
+	#
+	# export GDK_SCALE=2
+	# export FWM_SCALE=1.8
+	# 
+	. $FWM_HOME/screenrc
+fi
+
 case $PATH in
 *$FWM_HOME/bin*) ;;
 *) export PATH=$PATH:$FWM_HOME/bin;;
