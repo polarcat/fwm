@@ -3440,7 +3440,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 
 	ignore_panel = 0;
 
-	if (cli->flags & CLI_FLG_CENTER) {
+	if (cli->flags & CLI_FLG_CENTER && !(winflags & WIN_FLG_SCAN)) {
 		g->x = scr->x + scr->w / 2 - g->width / 2;
 		g->y = scr->top + scr->h / 2 - g->height / 2;
 	} else if (cli->flags & CLI_FLG_TOPLEFT) {
