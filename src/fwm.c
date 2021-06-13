@@ -703,6 +703,25 @@ static void title_width(struct screen *scr)
 	title->w = x - space_width;
 }
 
+static inline void free_window_title(struct sprop *title)
+{
+	free(title->ptr);
+	title->ptr = NULL;
+	title->len = 0;
+}
+
+static uint8_t get_window_title(xcb_window_t win, struct sprop *title)
+{
+	get_sprop(title, win, a_net_wm_name, UINT_MAX);
+	if (!title->ptr || !title->len) {
+		get_sprop(title, win, XCB_ATOM_WM_NAME, UCHAR_MAX);
+		if (!title->ptr || !title->len)
+			return 0;
+	}
+
+	return 1;
+}
+
 static void print_title(struct screen *scr, xcb_window_t win)
 {
 	struct sprop title;
@@ -3264,6 +3283,27 @@ static void map_window(xcb_window_t win)
 	xcb_flush(dpy);
 }
 
+static uint8_t ignore_window(xcb_window_t win)
+{
+	struct stat st;
+	char path[1024];
+	struct sprop title;
+
+	if (get_window_title(win, &title)) {
+		snprintf(path, sizeof(path), "%s/ignore/%s",
+		  homedir, title.str);
+		free_window_title(&title);
+		if (stat(path, &st) == 0) {
+			ww("ignore user defined win %#x %s\n", win,
+			  path);
+			map_window(win);
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 static struct client *add_window(xcb_window_t win, uint8_t winflags)
 {
 	struct list_head *cur, *tmp;
@@ -3317,7 +3357,9 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 
 	flags = 0;
 
-	if ((grav = special(win, "dock", sizeof("dock"))))
+	if (ignore_window(win))
+		goto out;
+	else if ((grav = special(win, "dock", sizeof("dock"))))
 		flags |= grav;
 	else if (special(win, "center", sizeof("center")))
 		flags |= CLI_FLG_CENTER;
