@@ -1,0 +1,13 @@
+#!/bin/sh
+
+. $FWM_HOME/lib/menu-utils
+
+ctl_=$FWM_HOME/.control$DISPLAY
+cli_=$FWM_HOME/tmp/clients
+
+printf "list-clients" > $ctl_
+
+startmenu -b $colors_ -s 2 -d $cli_ | while read scr tag win info; do
+	echo "focus-window $win" > $ctl_
+	exit 0
+done
