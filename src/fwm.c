@@ -2927,7 +2927,6 @@ static void show_windows(struct tag *tag, uint8_t focus)
 	}
 
 	raise_client(&arg);
-	center_pointer(arg.cli);
 }
 
 static void hide_windows(struct tag *tag)
