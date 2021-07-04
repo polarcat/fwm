@@ -3842,11 +3842,7 @@ static void select_tag(struct screen *scr, int16_t x, int16_t y)
 		show_windows(scr->tag, 0);
 	}
 
-	if (scr->tag->front)
-		show_toolbox(scr->tag->front);
-	else if (scr->tag->visited)
-		show_toolbox(scr->tag->visited);
-	else if ((tmp = front_client(scr->tag)))
+	if ((tmp = front_client(scr->tag)))
 		show_toolbox(tmp);
 	else
 		hide_toolbox();
@@ -4645,7 +4641,7 @@ static void focus_screen(uint8_t id)
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
 		if (scr->id == id) {
-			ii("focus screen %u tag %s", id, scr->tag->name);
+			ii("focus screen %u tag %s\n", id, scr->tag->name);
 			focus_tag(scr, scr->tag);
 			curscr = scr;
 			warp_pointer(rootscr->root, curscr->x + curscr->w / 2,
@@ -4688,7 +4684,7 @@ static void focus_window_req(xcb_window_t win)
 			raise_client(&arg);
 			center_pointer(arg.cli);
 
-			ii("focus screen %u tag %s win %#x",
+			ii("focus screen %u tag %s win %#x\n",
 			   curscr->id,
 			   arg.cli->tag ? arg.cli->tag->name : "<nil>",
 			   win);
