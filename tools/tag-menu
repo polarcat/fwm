@@ -91,8 +91,8 @@ topmenu()
 		sleep 0.1
 	done
 
-	while read scr tag name geo wcnt cur; do
-		if [ "$cur" = '*' ]; then
+	while read scr tag name geo wcnt cur win; do
+		if [ "$cur" = '1' ]; then
 			scr_=$scr
 			tag_=$tag
 			name_=$name
