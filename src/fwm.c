@@ -1958,6 +1958,9 @@ static void *task(void *arg)
 
 static void run(const char *cmd)
 {
+	if (!cmd)
+		return;
+
 	const char *userhome = getenv("HOME");
 	pthread_t t;
 
@@ -4866,6 +4869,8 @@ static void handle_user_request(int fd)
 
 	if (match(name.str, "reload-keys")) {
 		init_keys();
+	} else if (match(name.str, "lock")) {
+		run(strdup("xscreensaver-command -lock"));
 	} else if (match(name.str, "reinit-outputs")) {
 		init_outputs();
 	} else if (match(name.str, "list-clients")) {
