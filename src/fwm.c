@@ -611,6 +611,57 @@ static void timestamp(struct client *cli)
 	cli->ts = (ts.tv_sec * 1000000000 + ts.tv_nsec) / 1000; /* us */
 }
 
+static enum winstatus window_status(xcb_window_t win)
+{
+	enum winstatus status;
+	xcb_get_window_attributes_cookie_t c;
+	xcb_get_window_attributes_reply_t *a;
+
+	if (win == XCB_WINDOW_NONE)
+		return WIN_STATUS_UNKNOWN;
+
+	c = xcb_get_window_attributes(dpy, win);
+	a = xcb_get_window_attributes_reply(dpy, c, NULL);
+	if (!a)
+		status = WIN_STATUS_UNKNOWN;
+	else if (a->map_state != XCB_MAP_STATE_VIEWABLE)
+		status = WIN_STATUS_HIDDEN;
+	else
+		status = WIN_STATUS_VISIBLE;
+
+	free(a);
+
+	if (status != WIN_STATUS_UNKNOWN) { /* do some sanity check */
+		struct sprop class;
+
+		get_sprop(&class, win, XCB_ATOM_WM_CLASS, UCHAR_MAX);
+		if (!class.len)
+			status = WIN_STATUS_UNKNOWN;
+
+		if (class.ptr)
+			free(class.ptr);
+	}
+
+	return status;
+}
+
+static struct client *validate_client(struct list_head *head)
+{
+	struct client *cli;
+
+	if (head->next && (cli = list2cli(head->next))) {
+		if (window_status(cli->win) != WIN_STATUS_UNKNOWN)
+			return cli;
+	}
+
+	if (head->prev && (cli = list2cli(head->prev))) {
+		if (window_status(cli->win) != WIN_STATUS_UNKNOWN)
+			return cli;
+	}
+
+	return NULL;
+}
+
 static struct client *front_client(struct tag *tag)
 {
 	if (list_empty(&tag->clients))
@@ -619,10 +670,8 @@ static struct client *front_client(struct tag *tag)
 		return tag->front;
 	else if (tag->visited)
 		return tag->visited;
-	else if (list_single(&tag->clients))
-		return list2cli(tag->clients.next);
-
-	return list2cli(tag->clients.prev);
+	else
+		return validate_client(&tag->clients);
 }
 
 #ifndef TRACE
@@ -779,40 +828,6 @@ static xcb_window_t window_leader(xcb_window_t win)
 
 	free(r);
 	return ret;
-}
-
-static enum winstatus window_status(xcb_window_t win)
-{
-	enum winstatus status;
-	xcb_get_window_attributes_cookie_t c;
-	xcb_get_window_attributes_reply_t *a;
-
-	if (win == XCB_WINDOW_NONE)
-		return WIN_STATUS_UNKNOWN;
-
-	c = xcb_get_window_attributes(dpy, win);
-	a = xcb_get_window_attributes_reply(dpy, c, NULL);
-	if (!a)
-		status = WIN_STATUS_UNKNOWN;
-	else if (a->map_state != XCB_MAP_STATE_VIEWABLE)
-		status = WIN_STATUS_HIDDEN;
-	else
-		status = WIN_STATUS_VISIBLE;
-
-	free(a);
-
-	if (status != WIN_STATUS_UNKNOWN) { /* do some sanity check */
-		struct sprop class;
-
-		get_sprop(&class, win, XCB_ATOM_WM_CLASS, UCHAR_MAX);
-		if (!class.len)
-			status = WIN_STATUS_UNKNOWN;
-
-		if (class.ptr)
-			free(class.ptr);
-	}
-
-	return status;
 }
 
 static void border_color(xcb_window_t win, uint32_t color)
@@ -4755,6 +4770,26 @@ static void update_seq()
 	fclose(f);
 }
 
+static uint16_t count_clients(struct tag *tag)
+{
+	uint16_t clicnt = 0;
+	struct list_head *cur;
+
+	list_walk(cur, &tag->clients) {
+		struct client *cli = list2cli(cur);
+		enum winstatus stat = window_status(cli->win);
+
+		if (stat != WIN_STATUS_UNKNOWN) {
+			clicnt++;
+		} else if (tag->front == cli) {
+			tag->front = validate_client(cur);
+			tag->visited = tag->front;
+		}
+	}
+
+	return clicnt;
+}
+
 static void dump_tags(void)
 {
 	struct list_head *cur;
@@ -4774,18 +4809,14 @@ static void dump_tags(void)
 		struct screen *scr = list2screen(cur);
 
 		list_walk(curtag, &scr->tags) {
-			struct list_head *cli;
 			struct tag *tag = list2tag(curtag);
 			uint8_t current;
-			uint16_t clicnt = 0;
-			struct client *front;
+			uint16_t clicnt = count_clients(tag);
+			struct client *cli;
 			xcb_window_t win;
 
-			list_walk(cli, &tag->clients)
-				clicnt++;
-
-			if ((front = front_client(tag)))
-				win = front->win;
+			if ((cli = front_client(tag)))
+				win = cli->win;
 			else
 				win = XCB_WINDOW_NONE;
 
