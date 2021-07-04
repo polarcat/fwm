@@ -10,14 +10,14 @@ printf "list-tags" > $ctl_
 printf "" > $jump_
 
 while read scr tag name geo wcnt cur win; do
-	printf "$name\t$win\t$wcnt\n" >> $jump_
+	printf "$name\t$tag\t$win\t$wcnt\n" >> $jump_
 done < $tags_
 
 if [ ! -s $jump_ ]; then
 	exit 0
 fi
 
-startmenu -b $colors_ -s 0 -d $jump_ | while read name win wcnt; do
-	echo "focus-window $win" > $ctl_
+startmenu -b $colors_ -s 0 -d $jump_ | while read name tag win wcnt; do
+	echo "focus-tag $tag $win" > $ctl_
 	exit 0
 done
