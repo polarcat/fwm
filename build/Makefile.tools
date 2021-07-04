@@ -34,7 +34,7 @@ tools += mod_k:center:popup:keys-menu
 tools += mod_l:center:popup:clients-menu
 tools += mod_j:center:popup:tags-menu
 tools += mod_d:center:popup:screens-menu
-tools += mod_y:center:popup:apps-menu
+tools += mod_p:center:popup:apps-menu
 tools += mod_r:center:popup:run-menu
 tools += mod_v:center:popup:clip-menu
 endif
