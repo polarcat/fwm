@@ -4654,14 +4654,40 @@ static void focus_screen(uint8_t id)
 	}
 }
 
+static void focus_tagwin_req(uint8_t id, xcb_window_t win)
+{
+	struct list_head *curscr;
+
+	list_walk(curscr, &screens) {
+		struct screen *scr = list2screen(curscr);
+		struct list_head *curtag;
+
+		list_walk(curtag, &scr->tags) {
+			struct tag *tag = list2tag(curtag);
+			struct client *cli;
+			struct arg arg;
+
+			if (tag->id != id)
+				continue;
+			else if (!(cli = tag2cli(tag, win)))
+				return;
+
+			focus_tag(cli->scr, tag);
+			arg.cli = cli;
+			arg.kmap = NULL;
+			raise_client(&arg);
+			center_pointer(cli);
+
+			dd("focus scr %u tag %s win %#x\n", cli->scr->id,
+			  tag->name, win);
+			return;
+		}
+	}
+}
+
 static void focus_window_req(xcb_window_t win)
 {
 	struct list_head *cur;
-
-	if (errno != 0) {
-		ee("failed to focus win %#x\n", win);
-		return;
-	}
 
 	if (win == XCB_WINDOW_NONE)
 		return;
@@ -4897,11 +4923,25 @@ static void handle_user_request(int fd)
 		const char *arg = &name.str[sizeof("focus-screen")];
 		if (arg)
 			focus_screen(atoi(arg));
-	} else if (match(name.str, "focus-window")) {
-		const char *arg = &name.str[sizeof("focus-window")];
+	} else if (match(name.str, "focus-tag")) {
+		const char *tagstr = &name.str[sizeof("focus-tag")];
+		char *winstr = NULL;
+		uint8_t id;
+
 		errno = 0;
-		if (arg)
-			focus_window_req(strtol(arg, NULL, 16));
+		id = strtol(tagstr, &winstr, 10);
+		if (!errno) {
+			xcb_window_t win = strtol(winstr, NULL, 16);
+			if (!errno)
+				focus_tagwin_req(id, win);
+		}
+	} else if (match(name.str, "focus-window")) {
+		const char *str = &name.str[sizeof("focus-window")];
+
+		errno = 0;
+		xcb_window_t win = strtol(str, NULL, 16);
+		if (!errno)
+			focus_window_req(win);
 	} else if (match(name.str, "make-grid")) {
 		struct arg arg = { .data = 0, };
 		make_grid(&arg);
