@@ -1,0 +1,13 @@
+#!/bin/sh
+
+log=/tmp/pm-suspend.log
+echo "lock screen" >>$log
+for user in /home/*; do
+	for ctl in $user/.fwm/.control*; do
+		echo "issue suspend to $ctl" >>$log
+		echo lock > $ctl
+	done
+done
+echo "suspend" >>$log
+pm-suspend >>$log 2>&1
+echo "resume" >>$log
