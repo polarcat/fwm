@@ -818,8 +818,10 @@ static int init_rows(void)
 		return -1;
 	}
 
-	if (search_col_idx_ >= cols_per_row_)
+	if (search_col_idx_ >= cols_per_row_) {
 		search_col_idx_ = 0;
+		swap_col_idx_ = 0;
+	}
 
 #ifdef DEBUG
 	uint8_t col_max_len = row_len_ / cols_per_row_;
