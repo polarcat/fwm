@@ -3,11 +3,21 @@
 . $FWM_HOME/lib/menu-utils
 
 ctl_=$FWM_HOME/.control$DISPLAY
-cli_=$FWM_HOME/tmp/clients
+tags_=$FWM_HOME/tmp/tags
+jump_=$FWM_HOME/tmp/jump
 
-printf "list-clients" > $ctl_
+printf "list-tags" > $ctl_
+printf "" > $jump_
 
-startmenu -b $colors_ -s 2 -d $cli_ | while read scr tag win info; do
+while read scr tag name geo wcnt cur win; do
+	printf "$name\t$win\t$wcnt\n" >> $jump_
+done < $tags_
+
+if [ ! -s $jump_ ]; then
+	exit 0
+fi
+
+startmenu -b $colors_ -s 0 -d $jump_ | while read name win wcnt; do
 	echo "focus-window $win" > $ctl_
 	exit 0
 done
