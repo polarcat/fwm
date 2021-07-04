@@ -2990,25 +2990,40 @@ static void walk_tags(struct arg *arg)
 
 static void retag_client(struct arg *arg)
 {
-	struct client *front;
+	struct tag *tag;
+	struct list_head *cur;
 
 	if (list_single(&curscr->tags))
 		return;
 	else if (!arg->cli && !(arg->cli = pointer2cli()))
 		return;
 
+	tag = arg->cli->tag;
 	list_del(&arg->cli->head); /* remove from current tag */
 	walk_tags(arg); /* switch to next tag */
-
-	if ((front = front_client(curscr->tag)))
-		unfocus_window(front->win);
-
 	list_add(&curscr->tag->clients, &arg->cli->head); /* re-tag */
 	arg->cli->scr = curscr;
 	arg->cli->tag = curscr->tag;
 	center_pointer(arg->cli);
 	raise_client(arg);
 	xcb_flush(dpy);
+
+	if (!tag)
+		return;
+
+	list_walk(cur, &tag->clients) {
+		struct client *cli = list2cli(cur);
+
+		if (cli->win == XCB_WINDOW_NONE)
+			continue;
+
+		tag->front = cli;
+		tag->visited = cli;
+		return;
+	}
+
+	tag->front = NULL;
+	tag->visited = NULL;
 }
 
 #if 0
@@ -4764,13 +4779,15 @@ static void dump_tags(void)
 			uint8_t current;
 			uint16_t clicnt = 0;
 			struct client *front;
-			xcb_window_t win = XCB_WINDOW_NONE;
+			xcb_window_t win;
 
 			list_walk(cli, &tag->clients)
 				clicnt++;
 
 			if ((front = front_client(tag)))
 				win = front->win;
+			else
+				win = XCB_WINDOW_NONE;
 
 			curscr->tag == tag ? (current = 1) : (current = 0);
 			snprintf(buf, sizeof(buf),
