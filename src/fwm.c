@@ -4718,12 +4718,13 @@ static void dump_tags(void)
 {
 	struct list_head *cur;
 	char path[homelen + sizeof("/tmp/tags")];
-	FILE *f;
+	int fd;
+	char buf[256] = {0};
 
 	sprintf(path, "%s/tmp/tags", homedir);
 
-	if (!(f = fopen(path, "w+"))) {
-		ee("fopen(%s) failed, %s\n", path, strerror(errno));
+	if ((fd = open(path, O_RDWR)) < 0) {
+		ee("failed to open file %s, %s\n", path, strerror(errno));
 		return;
 	}
 
@@ -4734,20 +4735,27 @@ static void dump_tags(void)
 		list_walk(curtag, &scr->tags) {
 			struct list_head *cli;
 			struct tag *tag = list2tag(curtag);
-			char current;
+			uint8_t current;
 			uint16_t clicnt = 0;
+			struct client *front;
+			xcb_window_t win = XCB_WINDOW_NONE;
 
 			list_walk(cli, &tag->clients)
 				clicnt++;
 
-			curscr->tag == tag ? (current = '*') : (current = ' ');
-			fprintf(f, "%u\t%u\t%s\t%ux%u%+d%+d\t%u\t%c\n", scr->id,
-				tag->id, tag->name, tag->w, panel_height,
-				tag->x, scr->panel.y, clicnt, current);
+			if ((front = front_client(tag)))
+				win = front->win;
+
+			curscr->tag == tag ? (current = 1) : (current = 0);
+			snprintf(buf, sizeof(buf),
+			  "%u\t%u\t%s\t%ux%u%+d%+d\t%u\t%u\t%#x\n", scr->id,
+			  tag->id, tag->name, tag->w, panel_height,
+			  tag->x, scr->panel.y, clicnt, current, win);
+			write(fd, buf, strlen(buf));
 		}
 	}
 
-	fclose(f);
+	close(fd);
 	update_seq();
 }
 
