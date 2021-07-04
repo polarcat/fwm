@@ -1313,7 +1313,10 @@ int main(int argc, char *argv[])
 	xcb_screen_t *scr;
 	uint32_t val[2];
 	XRenderColor ref;
+	char *env = getenv("FWM_SCALE");
+	float font_scale;
 
+	env ? (font_scale = atof(env)) : (font_scale = 1);
 	opts(argc, argv);
 
 	xdpy_ = XOpenDisplay(NULL);
@@ -1331,12 +1334,12 @@ int main(int argc, char *argv[])
 		return 255;
 	}
 
-	if (!(font1_ = load_font(font1_name_, font1_size_))) {
+	if (!(font1_ = load_font(font1_name_, font1_size_ * font_scale))) {
 		ee("XftFontOpen(%s) failed\n", font1_name_);
 		goto err;
 	}
 
-	if (!(font2_ = load_font(font2_name_, font2_size_))) {
+	if (!(font2_ = load_font(font2_name_, font2_size_ * font_scale))) {
 		ee("XftFontOpen(%s) failed\n", font2_name_);
 		/* ignore error */
 		font2_ = font1_;
