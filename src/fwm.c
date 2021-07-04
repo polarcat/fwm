@@ -2147,6 +2147,7 @@ static void update_client_list(void)
 	}
 }
 
+#if 0
 static uint8_t tray_window(xcb_window_t win)
 {
 	uint8_t ret;
@@ -2171,6 +2172,7 @@ static uint8_t tray_window(xcb_window_t win)
 	free(r);
 	return ret;
 }
+#endif
 
 static uint8_t dock_left(char *path, uint8_t offs,
 			 const char *name, uint8_t len,
@@ -3304,6 +3306,32 @@ static uint8_t ignore_window(xcb_window_t win)
 	return 0;
 }
 
+#if 0
+static uint8_t ignore_systray(xcb_window_t win)
+{
+	struct stat st;
+	char path[1024];
+	struct sprop title;
+
+	if (get_window_title(win, &title)) {
+		char str[title.len + 1];
+		memset(str, 0, title.len + 1);
+		memcpy(str, title.str, title.len);
+		free_window_title(&title);
+		snprintf(path, sizeof(path), "%s/nosystray/%s",
+		  homedir, str);
+		ww("check nosystray for user defined win %#x %s\n", win, path);
+		if (stat(path, &st) == 0) {
+			ww("skip systray for user defined win %#x %s\n", win,
+			  path);
+			return 1;
+		}
+	}
+
+	return 0;
+}
+#endif
+
 static struct client *add_window(xcb_window_t win, uint8_t winflags)
 {
 	struct list_head *cur, *tmp;
@@ -3372,10 +3400,18 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	else if (special(win, "bottom-right", sizeof("bottom-right")))
 		flags |= CLI_FLG_BOTRIGHT;
 
-	if (tray_window(win) || winflags & WIN_FLG_TRAY) {
+#if 0
+	if (!ignore_systray(win) &&
+	  (tray_window(win) || winflags & WIN_FLG_TRAY)) {
 		ii("win %#x provides embed info\n", win);
 		flags |= CLI_FLG_TRAY;
 	}
+#else
+	if (winflags & WIN_FLG_TRAY) {
+		ii("win %#x has tray flag set\n", win);
+		flags |= CLI_FLG_TRAY;
+	}
+#endif
 
 	if (special(win, "popup", sizeof("popup"))) {
 		flags &= ~(CLI_FLG_DOCK | CLI_FLG_TRAY);
@@ -5554,7 +5590,6 @@ static void handle_configure_notify(xcb_configure_notify_event_t *e)
 	}
 }
 
-#ifdef HANDLE_SYSTRAY_REQ
 static void tray_add(xcb_window_t win)
 {
 	struct client *cli;
@@ -5568,7 +5603,6 @@ static void tray_add(xcb_window_t win)
 		}
 	}
 }
-#endif
 
 #define SYSTEM_TRAY_REQUEST_DOCK 0
 #define SYSTEM_TRAY_BEGIN_MESSAGE 1
@@ -5606,11 +5640,9 @@ static void handle_client_message(xcb_client_message_event_t *e)
 		   e->data.data32[0] == a_ping) {
 		tt("pong win %#x time %u\n", e->data.data32[2],
 		   e->data.data32[1]);
-#ifdef HANDLE_SYSTRAY_REQ
 	} else if (e->type == a_systray && e->format == 32 &&
 		   e->data.data32[1] == SYSTEM_TRAY_REQUEST_DOCK) {
 		tray_add(e->data.data32[2]);
-#endif
 	} else if (e->type == a_active_win && e->format == 32) {
 		arg.cli = win2cli(e->window);
 
