@@ -3450,6 +3450,11 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		flags |= CLI_FLG_POPUP;
 	}
 
+	if (window_status(win) == WIN_STATUS_UNKNOWN) {
+		ww("attempted to add invalid win %#x | %d\n", win, __LINE__);
+		goto out;
+	}
+
 	if (!(flags & (CLI_FLG_DOCK | CLI_FLG_TRAY)))
 		crc = window_exclusive(win);
 	else
