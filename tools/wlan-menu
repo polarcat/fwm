@@ -15,6 +15,7 @@ etc_=/etc/wpa_supplicant
 tmp_=/tmp/$USER/wlan
 out_=$tmp_/menu
 inf_=$tmp_/info
+dev_=wlan0
 
 mkdir -p $tmp_
 
@@ -92,18 +93,22 @@ connected()
 {
 	printf "\a\tnot connected\n" > $out_
 
-	ifconfig $2 | while read inet addr rest; do
+	ifconfig $dev_ | while read inet addr rest; do
 		case $addr in
 		"addr:"[0-9]*)
+			printf "\a\tconnected to $1 $addr\n" > $out_
+			break
+			;;
+		[0-9]*"."[0-9]*"."[0-9]*"."[0-9]*)
 			printf "\a\tconnected to $1 $addr\n" > $out_
 			break
 			;;
 		esac
 	done
 
-	if ! ping -c 2 $pinghost_ >/dev/null 2>&1; then
-		printf "\a\tno internet connection\n" >> $out_
-	fi
+#	if ! ping -c 2 $pinghost_ >/dev/null 2>&1; then
+#		printf "\a\tno internet connection\n" >> $out_
+#	fi
 
 	showinfo -d $out_
 }
@@ -251,6 +256,7 @@ activessid()
 		case $dest in
 		"00000000")
 			if [ -d /sys/class/net/$iface/wireless ]; then
+				dev_=$iface
 				break
 			fi
 			;;

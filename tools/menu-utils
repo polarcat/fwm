@@ -5,7 +5,7 @@ tmpdir_=$FWM_HOME/tmp
 rundir_=$FWM_HOME/run
 dirset_=0
 dockpid_=''
-pinghost_=alpinelinux.org
+pinghost_=fi.pool.ntp.org
 
 normbg() { read normbg_ < $FWM_HOME/colors/normal-bg; }
 normfg() { read normfg_ < $FWM_HOME/colors/normal-fg; }

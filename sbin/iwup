@@ -32,6 +32,20 @@ error()
 	return 0
 }
 
+restart()
+{
+	killall dhclient
+	killall wpa_supplicant
+	killall -9 wpa_supplicant
+	wpa_supplicant -s -B -i$dev_ -c /etc/wpa_supplicant/current.conf
+}
+
+ifaceup()
+{
+	ifconfing $dev_ up
+	dhclient $dev_
+}
+
 if [ $# -eq 0 ]; then
 	help
 	exit 0
@@ -53,18 +67,35 @@ cd $etc_
 echo "ctrl_interface=DIR=$var_ GROUP=root" > current.conf
 cat configs/$1 >> current.conf
 ln -sf current.conf wpa_supplicant.conf
-ifdown $dev_
 
-/etc/init.d/wpa_supplicant restart 2>&1 | error
+if which ifdown >/dev/null 2>&1; then
+	ifdown $dev_
+else
+	ifconfig $dev_ down
+fi
+
+if [ -f /etc/init.d/wpa_supplicant ]; then
+	/etc/init.d/wpa_supplicant restart 2>&1 | error
+else
+	restart 2>&1 | error
+fi
 
 if [ $? -ne 0 ]; then
 	# reset config
 	echo "ctrl_interface=DIR=$var_ GROUP=root" > current.conf
-	/etc/init.d/wpa_supplicant restart 2>&1 | error
+	if [ -f /etc/init.d/wpa_supplicant ]; then
+		/etc/init.d/wpa_supplicant restart 2>&1 | error
+	else
+		restart 2>&1 | error
+	fi
 	exit 1
 fi
 
-ifup $dev_ 2>&1 | error
+if which ifup >/dev/null 2>&1; then
+	ifup $dev_ 2>&1 | error
+else
+	ifaceup 2>&1 | error
+fi
 
 if [ $? -eq 0 ]; then
 	echo "ok $dev_"
