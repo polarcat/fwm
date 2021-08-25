@@ -632,14 +632,12 @@ static enum winstatus window_status(xcb_window_t win)
 	free(a);
 
 	if (status != WIN_STATUS_UNKNOWN) { /* do some sanity check */
-		struct sprop class;
-
-		get_sprop(&class, win, XCB_ATOM_WM_CLASS, UCHAR_MAX);
-		if (!class.len)
+		xcb_get_geometry_cookie_t c = xcb_get_geometry(dpy, win);
+		xcb_get_geometry_reply_t *g;
+		g = xcb_get_geometry_reply(dpy, c, NULL);
+		if (!g)
 			status = WIN_STATUS_UNKNOWN;
-
-		if (class.ptr)
-			free(class.ptr);
+		free(g);
 	}
 
 	return status;
@@ -3309,6 +3307,7 @@ static void map_window(xcb_window_t win)
 		warp_pointer(win, g->width / 2, g->height / 2);
 		ii("map win %#x geo %ux%u+%d+%d\n", win, g->width, g->height,
 		   g->x, g->y);
+		free(g);
 	}
 
 	xcb_map_window_checked(dpy, win);
