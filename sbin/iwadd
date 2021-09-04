@@ -3,7 +3,7 @@
 cd /etc/wpa_supplicant
 mkdir -p configs
 
-read -t 1 ssid key
+read ssid key
 
 if [ -z "$ssid" ]; then
 	echo "bad ssid"

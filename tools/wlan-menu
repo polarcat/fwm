@@ -231,6 +231,13 @@ info()
 
 ssid() { printf "\a\t$2\t$3\n" >> $out_; }
 
+cleanup()
+{
+	jedi killall dhclient
+	jedi killall -9 dhclient
+	jedi ifconfig $dev down
+}
+
 disconnect()
 {
 	printf "\a\t\t\n" > $out_
@@ -244,7 +251,7 @@ disconnect()
 	startmenu -d $out_ |
 	while read icon ssid dev; do
 		if [ -n "$dev" ]; then
-			jedi ifdown $dev
+			cleanup $dev
 		fi
 		break
 	done

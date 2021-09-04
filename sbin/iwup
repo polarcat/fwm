@@ -5,6 +5,7 @@ var_=/var/run/wpa_supplicant
 sys_=/sys/class/net
 dev_=''
 ifs_=$IFS
+err_=0
 
 help()
 {
@@ -32,18 +33,30 @@ error()
 	return 0
 }
 
-restart()
+cleanup()
 {
+	ifconfig $dev_ down
 	killall dhclient
-	killall wpa_supplicant
-	killall -9 wpa_supplicant
-	wpa_supplicant -s -B -i$dev_ -c /etc/wpa_supplicant/current.conf
+	killall -9 dhclient
 }
 
-ifaceup()
+restart()
+{
+	if [ -f /etc/init.d/wpa_supplicant ]; then
+		/etc/init.d/wpa_supplicant restart
+	else
+		killall wpa_supplicant 2>/dev/null
+		killall -9 wpa_supplicant 2>/dev/null
+		wpa_supplicant -s -B -i$dev_ -c /etc/wpa_supplicant/current.conf
+	fi
+	err_=$?
+}
+
+connect()
 {
 	ifconfing $dev_ up
 	dhclient $dev_
+	err_=$?
 }
 
 if [ $# -eq 0 ]; then
@@ -67,36 +80,18 @@ cd $etc_
 echo "ctrl_interface=DIR=$var_ GROUP=root" > current.conf
 cat configs/$1 >> current.conf
 ln -sf current.conf wpa_supplicant.conf
+cleanup
+restart 2>&1 | error
 
-if which ifdown >/dev/null 2>&1; then
-	ifdown $dev_
-else
-	ifconfig $dev_ down
-fi
-
-if [ -f /etc/init.d/wpa_supplicant ]; then
-	/etc/init.d/wpa_supplicant restart 2>&1 | error
-else
-	restart 2>&1 | error
-fi
-
-if [ $? -ne 0 ]; then
+if [ $err_ -ne 0 ]; then
 	# reset config
 	echo "ctrl_interface=DIR=$var_ GROUP=root" > current.conf
-	if [ -f /etc/init.d/wpa_supplicant ]; then
-		/etc/init.d/wpa_supplicant restart 2>&1 | error
-	else
-		restart 2>&1 | error
-	fi
+	restart 2>&1 | error
 	exit 1
 fi
 
-if which ifup >/dev/null 2>&1; then
-	ifup $dev_ 2>&1 | error
-else
-	ifaceup 2>&1 | error
-fi
+connect 2>&1 | error
 
-if [ $? -eq 0 ]; then
+if [ $err_ -eq 0 ]; then
 	echo "ok $dev_"
 fi
