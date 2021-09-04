@@ -17,7 +17,7 @@ update()
 	read capacity < /sys/class/power_supply/BAT0/capacity
 
 	if [ "$capacity_" != "$capacity" ]; then
-		if [ $capacity -gt 100 ]; then
+		if [ $capacity -ge 100 ]; then
 			capacity=100
 			icon_=""  # full
 		elif [ $capacity -ge 75 -a $capacity -le 100 ]; then
