@@ -4701,19 +4701,18 @@ static void focus_tagwin_req(uint8_t id, xcb_window_t win)
 			struct client *cli;
 			struct arg arg;
 
-			if (tag->id != id)
+			if (tag->id != id) {
 				continue;
-			else if (!(cli = tag2cli(tag, win)))
-				return;
+			} else if ((cli = tag2cli(tag, win))) {
+				arg.cli = cli;
+				arg.kmap = NULL;
+				raise_client(&arg);
+				center_pointer(cli);
+			}
 
-			focus_tag(cli->scr, tag);
-			arg.cli = cli;
-			arg.kmap = NULL;
-			raise_client(&arg);
-			center_pointer(cli);
-
-			dd("focus scr %u tag %s win %#x\n", cli->scr->id,
-			  tag->name, win);
+			focus_tag(scr, tag);
+			dd("focus scr %u tag %s win %#x\n", scr->id, tag->name,
+			 win);
 			return;
 		}
 	}
@@ -4830,6 +4829,7 @@ static void dump_tags(void)
 			  tag->id, tag->name, tag->w, panel_height,
 			  tag->x, scr->panel.y, clicnt, current, win);
 			write(fd, buf, strlen(buf));
+			memset(buf, 0, sizeof(buf));
 		}
 	}
 
