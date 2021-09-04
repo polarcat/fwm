@@ -16,7 +16,7 @@ printf "\a\tchrome\n" >> $out_
 printf "\a\tfiles\n" >> $out_
 printf "\a\tclipboard\n" >> $out_
 printf "\a\tapplications\n" >> $out_
-printf "\a\twindows\n" >> $out_
+printf "\a\tlist\n" >> $out_
 printf "\a\tshortcuts\n" >> $out_
 printf "\a\tgrid\n" >> $out_
 printf "\a\ttag editor\n" >> $out_
@@ -38,7 +38,7 @@ startmenu -b -d $out_ | while read icon item; do
 	"files"*) exec spacefm &;;
 	"clipboard"*) exec clip-menu &;;
 	"applications"*) exec apps-menu &;;
-	"windows"*) exec clients-menu &;;
+	"list"*) exec clients-menu &;;
 	"shortcuts"*) exec keys-menu &;;
 	"grid"*) printf "make-grid" > $ctl_;;
 	"tag editor"*) tag-menu &;;
