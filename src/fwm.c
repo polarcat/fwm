@@ -270,6 +270,8 @@ static struct client *motion_cli;
 static int16_t motion_init_x;
 static int16_t motion_init_y;
 static uint8_t space_width = 1;
+static int16_t save_x_;
+static int16_t save_y_;
 
 struct tag {
 	struct list_head head;
@@ -3265,7 +3267,10 @@ static void del_window(xcb_window_t win)
 		print_title(scr, XCB_WINDOW_NONE);
 
 out:
-	focus_any(0);
+	if (save_x_ < 0 || save_y_ < 0)
+		focus_any(0);
+	else
+		warp_pointer(rootscr->root, save_x_, save_y_);
 
 flush:
 	update_client_list();
@@ -3377,6 +3382,9 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
+
+	/* save current pointer coords */
+	pointer2coord(&save_x_, &save_y_, NULL);
 
 	if (win == rootscr->root || win == toolbar.panel.win ||
 	    win == toolbox.win || panel_window(win))
@@ -3639,6 +3647,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	} else if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)) &&
 		   !(winflags & WIN_FLG_SCAN)) {
 		struct arg arg = { .cli = cli, .kmap = NULL, };
+		arg.data = 1; /* do not update saved pointer coords */
 		raise_client(&arg);
 	}
 
@@ -3696,6 +3705,9 @@ static void raise_client(struct arg *arg)
 		toolbox.visible ? hide_toolbox() : show_toolbox(arg->cli);
 	else
 		show_toolbox(arg->cli);
+
+	if (!arg->data)
+		pointer2coord(&save_x_, &save_y_, NULL);
 }
 
 static int screen_panel(xcb_window_t win)
