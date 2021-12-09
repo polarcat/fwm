@@ -3,19 +3,20 @@
 cd /etc/wpa_supplicant
 mkdir -p configs
 
-read ssid key
+ssid="$@"
+read key
 
 if [ -z "$ssid" ]; then
 	echo "bad ssid"
 	exit 1
 elif [ -n "$ssid" -a -n "$key" ]; then
-	if ! wpa_passphrase "$ssid" "$key" > configs/$ssid; then
-		cat configs/$ssid
+	if ! wpa_passphrase "'$ssid'" "$key" > configs/"$ssid"; then
+		cat configs/"$ssid"
 		exit 1
 	fi
 else
-	printf "network={\n\tssid=\"$ssid\"\n\tkey_mgmt=NONE\n}" > configs/$ssid
+	printf "network={\n\tssid=\"$ssid\"\n\tkey_mgmt=NONE\n}" > configs/"$ssid"
 fi
 
-chmod 0600 configs/$ssid
+chmod 0600 configs/"$ssid"
 echo "ok"

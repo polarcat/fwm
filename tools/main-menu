@@ -46,7 +46,7 @@ startmenu -b -d $out_ | while read icon item; do
 	"sound"*) mixer-menu &;;
 	"display"*) display-menu &;;
 	"suspend"*) suspend-menu &;;
-	"exit"*) killall fwm;;
+	"exit"*) stopcmd fwm;;
 	esac
 	break
 done

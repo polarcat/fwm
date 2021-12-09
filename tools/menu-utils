@@ -15,7 +15,24 @@ notebg() { read notebg_ < $FWM_HOME/colors/notice-bg; }
 notefg() { read notefg_ < $FWM_HOME/colors/notice-fg; }
 
 stoppid() { kill $@ >/dev/null 2>&1; kill -9 $@ >/dev/null 2>&1; }
-stopcmd() { killall $@ >/dev/null 2>&1; killall -9 $@ >/dev/null 2>&1; }
+
+stopcmd()
+{
+	cd /proc
+	for pid in *; do
+		if [ ! -f $pid/comm ]; then
+			continue
+		fi
+		read cmd < $pid/comm
+		case $cmd in
+		$1)
+			#echo "stop pid $pid with cmd $cmd" >&2
+			kill $pid
+			kill -9 $pid 2>/dev/null
+			;;
+		esac
+	done
+}
 
 getpid()
 { # for dock $1:name for tool $1:prog $2:name
@@ -23,14 +40,12 @@ getpid()
 
 	pid_=''
 	cd /proc
-
 	for pid in *; do
 		if [ ! -f $pid/cmdline ]; then
 			continue
 		fi
 
 		read cmd < $pid/cmdline
-
 		if [ $# -eq 1 ]; then
 			case $cmd in
 			fwm-dock*$1*) pid_="$pid_ $pid";;
@@ -57,7 +72,6 @@ initdirs()
 stoptool()
 { # $1:prog $2:name
 	getpid $@
-
 	for pid in $pid_; do
 		stoppid $pid
 	done
@@ -85,8 +99,6 @@ updatedock()
 
 showmenu()
 {
-	killall fwm-menu >/dev/null
-	sleep 0.1
 	fwm-menu -n menu $@
 }
 
@@ -166,7 +178,6 @@ showinfo()
 
 	normbg
 	normfg
-
 	colors="-0 $normfg_ -1 $normbg_ -2 $normfg_ -3 $normbg_"
 	showmenu $colors $@ >/dev/null
 }

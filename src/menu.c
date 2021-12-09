@@ -72,6 +72,7 @@ static struct page pages_[UCHAR_MAX + 1];
 
 static uint8_t search_bar_;
 static uint8_t append_;
+static uint8_t print_input_;
 static uint8_t interlace_;
 static uint32_t fg_ = 0xa0a0a0;
 static uint32_t bg_ = 0x050505;
@@ -648,12 +649,19 @@ static void key_press(xcb_key_press_event_t *e)
 	} else if (sym == XK_Return) {
 		char *str = selrow_->str;
 		*(str + selrow_->len) = '\0';
-		printf("%s", str);
 
-		if (append_ && search_idx_) {
+		if (!print_input_ && !append_) {
+			printf("%s\n", str);
+		} else if (print_input_ && !append_) {
+			fprintf(stderr, "%s:%d\n", __func__, __LINE__);
 			search_buf_[search_idx_] = '\0';
-			printf("\t%s\n", &search_buf_[PROMPT_LEN]);
+			printf("%s\n", &search_buf_[PROMPT_LEN]);
+		} else if (search_idx_) {
+			fprintf(stderr, "%s:%d\n", __func__, __LINE__);
+			search_buf_[search_idx_] = '\0';
+			printf("%s\t%s\n", str, &search_buf_[PROMPT_LEN]);
 		} else {
+			fprintf(stderr, "%s:%d\n", __func__, __LINE__);
 			printf("\n");
 		}
 
@@ -1070,6 +1078,7 @@ static void help(const char *name)
 	   "  -n, --name <name>            window name and class (def '%s')\n"
 	   "  -d, --delineate              alternate color from row to row\n"
 	   "  -a, --append                 append entered text to result\n"
+	   "  -p, --print-input            only print entered text\n"
 	   "  -b, --search-bar             show search bar\n"
 	   "  -0, --normalfg <hex>         rgb color, default 0x%x\n"
 	   "  -1, --normalbg <hex>         rgb color, default 0x%x\n"
@@ -1134,6 +1143,10 @@ static void opts(int argc, char *argv[])
 			interlace_ = 1;
 		} else if (opt(arg, "-a", "--append")) {
 			append_ = 1;
+			print_input_ = 0;
+		} else if (opt(arg, "-p", "--print-input")) {
+			append_ = 0;
+			print_input_ = 1;
 		} else if (opt(arg, "-b", "--search-bar")) {
 			search_bar_ = 1;
 		} else if (opt(arg, "-0", "--normal-foreground")) {

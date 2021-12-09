@@ -78,7 +78,9 @@ fi
 
 cd $etc_
 echo "ctrl_interface=DIR=$var_ GROUP=root" > current.conf
-cat configs/$1 >> current.conf
+while read line; do
+	echo "$line" >> current.conf
+done < configs/"$@"
 ln -sf current.conf wpa_supplicant.conf
 cleanup
 restart 2>&1 | error

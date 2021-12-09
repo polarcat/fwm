@@ -25,9 +25,9 @@ setup()
 {
 	printf "\a\t$1\n" > $out_
 
-	startmenu -b -a -d $out_ |
-	while read icon ssid key; do
-		echo "$1 $key" | jedi iwadd | while read error; do
+	startmenu -b -p -d $out_ |
+	while read key; do
+		echo "$key" | jedi iwadd "$1" | while read error; do
 			err=1
 
 			case $error in
@@ -42,8 +42,6 @@ setup()
 			break
 		done
 	done
-
-	$mainmenu_
 }
 
 add()
@@ -79,9 +77,9 @@ add()
 	done
 
 	startmenu -b -a -d $out_ |
-	while read bar0 bar1 bar2 bar4 bar5 ssid input; do
+	while read bar0 bar1 bar2 bar4 bar5 ssid; do
 		if [ -n "$ssid" ]; then
-			setup $ssid
+			setup "$ssid"
 			$mainmenu_
 		fi
 
@@ -118,7 +116,7 @@ connect()
 	printf "\a\tconnecting to $ssid ...\n" > $inf_
 	showinfo -d $inf_ &
 
-	jedi iwup $1 | while read status message; do
+	jedi iwup "$1" | while read status message; do
 		if [ -z "$message" ]; then
 			printf "\a\t$1: unknown status\n" > $out_
 			showinfo -d $out_
@@ -165,9 +163,9 @@ manage()
 		if [ -z "$ssid" ]; then
 			break
 		elif [ "$1" = "del" ]; then
-			jedi iwdel $ssid
+			jedi iwdel "$ssid"
 		else
-			connect $ssid
+			connect "$ssid"
 		fi
 
 		break
@@ -233,8 +231,6 @@ ssid() { printf "\a\t$2\t$3\n" >> $out_; }
 
 cleanup()
 {
-	jedi killall dhclient
-	jedi killall -9 dhclient
 	jedi ifconfig $dev down
 }
 
