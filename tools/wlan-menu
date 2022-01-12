@@ -21,96 +21,6 @@ mkdir -p $tmp_
 
 run() { $@ >/dev/null 2>&1; }
 
-setup()
-{
-	printf "\a\t$1\n" > $out_
-
-	startmenu -b -p -d $out_ |
-	while read key; do
-		echo "$key" | jedi iwadd "$1" | while read error; do
-			err=1
-
-			case $error in
-			"ok") err=0;;
-			*) printf "\a\t$error\n" > $out_;;
-			esac
-
-			if [ $err -ne 0 ]; then
-				showinfo -d $out_
-			fi
-
-			break
-		done
-	done
-}
-
-add()
-{
-	printf "\a\tscanning...\n" > $out_
-	showinfo -d $out_ &
-
-	run jedi iwlist wlan0 scan
-	run jedi wpa_cli scan
-
-	printf "\a\t\n" > $out_
-
-	jedi wpa_cli scan_results | while read bssid freq sig flags ssid; do
-		case $bssid in
-		OK|Selected|bssid) continue;;
-		esac
-
-		if [ $sig -gt -50 ]; then
-			lvl="    " # excellent
-		elif [ $sig -le -50 -a $sig -ge -60 ]; then
-			lvl="    " # good
-		elif [ $sig -lt -60 -a $sig -ge -70 ]; then
-			lvl="    " # fair
-		else
-			lvl="    " # weak
-		fi
-
-		if [ -z "$ssid" ]; then
-			ssid="??"
-		fi
-
-		printf "\a$lvl\t$ssid\n" >> $out_
-	done
-
-	startmenu -b -a -d $out_ |
-	while read bar0 bar1 bar2 bar4 bar5 ssid; do
-		if [ -n "$ssid" ]; then
-			setup "$ssid"
-			$mainmenu_
-		fi
-
-		break
-	done
-}
-
-connected()
-{
-	printf "\a\tnot connected\n" > $out_
-
-	ifconfig $dev_ | while read inet addr rest; do
-		case $addr in
-		"addr:"[0-9]*)
-			printf "\a\tconnected to $1 $addr\n" > $out_
-			break
-			;;
-		[0-9]*"."[0-9]*"."[0-9]*"."[0-9]*)
-			printf "\a\tconnected to $1 $addr\n" > $out_
-			break
-			;;
-		esac
-	done
-
-#	if ! ping -c 2 $pinghost_ >/dev/null 2>&1; then
-#		printf "\a\tno internet connection\n" >> $out_
-#	fi
-
-	showinfo -d $out_
-}
-
 connect()
 {
 	printf "\a\tconnecting to $ssid ...\n" > $inf_
@@ -133,8 +43,6 @@ connect()
 		if [ $err -ne 0 ]; then
 			showinfo -d $out_
 			$mainmenu_
-		else
-			connected $1 $message
 		fi
 
 		break
@@ -144,13 +52,7 @@ connect()
 manage()
 {
 	local cur=$etc_/current.conf
-	local ico=''
-
-	if [ "$1" = "del" ]; then
-		ico=""
-	else
-		ico=""
-	fi
+	local ico=''
 
 	printf "\a\t\n" > $out_
 
@@ -162,8 +64,6 @@ manage()
 	while read icon ssid; do
 		if [ -z "$ssid" ]; then
 			break
-		elif [ "$1" = "del" ]; then
-			jedi iwdel "$ssid"
 		else
 			connect "$ssid"
 		fi
@@ -181,16 +81,16 @@ level()
 
 	IFS=' '; getsignal $3; IFS=$ifs
 	if [ $sig_ -gt -50 ]; then
-		lvl="||||||||||||---"
+		lvl="■■■■■■■■■■■■-"
 	elif [ $sig_ -le -50 -a $sig_ -ge -60 ]; then
-		lvl="|||||||||------"
+		lvl="■■■■■■■■■----"
 	elif [ $sig_ -lt -60 -a $sig_ -ge -70 ]; then
-		lvl="||||||---------"
+		lvl="■■■■■■-------"
 	else
-		lvl="|||------------"
+		lvl="■■■----------"
 	fi
 
-	printf "$lvl|\n" >> $out_
+	printf "[$lvl]\n" >> $out_
 }
 
 devstat()
@@ -279,6 +179,7 @@ activessid()
 	done
 }
 
+stopcmd fwm-menu
 printf "" > $out_
 activessid
 read ssid < $out_
@@ -286,8 +187,6 @@ read ssid < $out_
 printf "\a\t$ssid\n" > $out_
 printf "\a\tconnect\n" >> $out_
 printf "\a\tdisconnect\n" >> $out_
-printf "\a\tadd\n" >> $out_
-printf "\a\tforget\n" >> $out_
 printf "\a\tinfo\n" >> $out_
 
 startmenu -b -a -d $out_ |
@@ -295,8 +194,6 @@ while read icon item cmd arg; do
 	case $item in
 	"connect") manage;;
 	"disconnect") disconnect;;
-	"add") add;;
-	"forget") manage del;;
 	"info") info;;
 	esac
 done
