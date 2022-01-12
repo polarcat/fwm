@@ -21,34 +21,6 @@ mkdir -p $tmp_
 
 run() { $@ >/dev/null 2>&1; }
 
-connect()
-{
-	printf "\a\tconnecting to $ssid ...\n" > $inf_
-	showinfo -d $inf_ &
-
-	jedi iwup "$1" | while read status message; do
-		if [ -z "$message" ]; then
-			printf "\a\t$1: unknown status\n" > $out_
-			showinfo -d $out_
-			break
-		fi
-
-		err=1
-
-		case $status in
-		"ok") err=0;;
-		*) printf "\a\t$status $message\n" > $out_;;
-		esac
-
-		if [ $err -ne 0 ]; then
-			showinfo -d $out_
-			$mainmenu_
-		fi
-
-		break
-	done
-}
-
 manage()
 {
 	local cur=$etc_/current.conf
@@ -90,32 +62,35 @@ level()
 		lvl="■■■----------"
 	fi
 
-	printf "[$lvl]\n" >> $out_
+	printf "[$lvl]" >> $out_
 }
 
 devstat()
 {
 	local ifs=$IFS
 
-	printf "" > $out_
+	printf "\n" > $out_
 
 	iwconfig $1 | while read dev line; do
 		case $dev in
-		*ink*) printf "\t\t  $line " >> $out_
+		*ink*) printf "\t$line " >> $out_
 		       IFS='='; level $line; IFS=$ifs;;
-		$1) printf "\t$dev\t  $line\n" >> $out_;;
-		*) printf "\t\t  $line\n" >> $out_;;
+		$1) printf "\t\033[1;32m$dev\033[0m $line\n\n" >> $out_;;
+		*) printf "\t$line\n" >> $out_;;
 		esac
 	done
 
 	ifconfig $1 | while read dev line; do
 		case $dev in
-		$1) printf "\t$dev\t  $line\n" >> $out_;;
-		*) printf "\t\t  $line\n" >> $out_;;
+		$1":") printf "\t$line\n" >> $out_;;
+		inet) printf "\t\033[1;34m$line\033[0m\n" >> $out_;;
+		*) printf "\t$dev $line\n" >> $out_;;
 		esac
 	done
 
-	showinfo $out_
+	echo "cat $out_; sleep 30" > $FWM_HOME/tmp/wlan-stat
+	chmod +x $FWM_HOME/tmp/wlan-stat
+	SHELL="$FWM_HOME/tmp/wlan-stat" xterm -geometry 80x20
 }
 
 info()
