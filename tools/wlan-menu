@@ -65,7 +65,7 @@ manage()
 		if [ -z "$ssid" ]; then
 			break
 		else
-			connect "$ssid"
+			wlan-connect "$ssid"
 		fi
 
 		break

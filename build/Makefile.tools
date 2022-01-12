@@ -37,6 +37,8 @@ tools += mod_d:center:popup:screens-menu
 tools += mod_p:center:popup:apps-menu
 tools += mod_r:center:popup:run-menu
 tools += mod_v:center:popup:clip-menu
+tools += null:null:null:wlan-connect
+tools += null:null:null:wlan-progress
 endif
 
 .PHONY: FORCE clean install
