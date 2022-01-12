@@ -1,0 +1,69 @@
+#!/bin/sh
+
+done_=0
+bgpid_='a'
+progress_=''
+
+draw_progress()
+{
+	local i=0
+	progress_=''
+	while [ $i -le 15 ]; do
+		if [ $i -eq $1 ]; then
+			progress_=$progress_'■'
+		else
+			progress_=$progress_'-'
+		fi
+		i=$((i + 1))
+	done
+}
+
+show_progress()
+{
+	local n=0
+	local i=0
+
+	while [ $done_ -ne 1 ]; do
+		if [ $i -lt 15 -a $n -eq 0 ]; then
+			i=$((i + 1))
+		elif [ $i -le 15 -a $n -eq 0 ]; then
+			n=1
+			i=14
+		elif [ $i -gt 0 -a $n -eq 1 ]; then
+			i=$((i - 1))
+		else
+			i=1
+			n=0
+		fi
+		draw_progress $i
+		printf "\033[G $ESSID [$progress_]\033[K"
+		sleep .1
+	done
+}
+
+hide_progress()
+{
+	done_=1
+	tput cnorm
+	kill $bgpid_ >/dev/null 2>&1
+	kill -9 $bgpid_ >/dev/null 2>&1
+}
+
+if [ -z "$ESSID" ]; then
+	exit 1
+fi
+
+trap hide_progress KILL TERM INT
+tput civis
+show_progress &
+bgpid_=$!
+dev=$(sudo iwup "$ESSID" | cut -f2 -d' ')
+hide_progress
+printf "\033[G $ESSID \033[K"
+
+ifconfig $dev | while read tag addr rest; do
+	case $tag in
+	inet) printf "\033[0;30m$addr \033[0m";;
+	esac
+done
+sleep 3

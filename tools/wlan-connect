@@ -1,0 +1,33 @@
+#!/bin/sh
+
+stopcmd()
+{
+	cd /proc
+	for pid in *; do
+		if [ ! -f $pid/comm ]; then
+			continue
+		fi
+		read cmd < $pid/comm
+		case $cmd in
+                xterm*name*wlan-progress*) kill $pid; kill -9 $pid 2>/dev/null;;
+		esac
+	done
+}
+
+if [ -z "$1" ]; then
+	echo "Usage: $(basename $0) <essid>"
+	exit 1
+fi
+
+ESSID="$@"
+SHELL="$FWM_HOME/bin/wlan-progress"
+
+if [ ! -x "$SHELL" ]; then
+	exit 1
+fi
+
+width=${#ESSID}
+width=$((width + 21))
+export ESSID SHELL
+stopcmd
+xterm -bg "#41749c" -name "wlan-progress" -geometry ${width}x1
