@@ -6,6 +6,8 @@ sys_=/sys/class/net
 dev_=''
 ifs_=$IFS
 err_=0
+dhcpc_=''
+dhcpa_=''
 
 help()
 {
@@ -36,28 +38,40 @@ error()
 cleanup()
 {
 	ifconfig $dev_ down
-	killall dhclient
-	killall -9 dhclient
+	killall $dhcpc_
+	killall -9 $dhcpc_
 }
 
 restart()
 {
-	if [ -f /etc/init.d/wpa_supplicant ]; then
-		/etc/init.d/wpa_supplicant restart
-	else
-		killall wpa_supplicant 2>/dev/null
-		killall -9 wpa_supplicant 2>/dev/null
-		wpa_supplicant -s -B -i$dev_ -c /etc/wpa_supplicant/current.conf
+	# we do not want to use startu up script even if it is present
+	if [ -x /etc/init.d/wpa_supplicant ]; then
+		/etc/init.d/wpa_supplicant stop 2>/dev/null
 	fi
+
+	killall wpa_supplicant 2>/dev/null
+	killall -9 wpa_supplicant 2>/dev/null
+	ifconfig $dev_ up
+	wpa_supplicant -B -i $dev_ -c /etc/wpa_supplicant/current.conf
 	err_=$?
 }
 
 connect()
 {
 	ifconfing $dev_ up
-	dhclient $dev_
+	$dhcpc_ $dhcpa_ $dev_
 	err_=$?
 }
+
+if which dhclient >/dev/null; then
+	dhcpc_=dhclient
+elif which udhcpc >/dev/null; then
+	dhcpc_=udhcpc
+	dhcpa_='-i'
+else
+	echo "(ee) no DHCP client found"
+	exit 1
+fi
 
 if [ $# -eq 0 ]; then
 	help
