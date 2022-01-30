@@ -62,7 +62,7 @@ level()
 		lvl="■■■----------"
 	fi
 
-	printf "[$lvl]" >> $out_
+	printf "[$lvl]\n" >> $out_
 }
 
 devstat()
@@ -88,7 +88,7 @@ devstat()
 		esac
 	done
 
-	echo "cat $out_; sleep 30" > $FWM_HOME/tmp/wlan-stat
+	printf "#!/bin/sh\ncat $out_\nsleep 30" > $FWM_HOME/tmp/wlan-stat
 	chmod +x $FWM_HOME/tmp/wlan-stat
 	SHELL="$FWM_HOME/tmp/wlan-stat" xterm -geometry 80x20
 }
