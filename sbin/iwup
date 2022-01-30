@@ -6,6 +6,7 @@ sys_=/sys/class/net
 dev_=''
 ifs_=$IFS
 err_=0
+log_=/tmp/$USER/iwup.log
 dhcpc_=''
 dhcpa_=''
 
@@ -22,19 +23,6 @@ getdev()
 	dev_=$1
 }
 
-error()
-{
-	while read line; do
-		case $line in
-		*"error"*|*"Error"*|*"ERROR"*|*"fail"*|*"Fail"*|*"FAIL"*)
-			echo "$line"
-			return 1
-			;;
-		esac
-	done
-	return 0
-}
-
 cleanup()
 {
 	ifconfig $dev_ down
@@ -46,11 +34,11 @@ restart()
 {
 	# we do not want to use startu up script even if it is present
 	if [ -x /etc/init.d/wpa_supplicant ]; then
-		/etc/init.d/wpa_supplicant stop 2>/dev/null
+		/etc/init.d/wpa_supplicant stop
 	fi
 
-	killall wpa_supplicant 2>/dev/null
-	killall -9 wpa_supplicant 2>/dev/null
+	killall wpa_supplicant
+	killall -9 wpa_supplicant
 	ifconfig $dev_ up
 	wpa_supplicant -B -i $dev_ -c /etc/wpa_supplicant/current.conf
 	err_=$?
@@ -69,7 +57,7 @@ elif which udhcpc >/dev/null; then
 	dhcpc_=udhcpc
 	dhcpa_='-i'
 else
-	echo "(ee) no DHCP client found"
+	echo "(ee) no DHCP client found" >&2
 	exit 1
 fi
 
@@ -86,27 +74,28 @@ for dir in $sys_/*; do
 done
 
 if [ -z "$dev_" ]; then
-	echo "wireless interface not found"
+	echo "wireless interface not found" >&2
 	exit 1
 fi
 
+echo -n >$log_
 cd $etc_
 echo "ctrl_interface=DIR=$var_ GROUP=root" > current.conf
 while read line; do
 	echo "$line" >> current.conf
 done < configs/"$@"
 ln -sf current.conf wpa_supplicant.conf
-cleanup
-restart 2>&1 | error
+cleanup >>$log_ 2>&1
+restart >>$log_ 2>&1
 
 if [ $err_ -ne 0 ]; then
 	# reset config
 	echo "ctrl_interface=DIR=$var_ GROUP=root" > current.conf
-	restart 2>&1 | error
+	restart >>$log_ 2>&1
 	exit 1
 fi
 
-connect 2>&1 | error
+connect >>$log_ 2>&1
 
 if [ $err_ -eq 0 ]; then
 	echo "ok $dev_"
