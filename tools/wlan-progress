@@ -44,7 +44,7 @@ show_progress()
 hide_progress()
 {
 	done_=1
-	tput cnorm
+	printf "\033[?25h"
 	kill $bgpid_ >/dev/null 2>&1
 	kill -9 $bgpid_ >/dev/null 2>&1
 }
@@ -54,11 +54,11 @@ if [ -z "$ESSID" ]; then
 fi
 
 trap hide_progress KILL TERM INT
-tput civis
+printf "\033[?25l"
 show_progress &
 bgpid_=$!
 dev=$(sudo iwup "$ESSID" | cut -f2 -d' ')
-hide_progress
+hide_progress >/dev/null
 printf "\033[G $ESSID \033[K"
 
 ifconfig $dev | while read tag addr rest; do
@@ -67,3 +67,4 @@ ifconfig $dev | while read tag addr rest; do
 	esac
 done
 sleep 3
+printf "\033[?25h"
