@@ -223,6 +223,7 @@ struct toolbox {
 	struct client *cli;
 	uint8_t size;
 	uint8_t visible;
+	uint16_t xdiv;
 };
 
 static struct toolbox toolbox;
@@ -1499,7 +1500,7 @@ static void hide_toolbox()
 static void draw_toolbox(const char *str, uint8_t len)
 {
 	struct color *fg = color2ptr(NOTICE_FG);
-	uint16_t x = (toolbox.size - FONT2_SIZE) / 2;
+	uint16_t x = (toolbox.size - FONT2_SIZE) / toolbox.xdiv;
 
 	fill_rect(toolbox.win, toolbox.gc, color2ptr(NOTICE_BG), 0, 0,
 		  toolbox.size, toolbox.size);
@@ -6093,6 +6094,7 @@ static void init_font(void)
 		panic("XftFontOpen(%s)\n", FONT1_NAME);
 
 	text_yoffs = font1->ascent + ITEM_V_MARGIN;
+	toolbox.xdiv = 2 * font_scale;
 
 	font2 = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
 			    FONT2_NAME, XFT_SIZE, XftTypeDouble,
