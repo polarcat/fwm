@@ -277,6 +277,7 @@ struct tag {
 	struct list_head head;
 	struct list_head clients;
 	struct client *visited; /* last focused client */
+	struct client *prev; /* prev focused client */
 	struct client *front; /* front client */
 	uint8_t id;
 	int16_t x;
@@ -876,7 +877,8 @@ static void center_pointer(struct client *cli)
 	if (cli->flags & CLI_FLG_POPUP)
 		return;
 
-	warp_pointer(cli->win, cli->w / 2, cli->h / 2);
+	uint8_t offset = BORDER_WIDTH * 2;
+	warp_pointer(cli->win, cli->w / 2 + offset, cli->h / 2 + offset);
 }
 
 static void restore_window(xcb_window_t win, struct screen **scr,
@@ -3243,6 +3245,9 @@ static void del_window(xcb_window_t win)
 	if (curscr->tag->visited && curscr->tag->visited->win == win)
 		curscr->tag->visited = NULL;
 
+	if (curscr->tag->prev && curscr->tag->prev->win == win)
+		curscr->tag->prev = NULL;
+
 	scr = curscr;
 
 	if (!(cli = win2cli(win))) {
@@ -3267,10 +3272,16 @@ static void del_window(xcb_window_t win)
 		print_title(scr, XCB_WINDOW_NONE);
 
 out:
-	if (save_x_ < 0 || save_y_ < 0)
+	if (scr && scr->tag->prev && scr->tag->prev->win != XCB_WINDOW_NONE) {
+		struct arg arg = { .cli = scr->tag->prev, .kmap = NULL, };
+		raise_client(&arg);
+		center_pointer(arg.cli);
+	} else if (save_x_ < 0 || save_y_ < 0) {
 		focus_any(0);
-	else
+	} else {
+		focus_window(rootscr->root);
 		warp_pointer(rootscr->root, save_x_, save_y_);
+	}
 
 flush:
 	update_client_list();
@@ -3684,8 +3695,10 @@ static void raise_client(struct arg *arg)
 			return;
 	}
 
-	if (curscr->tag->front)
+	if (curscr->tag->front) {
+		curscr->tag->prev = curscr->tag->front;
 		unfocus_window(curscr->tag->front->win);
+	}
 
 	if (curscr->tag->visited)
 		unfocus_window(curscr->tag->visited->win);
