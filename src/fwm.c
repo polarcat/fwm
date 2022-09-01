@@ -3865,10 +3865,13 @@ static void select_tag(struct screen *scr, int16_t x, int16_t y)
 	toolbar.cli = NULL;
 	hide_toolbar();
 
-	if (scr->tag && tag_pointed(scr->tag, x, y))
+	if (scr->tag && tag_pointed(scr->tag, x, y)) {
+		curscr->flags |= SCR_FLG_SWITCH_WINDOW_NOWARP;
+		switch_window(curscr, DIR_NEXT);
 		return;
-	else if (scr->tag) /* deselect current tag instantly */
+	} else if (scr->tag) { /* deselect current tag instantly */
 		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
+	}
 
 	prev = scr->tag;
 
