@@ -3827,12 +3827,17 @@ static void scan_clients(uint8_t rescan)
 
 	/* walk through windows tree */
 	c = xcb_query_tree(dpy, rootscr->root);
-	tree = xcb_query_tree_reply(dpy, c, 0);
-	if (!tree)
-		panic("xcb_query_tree_reply() failed\n");
+	if (!(tree = xcb_query_tree_reply(dpy, c, 0))) {
+		ee("xcb_query_tree_reply(...) failed\n");
+		goto out;
+	}
 
 	nn = xcb_query_tree_children_length(tree);
-	wins = xcb_query_tree_children(tree);
+	if (!(wins = xcb_query_tree_children(tree))) {
+		n = 0;
+		ee("xcb_query_tree_children(...) failed\n");
+		goto out;
+	}
 
 	if (rescan)
 		flags = WIN_FLG_USER;
@@ -3863,6 +3868,7 @@ static void scan_clients(uint8_t rescan)
 		hide_leader(wins[i]);
 	}
 
+out:
 	ii("%d/%d windows added\n", n, nn);
 
 	if (!rescan && (cli = front_client(curscr->tag))) {
