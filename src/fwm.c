@@ -1672,7 +1672,7 @@ static void focus_any(pid_t pid)
 
 static void draw_hintbox(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
-	fill_rect(toolbox.win, toolbox.gc, color2ptr(NORMAL_BG), x + 1, y + 1,
+	fill_rect(toolbox.win, toolbox.gc, color2ptr(ALERT_BG), x + 1, y + 1,
 		  w - 2 , h - 2);
 }
 
