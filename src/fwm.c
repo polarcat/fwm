@@ -191,16 +191,16 @@ struct toolbar_item {
 };
 
 static struct toolbar_item toolbar_items[] = {
-	{ BTN_MOUSE, slen(BTN_MOUSE), },
 	{ BTN_CLOSE, slen(BTN_CLOSE), },
-	{ BTN_MOVE, slen(BTN_MOVE), },
 	{ BTN_CENTER, slen(BTN_CENTER), },
+	{ BTN_FLAG, slen(BTN_FLAG), },
 	{ BTN_LEFT, slen(BTN_LEFT), },
 	{ BTN_RIGHT, slen(BTN_RIGHT), },
 	{ BTN_TOP, slen(BTN_TOP), },
 	{ BTN_BOTTOM, slen(BTN_BOTTOM), },
 	{ BTN_EXPAND, slen(BTN_EXPAND), },
-	{ BTN_FLAG, slen(BTN_FLAG), },
+	{ BTN_MOVE, slen(BTN_MOVE), },
+	{ BTN_MOUSE, slen(BTN_MOUSE), },
 };
 
 struct toolbar {
@@ -213,7 +213,13 @@ struct toolbar {
 	xcb_keycode_t kprev;
 	xcb_keycode_t kenter;
 	xcb_keycode_t kclose; /* hide toolbar */
-	uint16_t title_x;
+};
+
+enum {
+	TOP_LEFT,
+	TOP_RIGHT,
+	BOTTOM_LEFT,
+	BOTTOM_RIGHT,
 };
 
 struct toolbox {
@@ -224,6 +230,9 @@ struct toolbox {
 	uint8_t size;
 	uint8_t visible;
 	uint16_t xdiv;
+	uint16_t x;
+	uint16_t y;
+	uint8_t gravity;
 };
 
 static struct toolbox toolbox;
@@ -1410,8 +1419,10 @@ static void move_toolbox(struct client *cli)
 	uint32_t val[2];
 	uint32_t mask;
 
-	val[0] = (cli->x + cli->w) - toolbox.size;
-	val[1] = (cli->y + cli->h) - toolbox.size;
+	toolbox.x = (cli->x + cli->w) - toolbox.size;
+	toolbox.y = (cli->y + cli->h) - toolbox.size;
+	val[0] = toolbox.x;
+	val[1] = toolbox.y;
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	xcb_configure_window_checked(dpy, toolbox.win, mask, val);
 }
@@ -1446,38 +1457,43 @@ static int toolbox_obscured(struct client *cli, int16_t x, int16_t y)
 	return 0;
 }
 
-static int find_toolbox(struct client *cli, uint32_t *xy)
+static int find_toolbox(struct client *cli)
 {
 	int16_t xx = curscr->x;
 	uint16_t ww = curscr->x + curscr->w;
 	int16_t yy = curscr->y;
 	uint16_t hh = curscr->y + curscr->h;
-	uint16_t d = toolbox.size - 2 * BORDER_WIDTH;
+	uint16_t bb = 2 * BORDER_WIDTH;
+	uint16_t d = toolbox.size - bb;
 
 	if (cli->x + cli->w >= xx && cli->x + cli->w <= ww &&
 		   cli->y >= yy && cli->y <= hh &&
 		   !toolbox_obscured(cli, cli->x + cli->w - d, cli->y)) {
-		xy[0] = cli->x + cli->w - d - 2 * BORDER_WIDTH;
-		xy[1] = cli->y + 2 * BORDER_WIDTH;
+		toolbox.x = cli->x + cli->w - d - bb;
+		toolbox.y = cli->y + bb;
+		toolbox.gravity = TOP_RIGHT;
 		dd("TOP RIGHT is OK win %#x\n", cli->win);
 	} else if (cli->x >= xx && cli->x <= ww &&
 	    cli->y >= yy && cli->y <= hh &&
 	    !toolbox_obscured(cli, cli->x, cli->y)) {
-		xy[0] = cli->x + 2 * BORDER_WIDTH;
-		xy[1] = cli->y + 2 * BORDER_WIDTH;
+		toolbox.x = cli->x + bb;
+		toolbox.y = cli->y + bb;
+		toolbox.gravity = TOP_LEFT;
 		dd("TOP LEFT is OK win %#x\n", cli->win);
 	} else if (cli->x + cli->w >= xx && cli->x + cli->w <= ww &&
 		   cli->y + cli->h >= yy && cli->y + cli->h <= hh &&
 		   !toolbox_obscured(cli, cli->x + cli->w - d,
 				     cli->y + cli->h - d)) {
-		xy[0] = cli->x + cli->w - d - 2 * BORDER_WIDTH;
-		xy[1] = cli->y + cli->h - d - 2 * BORDER_WIDTH;
+		toolbox.x = cli->x + cli->w - d - bb;
+		toolbox.y = cli->y + cli->h - d - bb;
+		toolbox.gravity = BOTTOM_RIGHT;
 		dd("BOT RIGHT is OK win %#x\n", cli->win);
 	} else if (cli->x >= xx && cli->x <= ww &&
 		   cli->y + cli->h >= yy && cli->y + cli->h <= hh &&
 		   !toolbox_obscured(cli, cli->x, cli->y + cli->h - d)) {
-		xy[0] = cli->x + 2 * BORDER_WIDTH;
-		xy[1] = cli->y + cli->h - d - 2 * BORDER_WIDTH;
+		toolbox.x = cli->x + bb;
+		toolbox.y = cli->y + cli->h - d - bb;
+		toolbox.gravity = BOTTOM_LEFT;
 		dd("BOT LEFT is OK win %#x\n", cli->win);
 	} else {
 		ww("no toolbox for win %#x geo %ux%u+%d+%d scr %u tag '%s'\n",
@@ -1502,8 +1518,9 @@ static void draw_toolbox(const char *str, uint8_t len)
 	struct color *fg = color2ptr(NOTICE_FG);
 	uint16_t x = (toolbox.size - FONT2_SIZE) / toolbox.xdiv;
 
-	fill_rect(toolbox.win, toolbox.gc, color2ptr(NOTICE_BG), 0, 0,
-		  toolbox.size, toolbox.size);
+	fill_rect(toolbox.win, toolbox.gc, color2ptr(NOTICE_BG), 1, 1,
+	 toolbox.size - ITEM_V_MARGIN, toolbox.size - ITEM_V_MARGIN);
+
 	XftDrawStringUtf8(toolbox.draw, fg->val, font2, x, text_yoffs,
 			  (XftChar8 *) str, len);
 	XSync(xdpy, 0);
@@ -1519,13 +1536,15 @@ static void show_toolbox(struct client *cli)
 	if (!cli || (cli && cli->flags & (CLI_FLG_POPUP | CLI_FLG_EXCLUSIVE)))
 		return;
 
-	if (!find_toolbox(cli, val)) {
+	if (!find_toolbox(cli)) {
 		hide_toolbox();
 		return;
 	}
 
 	raise_window(toolbox.win);
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+	val[0] = toolbox.x - BORDER_WIDTH * 3;
+	val[1] = toolbox.y + BORDER_WIDTH;
 	xcb_configure_window(dpy, toolbox.win, mask, val);
 	xcb_map_window_checked(dpy, toolbox.win);
 
@@ -1573,7 +1592,6 @@ static void hide_toolbar(void)
 	XftDrawDestroy(toolbar.panel.draw);
 	xcb_free_gc(dpy, toolbar.panel.gc);
 	xcb_destroy_window_checked(dpy, toolbar.panel.win);
-	toolbar.scr->items[PANEL_AREA_TITLE].x = toolbar.title_x;
 	title_width(toolbar.scr);
 
 	if (toolbar.cli) {
@@ -1734,7 +1752,7 @@ static void init_toolbox(void)
 	toolbox.size = panel_height;
 	toolbox.win = xcb_generate_id(dpy);
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
-	val[0] = color2int(NOTICE_BG);
+	val[0] = color2int(NORMAL_BG);
 	val[1] = XCB_EVENT_MASK_BUTTON_PRESS;
 	val[1] |= XCB_EVENT_MASK_BUTTON_RELEASE;
 	val[1] |= XCB_EVENT_MASK_LEAVE_WINDOW;
@@ -1744,7 +1762,8 @@ static void init_toolbox(void)
 			  XCB_WINDOW_CLASS_INPUT_OUTPUT, rootscr->root_visual,
 			  mask, val);
 
-	border_width(toolbox.win, 0);
+	border_color(toolbox.win, notice_bg);
+	border_width(toolbox.win, BORDER_WIDTH);
 	xcb_flush(dpy);
 	mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND;
 	val[0] = val[1] = color2int(NORMAL_BG);
@@ -1769,29 +1788,39 @@ static void close_client(struct client **ptr)
 	free_client(ptr);
 }
 
-static uint16_t reset_toolbar(void)
+static void reset_toolbar_item(struct toolbar_item *item, uint16_t w)
+{
+	uint16_t h;
+
+	item->flags = 0;
+
+	if (item->str == (const char *) BTN_FLAG && curscr->tag->anchor)
+		item->flags = ITEM_FLG_LOCKED;
+
+	item->x = w;
+	text_exts(item->str, item->len, &item->w, &h, font2);
+}
+
+static void reset_toolbar(void)
 {
 	struct toolbar_item *ptr = toolbar_items;
 	struct toolbar_item *end = toolbar_items + ARRAY_SIZE(toolbar_items);
-	uint16_t h;
-	uint16_t w = 0;
+	int32_t w;
+	uint8_t reverse;
 
-	while (ptr < end) {
-		ptr->flags = 0;
-
-		if (ptr->str == (const char *) BTN_FLAG &&
-		    curscr->tag->anchor) {
-			ptr->flags = ITEM_FLG_LOCKED;
-		}
-
-		ptr->x = w;
-		text_exts(ptr->str, ptr->len, &ptr->w, &h, font2);
-		w += (panel_height - ITEM_V_MARGIN);
-		ptr++;
+	if (toolbox.gravity == TOP_LEFT || toolbox.gravity == BOTTOM_LEFT) {
+		reverse = 1;
+		w =  ARRAY_SIZE(toolbar_items) * panel_height - panel_height;
+	} else {
+		reverse = 0;
+		w = 0;
 	}
 
-	ii("toolbar width %u\n", w);
-	return w;
+	while (ptr < end) {
+		reset_toolbar_item(ptr, w);
+		reverse ? (w -= panel_height) : (w += panel_height);
+		ptr++;
+	}
 }
 
 static void toolbar_grab_input(void)
@@ -1889,8 +1918,8 @@ static void draw_toolbar_text(struct toolbar_item *item, uint8_t flag)
 {
 	struct color *fg;
 	struct color *bg;
-	int16_t xpad;
-	uint16_t w;
+	uint16_t item_w;
+	uint16_t xx;
 
 	if (item->flags & flag)
 		return;
@@ -1912,23 +1941,51 @@ static void draw_toolbar_text(struct toolbar_item *item, uint8_t flag)
 		item->flags &= ~ITEM_FLG_ALERT;
 	}
 
+	if (item->str == (const char *) BTN_CLOSE)
+		fg = color2ptr(ALERT_FG);
+
 	item->flags |= flag;
-	w = panel_height - ITEM_V_MARGIN;
-	xpad = (w - item->w) / 2;
+	item_w = panel_height - ITEM_V_MARGIN;
 
 	if (item->w % 2)
-		w -= 2; /* FIXME: text looks better centered this way */
+		item_w = item->w;
+	else
+		item_w = item->w + 1; /* text is more "centered" this way */
 
-	draw_panel_text(&toolbar.panel, fg, bg, item->x, w,
-			item->str, item->len, font2, xpad);
+	xx = (panel_height - item_w) / 2;
+
+	fill_rect(toolbar.panel.win, toolbar.panel.gc, bg, item->x, 1,
+	 toolbox.size - ITEM_V_MARGIN, toolbox.size - ITEM_V_MARGIN);
+	XftDrawStringUtf8(toolbar.panel.draw, fg->val, font2, item->x + xx,
+	 text_yoffs, (XftChar8 *) item->str, item->len);
+	XSync(xdpy, 0);
 }
 
-static void focus_toolbar_item(int16_t x, int16_t y)
+static void focus_toolbar_item(struct toolbar_item *item, int16_t x)
+{
+	uint8_t flg;
+	uint16_t xx = item->x + panel_height - ITEM_V_MARGIN - 1;
+
+	if (x < item->x || x > xx) { /* out of focus */
+		if (item->flags & ITEM_FLG_LOCKED &&
+		 curscr->tag->anchor == toolbar.cli) {
+			item->flags &= ~ITEM_FLG_LOCKED; /* toggle lock */
+			flg = ITEM_FLG_LOCKED;
+		} else {
+			flg = ITEM_FLG_NORMAL;
+		}
+	} else { /* in focus */
+		flg = ITEM_FLG_FOCUSED;
+		focused_item = item;
+	}
+
+	draw_toolbar_text(item, flg);
+}
+
+static void focus_toolbar_items(int16_t x, int16_t y)
 {
 	struct toolbar_item *ptr = toolbar_items;
 	struct toolbar_item *end = toolbar_items + ARRAY_SIZE(toolbar_items);
-	uint16_t xx = 0;
-	uint8_t flg;
 
 	focused_item = NULL;
 
@@ -1936,34 +1993,18 @@ static void focus_toolbar_item(int16_t x, int16_t y)
 		return;
 
 	while (ptr < end) {
-		xx = ptr->x + panel_height - ITEM_V_MARGIN - 1;
-
-		if (x < ptr->x || x > xx) { /* out of focus */
-			if (ptr->flags & ITEM_FLG_LOCKED &&
-			    curscr->tag->anchor == toolbar.cli) {
-				ptr->flags &= ~ITEM_FLG_LOCKED; /* toggle lock */
-				flg = ITEM_FLG_LOCKED;
-			} else {
-				flg = ITEM_FLG_NORMAL;
-			}
-		} else { /* in focus */
-			if (ptr->str == (const char *) BTN_CLOSE)
-				flg = ITEM_FLG_ALERT;
-			else
-				flg = ITEM_FLG_FOCUSED;
-
-			focused_item = ptr;
-		}
-
-		draw_toolbar_text(ptr, flg);
+		focus_toolbar_item(ptr, x);
 		ptr++;
 	}
 }
 
 static void draw_toolbar(void)
 {
-	warp_pointer(toolbar.panel.win, toolbar_items[0].x, panel_height / 2);
-	focus_toolbar_item(toolbar_items[0].x, 0);
+	struct toolbar_item *ptr;
+	ptr = &toolbar_items[ARRAY_SIZE(toolbar_items) - 1];
+
+	warp_pointer(toolbar.panel.win, ptr->x, panel_height / 2);
+	focus_toolbar_items(ptr->x, 0);
 	xcb_flush(dpy);
 }
 
@@ -2382,15 +2423,21 @@ static void window_state(xcb_window_t win, uint8_t state)
 
 static void setup_toolbar(struct client *cli)
 {
-	uint16_t w;
+	uint16_t w = ARRAY_SIZE(toolbar_items) * panel_height;
 	uint32_t val[2], mask;
 
-	w = reset_toolbar();
+	reset_toolbar();
 
 	toolbar.cli = cli;
 	toolbar.scr = curscr;
-	toolbar.x = curscr->items[PANEL_AREA_TITLE].x;
-	toolbar.y = curscr->panel.y;
+
+	if (toolbox.gravity == TOP_LEFT || toolbox.gravity == BOTTOM_LEFT)
+		toolbar.x = toolbox.x + toolbox.size + BORDER_WIDTH;
+	else
+		toolbar.x = toolbox.x - w - BORDER_WIDTH;
+
+	toolbar.y = toolbox.y;
+
 	toolbar.panel.w = w;
 	toolbar.panel.h = panel_height;
 	toolbar.panel.win = xcb_generate_id(dpy);
@@ -2412,6 +2459,8 @@ static void setup_toolbar(struct client *cli)
 			  0, 0, toolbar.panel.w, toolbar.panel.h,
 			  0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			  rootscr->root_visual, mask, val);
+	border_color(toolbar.panel.win, notice_bg);
+	border_width(toolbar.panel.win, BORDER_WIDTH);
 	xcb_flush(dpy);
 
 	toolbar.panel.gc = xcb_generate_id(dpy);
@@ -2441,7 +2490,7 @@ static void show_toolbar(struct arg *arg)
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
 	val[0] = toolbar.x;
-	val[1] = toolbar.y;
+	val[1] = toolbar.y + BORDER_WIDTH;
 	val[2] = toolbar.panel.w;
 	val[3] = toolbar.panel.h;
 	xcb_configure_window(dpy, toolbar.panel.win, mask, val);
@@ -2450,8 +2499,6 @@ static void show_toolbar(struct arg *arg)
 	   toolbar.scr->id, toolbar.scr->tag->name);
 	xcb_map_window_checked(dpy, toolbar.panel.win);
 	draw_toolbar();
-	toolbar.title_x = toolbar.scr->items[PANEL_AREA_TITLE].x;
-	toolbar.scr->items[PANEL_AREA_TITLE].x = toolbar.x + toolbar.panel.w;
 	title_width(toolbar.scr);
 	print_title(toolbar.scr, toolbar.cli->win);
 	raise_window(toolbar.panel.win);
@@ -5100,11 +5147,9 @@ static void toolbar_button_press(void)
 	} else if (focused_item->str == (const char *) BTN_CENTER) {
 		arg.cli->pos = WIN_POS_CENTER;
 		place_window(&arg);
-		hide_toolbar();
 	} else if (focused_item->str == (const char *) BTN_EXPAND) {
 		arg.cli->pos = WIN_POS_FILL;
 		place_window(&arg);
-		hide_toolbar();
 	} else if (focused_item->str == (const char *) BTN_FLAG) {
 		if (toolbar.cli &&
 		    (!curscr->tag->anchor ||
@@ -5120,19 +5165,18 @@ static void toolbar_button_press(void)
 			focused_item->flags &= ~ITEM_FLG_LOCKED;
 			recalc_space(curscr, 0);
 		}
-
-		hide_toolbar();
 	} else if (focused_item->str == (const char *) BTN_MOVE) {
 		toolbar_pressed = 1; /* client window handles button release */
 		arg.cli->flags |= CLI_FLG_MOVE;
-		hide_toolbar();
+		hide_toolbar(); /* special case */
 		center_pointer(arg.cli);
 		init_motion(arg.cli->win);
 		raise_panel(curscr);
 		xcb_flush(dpy);
-	} else {
-		hide_toolbar();
+		return; /* special case */
 	}
+
+	hide_toolbar();
 }
 
 static void panel_button_press(xcb_button_press_event_t *e)
@@ -5354,7 +5398,7 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	   e->root_x, e->root_y, e->event, e->event_x, e->event_y, e->child);
 
 	if (e->event == toolbar.panel.win) {
-		focus_toolbar_item(e->event_x, e->event_y);
+		focus_toolbar_items(e->event_x, e->event_y);
 		return;
 	} else if (e->child == toolbox.win) {
 		return;
