@@ -460,6 +460,7 @@ enum coloridx {
 	NOTICE_FG,
 	NOTICE_BG,
 	BORDER_FG,
+	TITLE_FG,
 };
 
 static XftColor normal_fg;
@@ -471,6 +472,7 @@ static uint32_t alert_bg;
 static XftColor notice_fg;
 static uint32_t notice_bg;
 static uint32_t border_fg;
+static XftColor title_fg;
 
 static struct color defcolors[] = {
 	{ "normal-fg", &normal_fg, 0xa0a0a0, COLOR_TYPE_XFT, },
@@ -482,6 +484,7 @@ static struct color defcolors[] = {
 	{ "notice-fg", &notice_fg, 0x101010, COLOR_TYPE_XFT, },
 	{ "notice-bg", &notice_bg, 0x90ae2b, COLOR_TYPE_INT, },
 	{ "border-fg", &border_fg, 0x444444, COLOR_TYPE_INT, },
+	{ "title-fg", &title_fg, 0x90ae2b, COLOR_TYPE_XFT, },
 	{ NULL, NULL, 0, 0, },
 };
 
@@ -814,7 +817,7 @@ static void print_title(struct screen *scr, xcb_window_t win)
 		title.str[title.len - 1] = '.';
 	}
 
-	draw_panel_text(&scr->panel, color2ptr(NORMAL_FG),
+	draw_panel_text(&scr->panel, color2ptr(TITLE_FG),
 			color2ptr(NORMAL_BG),
 			scr->items[PANEL_AREA_TITLE].x,
 			scr->items[PANEL_AREA_TITLE].w,
