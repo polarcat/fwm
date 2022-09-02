@@ -2811,10 +2811,10 @@ static void window_halfw(uint16_t *w, uint16_t *h, uint8_t div)
 	*h = curscr->h - 2 * BORDER_WIDTH;
 }
 
-static void window_halfwh(uint16_t *w, uint16_t *h)
+static void window_halfwh(uint16_t *w, uint16_t *h, uint8_t div)
 {
-	*w = curscr->w / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
-	*h = curscr->h / 2 - 2 * BORDER_WIDTH - WINDOW_PAD;
+	*w = curscr->w / div - 2 * BORDER_WIDTH - WINDOW_PAD;
+	*h = curscr->h / div - 2 * BORDER_WIDTH - WINDOW_PAD;
 
 	if (curscr->h % 2)
 		(*h)++;
@@ -2857,7 +2857,7 @@ static void place_window(struct arg *arg)
 		arg->cli->flags |= CLI_FLG_CENTER;
 		x = curscr->x + curscr->w / 2 - curscr->w / 4;
 		y = curscr->top + curscr->h / 2 - curscr->h / 4;
-		window_halfwh(&w, &h);
+		window_halfwh(&w, &h, 2);
 		x -= arg->cli->inc;
 		y -= arg->cli->inc;
 		w += 2 * arg->cli->inc;
@@ -2911,27 +2911,43 @@ static void place_window(struct arg *arg)
 		break;
 	case WIN_POS_TOP_LEFT:
 		tt("WIN_POS_TOP_LEFT\n");
+
+		if (last_winpos != pos || ++arg->cli->div > POS_DIV_MAX)
+			arg->cli->div = 2;
+
 		x = curscr->x;
 		y = curscr->top;
-		window_halfwh(&w, &h);
+		window_halfwh(&w, &h, arg->cli->div);
 		break;
 	case WIN_POS_TOP_RIGHT:
 		tt("WIN_POS_TOP_RIGHT\n");
-		x = curscr->x + curscr->w / 2;
+
+		if (last_winpos != pos || ++arg->cli->div > POS_DIV_MAX)
+			arg->cli->div = 2;
+
+		window_halfwh(&w, &h, arg->cli->div);
+		x = curscr->x + curscr->w - w - BORDER_WIDTH * 2;
 		y = curscr->top;
-		window_halfwh(&w, &h);
 		break;
 	case WIN_POS_BOTTOM_LEFT:
 		tt("WIN_POS_BOTTOM_LEFT\n");
+
+		if (last_winpos != pos || ++arg->cli->div > POS_DIV_MAX)
+			arg->cli->div = 2;
+
+		window_halfwh(&w, &h, arg->cli->div);
 		x = curscr->x;
-		y = curscr->top + curscr->h / 2;
-		window_halfwh(&w, &h);
+		y = curscr->top + curscr->h - h - BORDER_WIDTH * 2;
 		break;
 	case WIN_POS_BOTTOM_RIGHT:
 		tt("WIN_POS_BOTTOM_RIGHT\n");
-		x = curscr->x + curscr->w / 2;
-		y = curscr->top + curscr->h / 2;
-		window_halfwh(&w, &h);
+
+		if (last_winpos != pos || ++arg->cli->div > POS_DIV_MAX)
+			arg->cli->div = 2;
+
+		window_halfwh(&w, &h, arg->cli->div);
+		x = curscr->x + curscr->w - w - BORDER_WIDTH * 2;
+		y = curscr->top + curscr->h - h - BORDER_WIDTH * 2;
 		break;
 	default:
 		return;
