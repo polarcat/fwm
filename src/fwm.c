@@ -2550,7 +2550,7 @@ static struct client *next_client(struct client *cli)
 	}
 
 	ww("no next valid window after %#x\n", cli->win);
-	return NULL;
+	return cli;
 }
 
 static struct client *switch_window(struct screen *scr, enum dir dir)
