@@ -2767,6 +2767,10 @@ static void flag_window(struct arg *arg)
 
 	if (arg->cli == curscr->tag->anchor) {
 		curscr->tag->anchor = NULL;
+		curscr->tag->space.x = curscr->x;
+		curscr->tag->space.y = curscr->top;
+		curscr->tag->space.w = curscr->w;
+		curscr->tag->space.h = curscr->h;
 	} else if ((curscr->tag->anchor = pointer2cli())) {
 		curscr->tag->anchor->div = 1;
 
