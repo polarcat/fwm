@@ -310,12 +310,16 @@ struct tag {
 #define POS_DIV_MAX 9
 #endif
 
+#define GROW_STEP .1
+#define GROW_STEP_GLOW 1.2
+#define GROW_STEP_MIN 1.1
+
 struct client {
 	struct list_head head; /* local list */
 	struct list_head list; /* global list */
 	int16_t x, y;
 	uint16_t w, h;
-	uint8_t div; /* for position calculation */
+	float div; /* for position calculation */
 	uint16_t inc; /* window size increment */
 	xcb_window_t win;
 	xcb_window_t leader;
@@ -356,6 +360,7 @@ enum winpos {
 	WIN_POS_RIGHT_FILL,
 	WIN_POS_TOP_FILL,
 	WIN_POS_BOTTOM_FILL,
+	WIN_POS_PRESERVE,
 };
 
 static uint8_t last_winpos;
@@ -377,6 +382,7 @@ static void next_window(struct arg *);
 static void prev_window(struct arg *);
 static void raise_client(struct arg *);
 static void place_window(struct arg *);
+static void grow_window(struct arg *);
 static void make_grid(struct arg *);
 static void show_toolbar(struct arg *);
 static void flag_window(struct arg *);
@@ -419,6 +425,8 @@ static struct keymap kmap_def[] = {
 	  place_window, WIN_POS_BOTTOM_RIGHT, },
 	{ SHIFT, XK_F10, 0, "shift_f10", "center",
 	  place_window, WIN_POS_CENTER, },
+	{ MOD, XK_F1, 0, "mod_f1", "grow",
+	  grow_window, WIN_POS_PRESERVE, },
 	{ MOD, XK_F5, 0, "mod_f5", "fill left",
 	  place_window, WIN_POS_LEFT_FILL, },
 	{ MOD, XK_F6, 0, "mod_f6", "fill right",
@@ -985,7 +993,7 @@ static void store_client(struct client *cli, uint8_t clean)
 	}
 }
 
-static void space_halfh(struct screen *scr, uint16_t y, uint8_t div)
+static void space_halfh(struct screen *scr, uint16_t y, float div)
 {
 	scr->tag->space.x = scr->x;
 	scr->tag->space.y = y;
@@ -993,7 +1001,7 @@ static void space_halfh(struct screen *scr, uint16_t y, uint8_t div)
 	scr->tag->space.h = scr->h - scr->h / div;
 }
 
-static void space_halfw(struct screen *scr, uint16_t x, uint8_t div)
+static void space_halfw(struct screen *scr, uint16_t x, float div)
 {
 	scr->tag->space.x = x;
 	scr->tag->space.y = scr->top;
@@ -2763,7 +2771,16 @@ static void flag_window(struct arg *arg)
 		curscr->tag->anchor->div = 1;
 
 		if ((arg->cli = curscr->tag->anchor)) {
-			arg->cli->pos = WIN_POS_LEFT_FILL;
+			switch (arg->cli->pos) {
+			case WIN_POS_LEFT_FILL:
+			case WIN_POS_RIGHT_FILL:
+			case WIN_POS_TOP_FILL:
+			case WIN_POS_BOTTOM_FILL:
+				break;
+			default:
+				arg->cli->pos = WIN_POS_TOP_FILL;
+			}
+
 			border_color(arg->cli->win, notice_bg);
 		}
 
@@ -2796,16 +2813,16 @@ static void flag_window(struct arg *arg)
 	}
 }
 
-static void window_halfh(uint16_t *w, uint16_t *h, uint8_t div)
+static void window_halfh(uint16_t *w, uint16_t *h, float div)
 {
 	*w = curscr->w - 2 * BORDER_WIDTH;
 	*h = curscr->h / div - 2 * BORDER_WIDTH - WINDOW_PAD;
 
-	if (div == 2 && curscr->h % div)
+	if (div == 2 && curscr->h % (uint8_t) div)
 		(*h)++;
 }
 
-static void window_halfw(uint16_t *w, uint16_t *h, uint8_t div)
+static void window_halfw(uint16_t *w, uint16_t *h, float div)
 {
 	*w = curscr->w / div - 2 * BORDER_WIDTH;
 	*h = curscr->h - 2 * BORDER_WIDTH;
@@ -2818,6 +2835,92 @@ static void window_halfwh(uint16_t *w, uint16_t *h, uint8_t div)
 
 	if (curscr->h % 2)
 		(*h)++;
+}
+
+static void update_flagged_window(struct arg *arg, int16_t x, int16_t y,
+ uint16_t w, uint16_t h, enum winpos pos)
+{
+	raise_client(arg);
+
+	client_moveresize(arg->cli, x, y, w, h);
+	move_toolbox(arg->cli);
+
+	if (curscr->tag->anchor == arg->cli) {
+		recalc_space(curscr, pos);
+		arg->data = 1; /* disable vert/horiz toggle */
+		make_grid(arg);
+	}
+
+	if (arg->cli != toolbar.cli)
+		center_pointer(arg->cli);
+
+	if (arg->cli->div == POS_DIV_MAX || arg->cli->div <= GROW_STEP_GLOW)
+		border_color(arg->cli->win, alert_bg);
+
+	if (!(arg->cli->flags & CLI_FLG_CENTER))
+		arg->cli->inc = 0;
+
+	store_client(arg->cli, 0);
+	xcb_flush(dpy);
+}
+
+static void grow_window(struct arg *arg)
+{
+	int16_t x, y;
+	uint16_t w, h;
+
+	if ((arg->cli->flags & CLI_FLG_CENTER) ||
+	 (arg->cli->flags & CLI_FLG_FULLSCREEN)) {
+		return; /* ignore */
+	}
+
+	if (!arg->cli && curscr->tag->anchor)
+		arg->cli = curscr->tag->anchor;
+	else if (!arg->cli && !(arg->cli = pointer2cli()))
+		return;
+
+	switch (last_winpos) {
+	case WIN_POS_LEFT_FILL:
+		arg->cli->div -= GROW_STEP;
+		if (arg->cli->div < GROW_STEP_MIN)
+			arg->cli->div = 2;
+
+		x = curscr->x;
+		y = curscr->top;
+		window_halfw(&w, &h, arg->cli->div);
+		break;
+	case WIN_POS_RIGHT_FILL:
+		arg->cli->div -= GROW_STEP;
+		if (arg->cli->div < GROW_STEP_MIN)
+			arg->cli->div = 2;
+
+		x = curscr->x + curscr->w - curscr->w / arg->cli->div;
+		y = curscr->x;
+		window_halfw(&w, &h, arg->cli->div);
+		break;
+	case WIN_POS_TOP_FILL:
+		arg->cli->div -= GROW_STEP;
+		if (arg->cli->div < GROW_STEP_MIN)
+			arg->cli->div = 2;
+
+		x = curscr->x;
+		y = curscr->top;
+		window_halfh(&w, &h, arg->cli->div);
+		break;
+	case WIN_POS_BOTTOM_FILL:
+		arg->cli->div -= GROW_STEP;
+		if (arg->cli->div < GROW_STEP_MIN)
+			arg->cli->div = 2;
+
+		x = curscr->x;
+		y = curscr->top + curscr->h - curscr->h / arg->cli->div;
+		window_halfh(&w, &h, arg->cli->div);
+		break;
+	default:
+		return;
+	}
+
+	update_flagged_window(arg, x, y, w, h, last_winpos);
 }
 
 static void place_window(struct arg *arg)
@@ -2954,29 +3057,7 @@ static void place_window(struct arg *arg)
 	}
 
 	last_winpos = pos;
-	raise_client(arg);
-
-	if (arg->cli->div == POS_DIV_MAX)
-		border_color(arg->cli->win, alert_bg);
-
-	client_moveresize(arg->cli, x, y, w, h);
-	move_toolbox(arg->cli);
-
-	if (curscr->tag->anchor == arg->cli) {
-		recalc_space(curscr, pos);
-		arg->data = 1; /* disable vert/horiz toggle */
-		make_grid(arg);
-	}
-
-	if (arg->cli != toolbar.cli)
-		center_pointer(arg->cli);
-
-	if (!(arg->cli->flags & CLI_FLG_CENTER))
-		arg->cli->inc = 0;
-
-	store_client(arg->cli, 0);
-	xcb_flush(dpy);
-	return;
+	update_flagged_window(arg, x, y, w, h, pos);
 }
 
 static void next_window(unused(struct arg *arg))
