@@ -62,8 +62,10 @@ typedef uint8_t strlen_t;
 #define TOOLBAR_ITEM_XPAD 2
 #define TAG_GAP 2
 
-#define BORDER_WIDTH 1
+#define BORDER_WIDTH 2
 #define WINDOW_PAD 0
+
+#define WIN_DELAY_US 10000
 
 #ifndef WIN_WIDTH_MIN
 #define WIN_WIDTH_MIN 10
@@ -468,6 +470,7 @@ enum coloridx {
 	NOTICE_FG,
 	NOTICE_BG,
 	BORDER_FG,
+	FOCUS_FG,
 	TITLE_FG,
 };
 
@@ -480,6 +483,7 @@ static uint32_t alert_bg;
 static XftColor notice_fg;
 static uint32_t notice_bg;
 static uint32_t border_fg;
+static uint32_t focus_fg;
 static XftColor title_fg;
 
 static struct color defcolors[] = {
@@ -492,6 +496,7 @@ static struct color defcolors[] = {
 	{ "notice-fg", &notice_fg, 0x101010, COLOR_TYPE_XFT, },
 	{ "notice-bg", &notice_bg, 0x90ae2b, COLOR_TYPE_INT, },
 	{ "border-fg", &border_fg, 0x444444, COLOR_TYPE_INT, },
+	{ "focus-fg", &focus_fg, 0x41749c, COLOR_TYPE_INT, },
 	{ "title-fg", &title_fg, 0x90ae2b, COLOR_TYPE_XFT, },
 	{ NULL, NULL, 0, 0, },
 };
@@ -1256,7 +1261,7 @@ static void focus_window(xcb_window_t win)
 	if (win == toolbar.panel.win)
 		return;
 	else
-		border_color(win, active_bg);
+		border_color(win, focus_fg);
 
 	xcb_change_property_checked(dpy, XCB_PROP_MODE_REPLACE,
 				    rootscr->root, a_active_win,
@@ -4988,7 +4993,7 @@ static void dump_tags(void)
 
 	sprintf(path, "%s/tmp/tags", homedir);
 
-	if ((fd = open(path, O_RDWR)) < 0) {
+	if ((fd = open(path, O_WRONLY | O_TRUNC | O_CREAT)) < 0) {
 		ee("failed to open file %s, %s\n", path, strerror(errno));
 		return;
 	}
@@ -5680,6 +5685,12 @@ static void handle_visibility(xcb_window_t win)
 
 			if (scr->panel.win == win) {
 				redraw_panel(scr, front_client(curscr->tag), 0);
+				struct client *cli = pointer2cli();
+				if (cli) {
+					unfocus_clients(scr->tag);
+					focus_window(cli->win);
+					resort_client(cli);
+				}
 				xcb_flush(dpy);
 				return;
 			}
@@ -5761,12 +5772,8 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	show_toolbox(cli);
 	unfocus_clients(curscr->tag);
 
-	if (!cli) {
-		focus_window(e->event);
-	} else {
-		focus_window(cli->win);
-		resort_client(cli);
-	}
+	focus_window(cli->win);
+	resort_client(cli);
 
 	redraw_panel(cli->scr, cli, 1);
 	xcb_flush(dpy);
@@ -6050,6 +6057,7 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 		mask |= XCB_CONFIG_WINDOW_SIBLING;
 	}
 	if (e->value_mask & XCB_CONFIG_WINDOW_STACK_MODE) {
+		usleep(WIN_DELAY_US);
 		add_window(e->window, WIN_FLG_USER);
 		return;
 	}
@@ -6191,6 +6199,7 @@ static int handle_events(void)
 		te("XCB_MAP_REQUEST: parent %#x, win %#x\n",
 		   ((xcb_map_request_event_t *) e)->parent,
 		   ((xcb_map_request_event_t *) e)->window);
+		usleep(WIN_DELAY_US);
 		add_window(((xcb_map_notify_event_t *) e)->window, 0);
 		break;
 	case XCB_PROPERTY_NOTIFY:
