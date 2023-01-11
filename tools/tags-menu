@@ -7,10 +7,21 @@ tags_=$FWM_HOME/tmp/tags
 jump_=$FWM_HOME/tmp/jump
 
 printf "list-tags" > $ctl_
+
+for i in 0 1 2 3 4 5 6 7 8 9; do
+	sleep .01
+	test -s "$tags_"
+	if [ $? -eq 0 ]; then
+		break
+	fi
+done
+
 printf "" > $jump_
 
 while read scr tag name geo wcnt cur win; do
-	printf "$name\t$tag\t$win\t$wcnt\n" >> $jump_
+	if [ -n "$win" ]; then
+		printf "$name\t$tag\t$win\t$wcnt\n" >> $jump_
+	fi
 done < $tags_
 
 if [ ! -s $jump_ ]; then
