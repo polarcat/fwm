@@ -2777,7 +2777,7 @@ static void flag_window(struct arg *arg)
 		curscr->tag->space.w = curscr->w;
 		curscr->tag->space.h = curscr->h;
 	} else if ((curscr->tag->anchor = pointer2cli())) {
-		curscr->tag->anchor->div = 1;
+		curscr->tag->anchor->div = POS_DIV_MAX - 1;
 
 		if ((arg->cli = curscr->tag->anchor)) {
 			switch (arg->cli->pos) {
@@ -2787,12 +2787,13 @@ static void flag_window(struct arg *arg)
 			case WIN_POS_BOTTOM_FILL:
 				break;
 			default:
-				arg->cli->pos = WIN_POS_TOP_FILL;
+				arg->cli->pos = WIN_POS_BOTTOM_FILL;
 			}
 
 			border_color(arg->cli->win, notice_bg);
 		}
 
+		last_winpos = arg->cli->pos; /* to avoid div reset */
 		arg->kmap = NULL;
 		place_window(arg);
 	}
