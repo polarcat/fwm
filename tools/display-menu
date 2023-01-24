@@ -2,6 +2,53 @@
 
 . $FWM_HOME/lib/menu-utils
 
+disconnect_monitor()
+{
+	xrandr | while read name status prim rest; do
+		case $name in
+		[0-9]*|Screen|eDP*) continue;;
+		esac
+
+		xrandr --output $name --off
+	done
+}
+
+connect_monitor()
+{
+	local pos='--left-of'
+	local auto=0
+
+	case $1 in
+	right) pos='--right-of';;
+	auto) auto=1;;
+	esac
+
+	xrandr | while read name status role rest; do
+		case $role in
+		primary) primary=$name; continue;;
+		esac
+
+		case $name in
+		[0-9]*|Screen|eDP*) continue;;
+		esac
+
+		if [ $auto -eq 1 ]; then
+			pos="--left-of"
+			auto=$((auto + 1))
+		elif [ $auto -eq 2 ]; then
+			pos="--right-of"
+			auto=$((auto + 1))
+		fi
+
+		xrandr --output $name --auto $pos $primary
+
+		if [ $auto -eq 2 ]; then
+			break
+		fi
+	done
+	echo reinit-outputs > $ctl_
+}
+
 ctl_=$FWM_HOME/.control$DISPLAY
 tmp_=$FWM_HOME/tmp
 out_=$tmp_/menu
@@ -9,11 +56,16 @@ out_=$tmp_/menu
 #printf "\a\t\n" > $out_
 printf "\a\t\n" > $out_
 printf "\a\tbrightness\n" >> $out_
-printf "\a\tconnect\n" >> $out_
+printf "\a\tleft\n" >> $out_
+printf "\a\tright\n" >> $out_
+printf "\a\tdisconnect\n" >> $out_
 
 startmenu -b -d $out_ | while read icon item; do
 	case $item in
 	"brightness"*) exec brightness-menu &;;
-	"connect"*) exec randr-menu &;;
+	"left"*) connect_monitor left;;
+	"right"*) connect_monitor right;;
+	"auto"*) connect_monitor auto;;
+	"disconnect"*) disconnect_monitor;;
 	esac
 done
