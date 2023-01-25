@@ -2576,7 +2576,12 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 		return NULL;
 	}
 
-	trace_tag_windows(scr->tag);
+	if (arg.cli->scr) {
+		curscr = arg.cli->scr;
+		scr = curscr;
+	}
+
+	trace_tag_windows(curscr->tag);
 
 	scr->flags |= SCR_FLG_SWITCH_WINDOW;
 
@@ -6080,11 +6085,18 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 
 static void handle_randr_notify(xcb_randr_screen_change_notify_event_t *e)
 {
+	/* Do not call init_outputs() here just print message for information.
+         ^
+	 * The reason for this is that CRTC info is not always available upon
+	 * this notification which causes some not so very nice side effects
+	 * during output initialization.
+	 *
+	 * Instead allow user to refresh outputs info in controlled way by
+	 * issuing 'reinit-outputs' command via IPC
+	 */
 	ii("root %#x, win %#x, sizeID %u, w %u, h %u, mw %u, mh %u\n",
 	   e->root, e->request_window, e->sizeID, e->width, e->height,
 	   e->mwidth, e->mheight);
-
-	init_outputs();
 }
 
 static int handle_events(void)
