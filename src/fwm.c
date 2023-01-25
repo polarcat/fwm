@@ -871,18 +871,6 @@ static void border_width(xcb_window_t win, uint16_t width)
 	xcb_configure_window_checked(dpy, win, mask, val);
 }
 
-static void resort_client(struct client *cli)
-{
-	if (cli->scr->flags & SCR_FLG_SWITCH_WINDOW &&
-	    !(cli->scr->flags & SCR_FLG_SWITCH_WINDOW_NOWARP)) {
-		cli->scr->flags &= ~SCR_FLG_SWITCH_WINDOW;
-		return;
-	}
-
-	list_del(&cli->head);
-	list_add(&cli->tag->clients, &cli->head);
-}
-
 static void init_motion(xcb_window_t win)
 {
 	xcb_grab_pointer(dpy, 0, rootscr->root,
@@ -3789,11 +3777,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
 		xcb_unmap_window_checked(dpy, cli->win);
 	} else {
-		struct client *tmp;
-
-		if ((tmp = pointer2cli()))
-			resort_client(tmp);
-
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 		xcb_map_window_checked(dpy, cli->win);
 		center_pointer(cli);
@@ -3871,10 +3854,6 @@ static void raise_client(struct arg *arg)
 	raise_window(arg->cli->win);
 	focus_window(arg->cli->win);
 	timestamp(arg->cli);
-
-	if (!(curscr->flags & SCR_FLG_SWITCH_WINDOW))
-		resort_client(arg->cli);
-
 	store_client(arg->cli, 0);
 
 	if (arg->kmap && arg->kmap->arg == 1)
@@ -5580,7 +5559,6 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 		cli->scr = curscr;
 		ii("win %#x now on tag %s screen %d\n", e->child,
 		   curscr->tag->name, curscr->id);
-		resort_client(cli);
 		store_client(cli, 0);
 	}
 
@@ -5695,7 +5673,6 @@ static void handle_visibility(xcb_window_t win)
 				if (cli) {
 					unfocus_clients(scr->tag);
 					focus_window(cli->win);
-					resort_client(cli);
 				}
 				xcb_flush(dpy);
 				return;
@@ -5777,10 +5754,7 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	curscr->tag->visited = cli;
 	show_toolbox(cli);
 	unfocus_clients(curscr->tag);
-
 	focus_window(cli->win);
-	resort_client(cli);
-
 	redraw_panel(cli->scr, cli, 1);
 	xcb_flush(dpy);
 }
