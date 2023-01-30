@@ -366,6 +366,7 @@ enum winpos {
 };
 
 static uint8_t last_winpos;
+static xcb_window_t stashed_win;
 
 enum dir {
 	DIR_NEXT = 1,
@@ -388,6 +389,7 @@ static void grow_window(struct arg *);
 static void make_grid(struct arg *);
 static void show_toolbar(struct arg *);
 static void flag_window(struct arg *);
+static void stash_window(struct arg *);
 
 struct keymap {
 	uint16_t mod;
@@ -439,6 +441,8 @@ static struct keymap kmap_def[] = {
 	  place_window, WIN_POS_BOTTOM_FILL, },
 	{ MOD, XK_F9, 0, "mod_f9", "full screen",
 	  place_window, WIN_POS_FILL, },
+	{ MOD, XK_F10, 0, "mod_f10", "stash window",
+	  stash_window, },
 	{ MOD, XK_F3, 0, "mod_f3", "make grid",
 	  make_grid, },
 	{ MOD, XK_F4, 0, "mod_f4", "show toolbar",
@@ -1274,6 +1278,23 @@ static void raise_window(xcb_window_t win)
 	uint16_t mask = XCB_CONFIG_WINDOW_STACK_MODE;
 
 	xcb_configure_window_checked(dpy, win, mask, val);
+}
+
+static void stash_window(struct arg *arg)
+{
+	if (!arg || !arg->cli) {
+		return;
+	} else if (stashed_win == XCB_WINDOW_NONE) {
+		stashed_win = arg->cli->win;
+		xcb_unmap_window_checked(dpy, stashed_win);
+	} else {
+		xcb_map_window_checked(dpy, stashed_win);
+		raise_window(stashed_win);
+		focus_window(stashed_win);
+		stashed_win = XCB_WINDOW_NONE;
+	}
+
+	xcb_flush(dpy);
 }
 
 static void print_menu(struct screen *scr)
