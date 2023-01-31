@@ -4657,9 +4657,6 @@ static void screen_add(uint8_t id, xcb_randr_output_t out,
 
 	list_add(&screens, &scr->head);
 
-	if (scr->x == 0)
-		defscr = scr; /* make such screen default */
-
 	ii("add screen %d (%p), size %dx%d+%d+%d\n", scr->id, scr, scr->w,
 	   scr->h, scr->x, scr->y);
 }
@@ -4708,6 +4705,12 @@ static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 			scr->h = r->height;
 			free(scr->name);
 			scr->name = strdup(name);
+
+			if (!defscr && scr->id == 0) {
+				ii("default screen%u '%s'\n", scr->id, name);
+				defscr = scr; /* make such screen default */
+			}
+
 			goto out;
 		}
 	}
