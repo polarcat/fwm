@@ -288,9 +288,7 @@ static int16_t save_y_;
 struct tag {
 	struct list_head head;
 	struct list_head clients;
-	struct client *visited; /* last focused client */
 	struct client *prev; /* prev focused client */
-	struct client *front; /* front client */
 	uint8_t id;
 	int16_t x;
 	uint16_t w;
@@ -676,33 +674,12 @@ static enum winstatus window_status(xcb_window_t win)
 	return status;
 }
 
-static struct client *validate_client(struct list_head *head)
-{
-	struct client *cli;
-
-	if (head->next && (cli = list2cli(head->next))) {
-		if (window_status(cli->win) != WIN_STATUS_UNKNOWN)
-			return cli;
-	}
-
-	if (head->prev && (cli = list2cli(head->prev))) {
-		if (window_status(cli->win) != WIN_STATUS_UNKNOWN)
-			return cli;
-	}
-
-	return NULL;
-}
-
 static struct client *front_client(struct tag *tag)
 {
 	if (list_empty(&tag->clients))
 		return NULL;
-	else if (tag->front)
-		return tag->front;
-	else if (tag->visited)
-		return tag->visited;
 	else
-		return validate_client(&tag->clients);
+		return list2cli(tag->clients.prev);
 }
 
 #ifndef TRACE
@@ -875,6 +852,12 @@ static void border_width(xcb_window_t win, uint16_t width)
 	xcb_configure_window_checked(dpy, win, mask, val);
 }
 
+static void update_head(struct client *cli)
+{
+	list_del(&cli->head);
+	list_add(&cli->tag->clients, &cli->head);
+}
+
 static void init_motion(xcb_window_t win)
 {
 	xcb_grab_pointer(dpy, 0, rootscr->root,
@@ -1014,6 +997,26 @@ static void space_fullscr(struct screen *scr)
 	scr->tag->space.h = scr->h;
 }
 
+static void forget_client(struct tag *tag, struct client *cli)
+{
+	if (cli == tag->anchor) {
+		tag->anchor = NULL;
+		space_fullscr(curscr);
+	}
+}
+
+static void release_client(struct client **cli)
+{
+	if (*cli == toolbox.cli)
+		toolbox.cli = NULL;
+
+	store_client(*cli, 1);
+	list_del(&(*cli)->head);
+	list_del(&(*cli)->list);
+	free(*cli);
+	*cli = NULL;
+}
+
 static void free_client(struct client **ptr)
 {
 	struct client *cli = *ptr;
@@ -1024,30 +1027,10 @@ static void free_client(struct client **ptr)
 
 	list_walk(cur, &curscr->tags) {
 		struct tag *tag = list2tag(cur);
-
-		dd("tag '%s' anchor: %p visited: %p front: %p\n",
-		tag->name, tag->anchor, tag->visited, tag->front);
-
-		if (cli == tag->anchor) {
-			tag->anchor = NULL;
-			space_fullscr(curscr);
-		}
-
-		if (cli == tag->visited)
-			tag->visited = NULL;
-
-		if (cli == tag->front)
-			tag->front = NULL;
+		forget_client(tag, cli);
 	}
 
-	if (cli == toolbox.cli)
-		toolbox.cli = NULL;
-
-	store_client(cli, 1);
-	list_del(&cli->head);
-	list_del(&cli->list);
-	free(cli);
-	*ptr = NULL;
+	release_client(ptr);
 }
 
 static void update_dock(pid_t pid, char *msg)
@@ -1678,7 +1661,6 @@ static void focus_any(pid_t pid)
 		if (window_status(arg.cli->win) != WIN_STATUS_VISIBLE) {
 			ww("invisible front win %#x\n", arg.cli->win);
 			arg.cli = NULL;
-			curscr->tag->front = NULL;
 		} else {
 			ii("front win %#x\n", arg.cli->win);
 			raise_client(&arg);
@@ -3106,14 +3088,17 @@ static void show_windows(struct tag *tag, uint8_t focus)
 		return;
 	}
 
+	arg.cli = front_client(tag);
 	list_walk(cur, &tag->clients) {
 		struct client *cli = list2cli(cur);
 		window_state(cli->win, XCB_ICCCM_WM_STATE_NORMAL);
 		xcb_map_window_checked(dpy, cli->win);
+		if (!arg.cli)
+			arg.cli = cli;
 	}
 
-	if (!focus || !(arg.cli = front_client(tag)) ||
-	    window_status(arg.cli->win) != WIN_STATUS_VISIBLE) {
+	if (!focus || !arg.cli ||
+	    window_status(arg.cli->win) == WIN_STATUS_UNKNOWN) {
 		focus_root();
 		return;
 	}
@@ -3206,13 +3191,8 @@ static void retag_client(struct arg *arg)
 		if (cli->win == XCB_WINDOW_NONE)
 			continue;
 
-		tag->front = cli;
-		tag->visited = cli;
 		return;
 	}
-
-	tag->front = NULL;
-	tag->visited = NULL;
 }
 
 #if 0
@@ -3410,12 +3390,6 @@ static void del_window(xcb_window_t win)
 
 	if (toolbox.cli && toolbox.cli->win == win)
 		hide_toolbox();
-
-	if (curscr->tag->front && curscr->tag->front->win == win)
-		curscr->tag->front = NULL;
-
-	if (curscr->tag->visited && curscr->tag->visited->win == win)
-		curscr->tag->visited = NULL;
 
 	if (curscr->tag->prev && curscr->tag->prev->win == win)
 		curscr->tag->prev = NULL;
@@ -3663,8 +3637,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		goto out;
 	}
 
-	if (leader != XCB_WINDOW_NONE && !win2cli(leader) &&
-	    !(winflags & WIN_FLG_USER)) {
+	if (leader != XCB_WINDOW_NONE && !win2cli(leader)) {
 		ww("ignore win %#x with hidden leader %#x\n", win, leader);
 		map_window(win);
 		goto out;
@@ -3820,8 +3793,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 
 	if (winflags & WIN_FLG_SCAN) {
 		timestamp(cli);
-		if (cli->tag == curscr->tag)
-			curscr->tag->front = cli;
 	} else if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)) &&
 		   !(winflags & WIN_FLG_SCAN)) {
 		struct arg arg = { .cli = cli, .kmap = NULL, };
@@ -3862,16 +3833,7 @@ static void raise_client(struct arg *arg)
 			return;
 	}
 
-	if (curscr->tag->front) {
-		curscr->tag->prev = curscr->tag->front;
-		unfocus_window(curscr->tag->front->win);
-	}
-
-	if (curscr->tag->visited)
-		unfocus_window(curscr->tag->visited->win);
-
-	curscr->tag->visited = arg->cli;
-	curscr->tag->front = arg->cli;
+	update_head(arg->cli);
 	raise_window(arg->cli->win);
 	focus_window(arg->cli->win);
 	timestamp(arg->cli);
@@ -4982,12 +4944,8 @@ static uint16_t count_clients(struct tag *tag)
 		struct client *cli = list2cli(cur);
 		enum winstatus stat = window_status(cli->win);
 
-		if (stat != WIN_STATUS_UNKNOWN) {
+		if (stat != WIN_STATUS_UNKNOWN)
 			clicnt++;
-		} else if (tag->front == cli) {
-			tag->front = validate_client(cur);
-			tag->visited = tag->front;
-		}
 	}
 
 	return clicnt;
@@ -5435,7 +5393,6 @@ static void handle_button_press(xcb_button_press_event_t *e)
 	} else {
 		struct arg arg = { .cli = cli, .kmap = NULL, };
 		raise_client(&arg);
-		curscr->tag->front = cli;
 	}
 
 	raise_panel(curscr);
@@ -5670,8 +5627,6 @@ static void handle_key_press(xcb_key_press_event_t *e)
 			};
 
 			curscr = coord2scr(e->root_x, e->root_y);
-			curscr->tag->front = arg.cli;
-
 			if (kmap->action == retag_client)
 				curscr->flags |= SCR_FLG_CLIENT_RETAG;
 
@@ -5759,12 +5714,6 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	if (curscr && curscr->panel.win == e->event)
 		return;
 
-	if (curscr->tag->visited)
-		unfocus_window(curscr->tag->visited->win);
-
-	if (curscr->tag->front)
-		unfocus_window(curscr->tag->front->win);
-
 	if (!(cli = pointer2cli())) {
 		if (!(cli = win2cli(e->event))) {
 			ww("enter unmanaged window %#x\n", e->event);
@@ -5775,7 +5724,6 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	if (e->mode == MOD)
 		raise_window(e->event);
 
-	curscr->tag->visited = cli;
 	show_toolbox(cli);
 	unfocus_clients(curscr->tag);
 	focus_window(cli->win);
@@ -5944,7 +5892,6 @@ static void handle_client_message(xcb_client_message_event_t *e)
 			return;
 
 		focus_tag(arg.cli->scr, arg.cli->tag);
-		raise_window(e->window);
 		xcb_flush(dpy);
 	}
 }
