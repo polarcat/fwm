@@ -307,7 +307,7 @@ struct tag {
 #endif
 
 #ifndef POS_DIV_MAX
-#define POS_DIV_MAX 9
+#define POS_DIV_MAX 16
 #endif
 
 #define GROW_STEP .1
@@ -757,7 +757,7 @@ static void title_width(struct screen *scr)
 		i++;
 	}
 
-	title->w = x - space_width;
+	title->w = x - 4 * space_width;
 }
 
 static inline void free_window_title(struct sprop *title)
@@ -800,8 +800,6 @@ static void print_title(struct screen *scr, xcb_window_t win)
 	}
 	text_exts(title.str, title.len, &w, &h, font1);
 
-	dd("scr %d tag '%s' title '%s'\n", scr->id, scr->tag->name, title.str);
-
 	if (w > scr->items[PANEL_AREA_TITLE].w) {
 		do {
 			text_exts(title.str, title.len--, &w, &h, font1);
@@ -813,7 +811,7 @@ static void print_title(struct screen *scr, xcb_window_t win)
 
 	draw_panel_text(&scr->panel, color2ptr(TITLE_FG),
 			color2ptr(NORMAL_BG),
-			scr->items[PANEL_AREA_TITLE].x,
+			scr->items[PANEL_AREA_TITLE].x + TAG_GAP,
 			scr->items[PANEL_AREA_TITLE].w,
 			title.str, title.len, font1, space_width);
 out:
@@ -4214,7 +4212,7 @@ static int init_tags(struct screen *scr)
 	}
 
 	if (pos == scr->items[PANEL_AREA_TAGS].x) /* add default tag */
-		pos = add_tag(scr, "*", 0, pos);
+		pos = add_tag(scr, scr->name, 0, pos);
 
 	return pos;
 }
