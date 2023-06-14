@@ -9,8 +9,9 @@ disconnect_monitor()
 		[0-9]*|Screen|eDP*) continue;;
 		esac
 
-		xrandr --output $name --off
+		xrandr --output "$name" --off
 	done
+	echo reinit-outputs > $ctl_
 }
 
 connect_monitor()
@@ -32,6 +33,10 @@ connect_monitor()
 		[0-9]*|Screen|eDP*) continue;;
 		esac
 
+		case $status in
+		*disconnected*) continue;;
+		esac
+
 		if [ $auto -eq 1 ]; then
 			pos="--left-of"
 			auto=$((auto + 1))
@@ -40,9 +45,9 @@ connect_monitor()
 			auto=$((auto + 1))
 		fi
 
-		xrandr --output $name --auto $pos $primary
+		xrandr --output "$name" --auto $pos "$primary"
 
-		if [ $auto -eq 2 ]; then
+		if [ $auto -gt 2 ]; then
 			break
 		fi
 	done
@@ -58,6 +63,7 @@ printf "\a\t\n" > $out_
 printf "\a\tbrightness\n" >> $out_
 printf "\a\tleft\n" >> $out_
 printf "\a\tright\n" >> $out_
+printf "\a\tauto\n" >> $out_
 printf "\a\tdisconnect\n" >> $out_
 
 startmenu -b -d $out_ | while read icon item; do
