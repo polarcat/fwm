@@ -262,11 +262,22 @@ struct screen { /* per output abstraction */
 	int16_t top; /* y position relative to panel */
 	int16_t x, y;
 	uint16_t w, h;
+	uint16_t hdpi;
+	uint16_t vdpi;
 
 	uint8_t flags; /* SCR_FLG */
 
 	struct panel panel; /* screen panel */
 	struct panel_item items[PANEL_AREA_MAX];
+};
+
+struct output {
+	uint8_t id;
+	xcb_timestamp_t cfg_ts;
+	xcb_randr_output_t handle;
+	xcb_randr_get_output_info_reply_t *info;
+	xcb_randr_get_crtc_info_reply_t *crtc;
+	char name[UCHAR_MAX];
 };
 
 #define list2screen(item) list_entry(item, struct screen, head)
@@ -314,9 +325,16 @@ struct tag {
 #define GROW_STEP_GLOW 1.2
 #define GROW_STEP_MIN 1.1
 
+struct output_info {
+	uint8_t id;
+	int16_t x;
+	int16_t y;
+};
+
 struct client {
 	struct list_head head; /* local list */
 	struct list_head list; /* global list */
+	struct output_info output;
 	int16_t x, y;
 	uint16_t w, h;
 	float div; /* for position calculation */
@@ -585,6 +603,68 @@ static void get_sprop(struct sprop *ret, xcb_window_t win,
 	}
 }
 
+static uint8_t is_output_active(xcb_randr_output_t out)
+{
+	uint8_t ret;
+	xcb_randr_get_output_info_cookie_t c;
+	xcb_randr_get_output_info_reply_t *r;
+
+	c = xcb_randr_get_output_info_unchecked(dpy, out, XCB_CURRENT_TIME);
+	r = xcb_randr_get_output_info_reply(dpy, c, NULL);
+	if (!r)
+		return 0;
+
+	ret = r->connection == XCB_RANDR_CONNECTION_CONNECTED;
+	if (ret) {
+		xcb_randr_get_crtc_info_cookie_t c;
+		xcb_randr_get_crtc_info_reply_t *rr;
+
+		c = xcb_randr_get_crtc_info(dpy, r->crtc, r->timestamp);
+		rr = xcb_randr_get_crtc_info_reply(dpy, c, NULL);
+		if (!rr)
+			ret = 0; /* output is not in use */
+		else
+			free(rr);
+	}
+
+	free(r);
+	return ret;
+}
+
+static void select_default_screen(void)
+{
+	char dpi_str[sizeof("65535")];
+	struct list_head *cur;
+	xcb_randr_get_output_primary_reply_t *r;
+	xcb_randr_get_output_primary_cookie_t c;
+
+	c = xcb_randr_get_output_primary_unchecked(dpy, rootscr->root);
+	r = xcb_randr_get_output_primary_reply(dpy, c, NULL);
+
+	if (!r)
+		return;
+
+	defscr = NULL;
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if (scr->out == r->output) {
+			ii("default screen %u '%s'\n", scr->id, scr->name);
+			defscr = scr;
+			break;
+		}
+	}
+
+	if (!defscr)
+		defscr = list2screen(screens.next); /* use very first one */
+
+	free(r);
+
+	snprintf(dpi_str, sizeof(dpi_str), "%u", defscr->hdpi);
+	setenv("FWM_HDPI", dpi_str, 1);
+	snprintf(dpi_str, sizeof(dpi_str), "%u", defscr->vdpi);
+	setenv("FWM_VDPI", dpi_str, 1);
+}
+
 static pid_t win2pid(xcb_window_t win)
 {
 	pid_t pid;
@@ -721,8 +801,8 @@ static void fill_rect(xcb_window_t win, xcb_gcontext_t gc, struct color *color,
 		      int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
 	xcb_rectangle_t rect = { x, y, w, h, };
-	xcb_change_gc(dpy, gc, XCB_GC_FOREGROUND, color->val);
-	xcb_poly_fill_rectangle(dpy, win, gc, 1, &rect);
+	xcb_change_gc_checked(dpy, gc, XCB_GC_FOREGROUND, color->val);
+	xcb_poly_fill_rectangle_checked(dpy, win, gc, 1, &rect);
 }
 
 static void draw_panel_text(struct panel *panel, struct color *fg,
@@ -730,6 +810,9 @@ static void draw_panel_text(struct panel *panel, struct color *fg,
 			    const char *text, int len, XftFont *font,
 			    uint8_t xpad)
 {
+	if (panel->win == XCB_WINDOW_NONE || panel->gc == XCB_NONE)
+		return;
+
 	fill_rect(panel->win, panel->gc, bg, x, ITEM_V_MARGIN, w,
 		  panel_height - 2 * ITEM_V_MARGIN);
 
@@ -783,6 +866,9 @@ static void print_title(struct screen *scr, xcb_window_t win)
 {
 	struct sprop title;
 	uint16_t w, h;
+
+	if (scr->panel.win == XCB_WINDOW_NONE || scr->panel.gc == XCB_NONE)
+		return; /* nothing to do here */
 
 	/* clean area */
 	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG),
@@ -1113,7 +1199,8 @@ static struct screen *coord2scr(int16_t x, int16_t y)
 			return scr;
 		}
 	}
-	return list2screen(screens.next);
+
+	return defscr;
 }
 
 static struct client *dock2cli(struct screen *scr, xcb_window_t win)
@@ -1148,28 +1235,33 @@ static int pointer2coord(int16_t *x, int16_t *y, xcb_window_t *win)
 {
 	xcb_query_pointer_cookie_t c;
 	xcb_query_pointer_reply_t *r;
+	xcb_window_t child;
 
 	c = xcb_query_pointer(dpy, rootscr->root);
 	r = xcb_query_pointer_reply(dpy, c, NULL);
 
-	if (!r)
+	if (!r) {
+		*win = XCB_WINDOW_NONE;
 		return -1;
+	}
 
 	*x = r->root_x;
 	*y = r->root_y;
+	child = r->child;
+	free(r);
 
 	if (win) {
-		if (r->child == XCB_WINDOW_NONE ||
-		    window_status(r->child) != WIN_STATUS_VISIBLE) {
-			ww("ignore win %#x @%d,%d\n", r->child, *x, *y);
+		if (child == XCB_WINDOW_NONE) {
+			return -1;
+		} else if (window_status(child) != WIN_STATUS_VISIBLE) {
+			ww("ignore win %#x @%d,%d\n", child, *x, *y);
 			*win = XCB_WINDOW_NONE;
 		} else {
-			dd("child win %#x @%d,%d\n", r->child, *x, *y);
-			*win = r->child;
+			dd("child win %#x @%d,%d\n", child, *x, *y);
+			*win = child;
 		}
 	}
 
-	free(r);
 	return 0;
 }
 
@@ -1179,7 +1271,7 @@ static struct screen *pointer2scr(void)
 	int16_t y;
 
 	if (pointer2coord(&x, &y, NULL) < 0)
-		curscr = list2screen(screens.prev);
+		curscr = defscr;
 	else
 		curscr = coord2scr(x, y);
 
@@ -1342,6 +1434,9 @@ static void redraw_panel(struct screen *scr, struct client *cli, uint8_t raise)
 {
 	struct list_head *cur;
 
+	if (scr->panel.gc == XCB_NONE)
+		return;
+
 	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG), scr->x,
 		  0, scr->w, panel_height);
 
@@ -1392,6 +1487,31 @@ static uint16_t adjust_h(struct screen *scr, uint16_t h)
 	else if (h < WIN_HEIGHT_MIN)
 		return scr->h / 2 - 2 * BORDER_WIDTH;
 	return h;
+}
+
+static inline void recalc_client_pos(struct client *cli)
+{
+	uint32_t val[2];
+	uint16_t mask;
+
+	if (cli->output.x < cli->scr->x)
+		cli->x += cli->scr->x;
+	else if (cli->output.x > cli->scr->x)
+		cli->x -= cli->output.x;
+
+	cli->output.x = cli->scr->x;
+
+	if (cli->output.y < cli->scr->y)
+		cli->y += cli->scr->y;
+	else if (cli->output.y > cli->scr->y)
+		cli->y -= cli->output.y;
+
+	cli->output.y = cli->scr->y;
+
+	val[0] = cli->x;
+	val[1] = cli->y;
+	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+	xcb_configure_window_checked(dpy, cli->win, mask, val);
 }
 
 static void client_moveresize(struct client *cli, int16_t x, int16_t y,
@@ -2186,18 +2306,6 @@ static void panel_items_stat(struct screen *scr)
 }
 #endif
 
-static void trace_screens(void)
-{
-	struct list_head *cur;
-
-	list_walk(cur, &screens) {
-		struct screen *scr = list2screen(cur);
-		ii("screen %d, geo %ux%u+%d+%d, pos %d,%d\n", scr->id,
-		   scr->w, scr->h, scr->x, scr->y, scr->x + scr->w,
-		   scr->y + scr->h);
-	}
-}
-
 static void update_client_list(void)
 {
 	struct list_head *cur;
@@ -2636,7 +2744,8 @@ static void recalc_space(struct screen *scr, enum winpos pos)
 	else
 		space_fullscr(scr);
 
-	ii("pos %d tag '%s' space geo %ux%u%+d%+d\n", pos, scr->tag->name,
+	tt("screen %u '%s' pos %d tag '%s' space geo %ux%u%+d%+d\n", scr->id,
+	   scr->name, pos, scr->tag->name,
 	   scr->tag->space.w, scr->tag->space.h, scr->tag->space.x,
 	   scr->tag->space.y);
 
@@ -3638,7 +3747,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	if (leader != XCB_WINDOW_NONE && !win2cli(leader)) {
 		ww("ignore win %#x with hidden leader %#x\n", win, leader);
 		map_window(win);
-		goto out;
 	}
 
 	scr = NULL;
@@ -3647,23 +3755,24 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	if ((winflags & WIN_FLG_SCAN) && !(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
 		restore_window(win, &scr, &tag);
 
-	if (!scr && !(scr = pointer2scr())) {
-		if ((cli = win2cli(win))) {
-			ii("win %#x already on clients list\n", win);
-			list_del(&cli->head);
-			list_del(&cli->list);
-		}
+	if (scr && (!scr->panel.win || !scr->panel.gc)) {
 		scr = defscr;
-	} else {
-		if ((cli = dock2cli(scr, win))) {
-			dd("destroy dock win %#x\n", win);
-			close_client(&cli);
-		} else if ((cli = tag2cli(scr->tag, win))) {
-			ii("win %#x already on [%s] list\n", win,
-			   scr->tag->name);
-			list_del(&cli->head);
-			list_del(&cli->list);
-		}
+		tag = scr->tag;
+	} else if (!scr && !(scr = pointer2scr())) {
+		scr = defscr;
+	}
+
+	if ((cli = win2cli(win))) {
+		ii("win %#x already on clients list\n", win);
+		list_del(&cli->head);
+		list_del(&cli->list);
+	} else if ((cli = dock2cli(scr, win))) {
+		dd("destroy dock win %#x\n", win);
+		close_client(&cli);
+	} else if ((cli = tag2cli(scr->tag, win))) {
+		ii("win %#x already on [%s] list\n", win, scr->tag->name);
+		list_del(&cli->head);
+		list_del(&cli->list);
 	}
 
 	tt("screen %d, win %#x, geo %ux%u+%d+%d\n", scr->id, win, g->width,
@@ -3696,6 +3805,9 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	cli->crc = crc;
 	cli->flags = flags;
 	cli->pid = win2pid(win);
+	cli->output.id = scr->id;
+	cli->output.x = scr->x;
+	cli->output.y = scr->y;
 
 #define DONT_CENTER (\
 	CLI_FLG_TOPLEFT |\
@@ -4041,7 +4153,18 @@ static void select_tag(struct screen *scr, int16_t x, int16_t y)
 	else
 		hide_toolbox();
 
+	if (scr->panel.win == XCB_WINDOW_NONE)
+		return;
+
 	xcb_set_input_focus(dpy, XCB_NONE, scr->panel.win, XCB_CURRENT_TIME);
+}
+
+static void clean_tag_area(struct screen *scr, struct tag *tag)
+{
+	if (scr->panel.win != XCB_WINDOW_NONE && scr->panel.gc != XCB_NONE) {
+		fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG),
+		 tag->x, 0, tag->w, panel_height);
+	}
 }
 
 static struct tag *get_tag(struct screen *scr, const char *name, uint8_t id)
@@ -4057,10 +4180,7 @@ static struct tag *get_tag(struct screen *scr, const char *name, uint8_t id)
 			else if (tag->name)
 				free(tag->name);
 
-			/* clean area */
-			fill_rect(scr->panel.win, scr->panel.gc,
-				  color2ptr(NORMAL_BG),
-				  tag->x, 0, tag->w, panel_height);
+			clean_tag_area(scr, tag);
 
 			tag->nlen = strlen(name);
 			tag->name = strdup(name);
@@ -4107,7 +4227,8 @@ static int add_tag(struct screen *scr, const char *name, uint8_t id,
 
 	text_exts(name, tag->nlen, &tag->w, &h, font1);
 	tag->w += space_width * 2;
-	ii("tag '%s' len %u width %u\n", name, tag->nlen, tag->w);
+	ii("screen %u '%s' tag '%s' len %u width %u\n", scr->id, scr->name,
+	 name, tag->nlen, tag->w);
 
 	if (pos != scr->items[PANEL_AREA_TAGS].x) {
 		flg = ITEM_FLG_NORMAL;
@@ -4176,7 +4297,6 @@ static int init_tags(struct screen *scr)
 
 	list_init(&scr->tags);
 	list_init(&scr->dock);
-	list_init(&clients);
 	list_init(&configs);
 
 	pos = scr->items[PANEL_AREA_TAGS].x;
@@ -4222,6 +4342,9 @@ static void move_panel(struct screen *scr)
 	uint32_t val[3];
 	uint16_t mask;
 
+	if (scr->panel.win == XCB_NONE)
+		return;
+
 	val[0] = scr->x;
 
 	if (panel_top)
@@ -4238,16 +4361,20 @@ static void move_panel(struct screen *scr)
 	xcb_flush(dpy);
 }
 
+static inline void clean_panel_area(struct screen *scr)
+{
+	if (scr->panel.gc != XCB_NONE) {
+		fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG),
+		 0, 0, scr->w, panel_height);
+	}
+}
+
 static void reinit_panel(struct screen *scr)
 {
 	int16_t x = 0;
 	uint16_t h, w;
 
-	/* clean panel */
-	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG), 0, 0,
-		  scr->w, panel_height);
-	move_panel(scr);
-
+	clean_panel_area(scr);
 	text_exts(menu_icon, menu_icon_len, &w, &h, menu_font);
 
 	scr->items[PANEL_AREA_MENU].x = TAG_GAP;
@@ -4267,6 +4394,7 @@ static void reinit_panel(struct screen *scr)
 	scr->items[PANEL_AREA_TITLE].x = scr->items[PANEL_AREA_DIV].w;
 
 	arrange_dock(scr);
+	move_panel(scr);
 }
 
 static void refresh_panel(uint8_t id)
@@ -4479,7 +4607,20 @@ static void init_keys(void)
 	xcb_key_symbols_free(syms);
 }
 
-static void init_panel(struct screen *scr)
+static void destroy_panel(struct screen *scr)
+{
+	if (scr->panel.gc != XCB_NONE) {
+		xcb_free_gc_checked(dpy, scr->panel.gc);
+		scr->panel.gc = XCB_NONE;
+	}
+
+	if (scr->panel.win != XCB_WINDOW_NONE) {
+		xcb_destroy_window_checked(dpy, scr->panel.win);
+		scr->panel.win = XCB_WINDOW_NONE;
+	}
+}
+
+static void create_panel(struct screen *scr)
 {
 	uint32_t val[2], mask;
 
@@ -4488,6 +4629,7 @@ static void init_panel(struct screen *scr)
 	if (panel_height % 2)
 		panel_height++;
 
+	destroy_panel(scr); /* clean up previous setup */
 	scr->panel.win = xcb_generate_id(dpy);
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
@@ -4588,27 +4730,11 @@ static void init_tray(void)
 	free(r);
 }
 
-static void screen_add(uint8_t id, xcb_randr_output_t out,
-		       int16_t x, int16_t y, uint16_t w, uint16_t h,
-		       char *name)
+static void add_screen(struct screen *scr)
 {
-	struct screen *scr;
-
-	scr = calloc(1, sizeof(*scr));
-	if (!scr)
-		panic("calloc(%lu) failed\n", sizeof(*scr));
-
-	scr->id = id;
-	scr->out = out;
-	scr->x = x;
-	scr->y = y;
-	scr->w = w;
-	scr->h = h;
-	scr->name = strdup(name);
-
 	list_init(&scr->dock);
 	list_init(&scr->tags);
-	init_panel(scr);
+	create_panel(scr);
 
 	if (!list_empty(&scr->tags)) {
 		ii("current tag %p %s\n", list2tag(scr->tags.next),
@@ -4617,34 +4743,123 @@ static void screen_add(uint8_t id, xcb_randr_output_t out,
 
 	list_add(&screens, &scr->head);
 
-	ii("add screen %d (%p), size %dx%d+%d+%d\n", scr->id, scr, scr->w,
-	   scr->h, scr->x, scr->y);
+	ii("add screen %d size (%u %u) pos (%d %d) dpi (%u %u)\n",
+	 scr->id, scr->w, scr->h, scr->x, scr->y, scr->hdpi, scr->vdpi);
 }
 
-static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
-		      xcb_randr_get_output_info_reply_t *inf,
-		      xcb_timestamp_t ts, char *name)
+static void calc_screen_dpi(struct output *out, struct screen *scr)
+{
+	scr->hdpi = out->crtc->width / (out->info->mm_width / 25.4f);
+	scr->vdpi = out->crtc->height / (out->info->mm_height / 25.4f);
+}
+
+static void init_screen(struct output *out)
+{
+	struct screen *scr = calloc(1, sizeof(*scr));
+
+	if (!scr)
+		panic("calloc(%lu) failed\n", sizeof(*scr));
+
+	scr->id = out->id;
+	scr->out = out->handle;
+	scr->x = out->crtc->x;
+	scr->y = out->crtc->y;
+	scr->w = out->crtc->width;
+	scr->h = out->crtc->height;
+	scr->name = strdup(out->name);
+
+	calc_screen_dpi(out, scr);
+	add_screen(scr);
+}
+
+static void init_default_screen(void)
+{
+	struct screen *scr = calloc(1, sizeof(*scr));
+
+	if (!scr)
+		panic("calloc(%lu) failed\n", sizeof(*scr));
+
+	scr->id = 0;
+	scr->out = 0;
+	scr->x = 0;
+	scr->y = 0;
+	scr->w = rootscr->width_in_pixels;
+	scr->h = rootscr->height_in_pixels;
+	scr->name = strdup("0");
+	scr->hdpi = 96;
+	scr->vdpi = 96;
+
+	add_screen(scr);
+}
+
+static inline void reinit_screen(struct output *out, struct screen *scr)
+{
+	scr->x = out->crtc->x;
+	scr->y = out->crtc->y;
+	scr->w = out->crtc->width;
+	scr->h = out->crtc->height;
+
+	calc_screen_dpi(out, scr);
+
+	ii("re-init screen %d '%s' geo %ux%u+%d+%d\n", scr->id, scr->name,
+	 scr->w, scr->h + panel_height, scr->x, scr->y);
+
+	if (scr->panel.gc == XCB_NONE || scr->panel.win == XCB_WINDOW_NONE)
+		create_panel(scr);
+}
+
+static void update_clients(struct screen *scr)
+{
+	struct list_head *cur;
+	list_walk(cur, &clients) {
+		struct client *cli = glob2client(cur);
+		if (cli->scr == scr)
+			cli->scr = defscr;
+
+	}
+}
+
+static inline uint8_t is_screen_clone(struct output *o, struct screen *s)
+{
+	return (o->crtc->width == s->w &&
+	 o->crtc->height == s->h + panel_height &&
+	 o->crtc->x == s->x &&
+	 o->crtc->y == s->y);
+}
+
+static void init_crtc(struct output *out)
 {
 	struct list_head *cur;
 	xcb_randr_get_crtc_info_cookie_t c;
-	xcb_randr_get_crtc_info_reply_t *r;
 
-	c = xcb_randr_get_crtc_info(dpy, inf->crtc, ts);
-	r = xcb_randr_get_crtc_info_reply(dpy, c, NULL);
-	if (!r)
+	c = xcb_randr_get_crtc_info(dpy, out->info->crtc, out->cfg_ts);
+	out->crtc = xcb_randr_get_crtc_info_reply(dpy, c, NULL);
+	if (!out->crtc) { /* unused out */
+		struct list_head *tmp;
+		list_walk_safe(cur, tmp, &screens) {
+			struct screen *scr = list2screen(cur);
+			if (scr->out == out->handle) {
+				update_clients(scr);
+				list_del(&scr->head);
+				free(scr->name);
+				free(scr);
+			}
+		}
 		return;
+	}
 
-	ii("crtc%d geo %ux%u%+d%+d\n", i, r->width, r->height, r->x, r->y);
+	ii("crtc%d geo %ux%u%+d%+d\n", out->id, out->crtc->width,
+	 out->crtc->height, out->crtc->x, out->crtc->y);
 
 	/* find a screen that matches new geometry so we can re-use it */
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
 
-		if (r->width == scr->w && r->height == scr->h + panel_height &&
-		    r->x == scr->x && r->y == scr->y) {
-			ii("crtc%d is a clone of screen %d\n", i, scr->id);
+		if (is_screen_clone(out, scr)) {
+			ii("crtc%d is a clone of screen %d\n", out->id,
+			 scr->id);
 			free(scr->name);
-			scr->name = strdup(name);
+			scr->name = strdup(out->name);
 			goto out;
 		}
 	}
@@ -4652,65 +4867,51 @@ static void init_crtc(uint8_t i, uint8_t *id, xcb_randr_output_t out,
 	/* adapt request screen geometry if none found */
 	list_walk(cur, &screens) {
 		struct screen *scr = list2screen(cur);
-		if (scr->out == out) {
-			ii("crtc%d, screen %d: "
-			   "old geo %ux%u+%d+%d, "
-			   "new geo %ux%u+%d+%d\n",
-			   i, scr->id,
-			   scr->w, scr->h + panel_height, scr->x, scr->y,
-			   r->width, r->height, r->x, r->y);
-			scr->x = r->x;
-			scr->w = r->width;
-			scr->y = r->y;
-			scr->h = r->height;
+		if (scr->out == out->handle) {
 			free(scr->name);
-			scr->name = strdup(name);
-
-			if (!defscr && scr->id == 0) {
-				ii("default screen%u '%s'\n", scr->id, name);
-				defscr = scr; /* make such screen default */
-			}
-
+			scr->name = strdup(out->name);
+			reinit_screen(out, scr);
 			goto out;
 		}
 	}
 
-	/* one screen per output; share same root window via common
+	/* one screen per out; share same root window via common
 	 * xcb_screen_t structure
 	 */
-	screen_add(*id, out, r->x, r->y, r->width, r->height, name);
+	init_screen(out);
 
 out:
-	(uint8_t)(*id)++;
-	free(r);
+	free(out->crtc);
+	out->crtc = NULL;
 }
 
-static void init_output(uint8_t i, uint8_t *id, xcb_randr_output_t out,
-			xcb_timestamp_t ts)
+static void init_output(struct output *out)
 {
-	char name[UCHAR_MAX];
 	strlen_t len;
 	xcb_randr_get_output_info_cookie_t c;
-	xcb_randr_get_output_info_reply_t *r;
 
-	c = xcb_randr_get_output_info(dpy, out, ts);
-	r = xcb_randr_get_output_info_reply(dpy, c, NULL);
-	if (!r)
+	c = xcb_randr_get_output_info(dpy, out->handle, out->cfg_ts);
+	out->info = xcb_randr_get_output_info_reply(dpy, c, NULL);
+	if (!out->info)
 		return;
 
-	len = xcb_randr_get_output_info_name_length(r) + 1;
-	if (len > sizeof(name))
-		len = sizeof(name);
-	snprintf(name, len, "%s", xcb_randr_get_output_info_name(r));
+	len = xcb_randr_get_output_info_name_length(out->info) + 1;
+	if (len > sizeof(out->name))
+		len = sizeof(out->name);
+	snprintf(out->name, len, "%s",
+	 xcb_randr_get_output_info_name(out->info));
 
-	ii("output %s, size %ux%u\n", name, r->mm_width, r->mm_height);
+	ii("out %s size %ux%u\n", out->name, out->info->mm_width,
+	 out->info->mm_height);
 
-	if (r->connection != XCB_RANDR_CONNECTION_CONNECTED)
-		ii("output %s%d not connected\n", name, i);
-	else
-		init_crtc(i, id, out, r, ts, name);
+	if (out->info->connection != XCB_RANDR_CONNECTION_CONNECTED) {
+		ii("out %s not connected\n", out->name);
+	} else {
+		init_crtc(out);
+	}
 
-	free(r);
+	free(out->info);
+	out->info = NULL;
 }
 
 static void init_outputs(void)
@@ -4722,7 +4923,7 @@ static void init_outputs(void)
 	xcb_randr_get_screen_resources_current_reply_t *r;
 	xcb_randr_output_t *out;
 	int len;
-	uint8_t id, i;
+	struct output output;
 
 	c = xcb_randr_get_screen_resources_current(dpy, rootscr->root);
 	r = xcb_randr_get_screen_resources_current_reply(dpy, c, NULL);
@@ -4753,34 +4954,51 @@ static void init_outputs(void)
 		scr->x = scr->y = scr->w = scr->h = 0;
 	}
 
-	id = 0;
-	for (i = 0; i < len; i++)
-		init_output(i, &id, out[i], r->config_timestamp);
+	memset(&output, 0, sizeof(output));
+	for (output.id = 0; output.id < len; output.id++) {
+		output.cfg_ts = r->config_timestamp;
+		output.handle = out[output.id];
+		init_output(&output);
+	}
 
 	free(r);
 
-	if (list_empty(&screens)) { /* randr failed or not supported */
-		screen_add(0, 0, 0, 0, rootscr->width_in_pixels,
-			   rootscr->height_in_pixels, "-");
-	}
+	if (list_empty(&screens)) /* randr failed or not supported */
+		init_default_screen();
 
-	if (!defscr)
-		defscr = list2screen(screens.next); /* use first one */
+	select_default_screen();
+
 	if (!curscr)
 		curscr = defscr;
 
-	/* force refresh all panels and adjust each screen height */
 	list_walk(cur, &screens) {
 		scr = list2screen(cur);
 		scr->h -= panel_height + PANEL_SCREEN_GAP;
-		reinit_panel(scr);
-	}
 
-	trace_screens();
+		struct list_head *c;
+		list_walk(c, &clients) {
+			struct client *cli = glob2client(c);
+			if (cli->scr == scr)
+				recalc_client_pos(cli);
+		}
+
+		reinit_panel(scr); /* force reinit panel */
+	}
+	list_init(&clients); /* now can safely reset client's list */
+
 	init_tray();
 	init_toolbox();
 	focus_root();
 	scan_clients(0);
+
+	list_walk(cur, &screens) {
+		scr = list2screen(cur);
+		/* redraw panel to remove visual artefacts */
+		redraw_panel(scr, NULL, 0);
+
+		ii("screen %d geo %ux%u+%d+%d size (%d %d)\n", scr->id, scr->w,
+		 scr->h, scr->x, scr->y, scr->x + scr->w, scr->y + scr->h);
+	}
 }
 
 static void load_color(const char *path, struct color *color)
@@ -5816,14 +6034,32 @@ static void print_configure_notify(xcb_configure_notify_event_t *e)
 }
 #endif
 
+static void reset_all_panels(void)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+
+		if (is_output_active(scr->out)) {
+			reinit_panel(scr);
+		} else {
+			destroy_panel(scr);
+
+			if (curscr == scr)
+				curscr = defscr;
+
+		}
+	}
+}
+
 static void handle_configure_notify(xcb_configure_notify_event_t *e)
 {
 	print_configure_notify(e);
 
 	if (e->event == rootscr->root && e->window == rootscr->root) {
-		struct screen *scr = pointer2scr();
-		if (scr) /* update because screen geo could change */
-			reinit_panel(scr);
+		/* reset panel because screen geometry could change */
+		reset_all_panels();
 	} else if (e->window != rootscr->root && e->border_width) {
 		border_width(e->window, BORDER_WIDTH);
 		xcb_flush(dpy);
@@ -6040,6 +6276,11 @@ static void handle_randr_notify(xcb_randr_screen_change_notify_event_t *e)
 	ii("root %#x, win %#x, sizeID %u, w %u, h %u, mw %u, mh %u\n",
 	   e->root, e->request_window, e->sizeID, e->width, e->height,
 	   e->mwidth, e->mheight);
+	if (!defscr)
+		select_default_screen();
+
+	/* In all cases reset current screen to default */
+	curscr = defscr;
 }
 
 static int handle_events(void)
