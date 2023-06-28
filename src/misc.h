@@ -206,6 +206,7 @@ static inline uint32_t crc32(char *buf, size_t len)
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 static inline int open_fifo(const char *path, int fd)
 {
