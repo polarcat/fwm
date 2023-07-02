@@ -5,6 +5,13 @@
  * Released under the GNU General Public License, version 2
  */
 
+#define USE_CRC32 /* use crc32 function from misc header */
+
+#include "misc.h"
+#include "fwm.h"
+#include "list.h"
+#include "text.h"
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -28,20 +35,32 @@
 #include <xcb/xcb_icccm.h>
 #include <xcb/xcb_util.h>
 
-#include <X11/Xlib-xcb.h>
-#include <X11/Xft/Xft.h>
 #include <X11/keysym.h>
-
-#define USE_CRC32 /* use crc32 function from misc header */
-
-#include "misc.h"
-#include "fwm.h"
-#include "list.h"
 
 /* defines */
 
+#ifndef DEFAULT_FONT_SIZE
+#define DEFAULT_FONT_SIZE 10.5f
+#endif
+
+#define MENU_ICON_HOME ""
+#define MENU_ICON_DEF "="
+#define DIV_ICON "::"
+
 #ifndef MAX_PATH
 #define MAX_PATH 255
+#endif
+
+#ifndef UCHAR_MAX
+#define UCHAR_MAX 255
+#endif
+
+#ifndef UINT_MAX
+#define UINT_MAX UINT32_MAX
+#endif
+
+#ifndef MAX_OUTPUT_NAME
+#define MAX_OUTPUT_NAME 32
 #endif
 
 #ifndef TAG_LONG_PRESS
@@ -58,12 +77,12 @@ typedef uint8_t strlen_t;
 
 #define PANEL_SCREEN_GAP 0
 #define ITEM_V_MARGIN 2
-#define ITEM_H_MARGIN 6
+#define ITEM_H_MARGIN 2
 #define TOOLBAR_ITEM_XPAD 2
-#define TAG_GAP 2
 
 #define BORDER_WIDTH 2
 #define WINDOW_PAD 0
+#define TOOLBOX_OFFSET 5
 
 #define WIN_DELAY_US 10000
 
@@ -101,8 +120,6 @@ typedef uint8_t strlen_t;
 
 #define TAG_NAME_MAX 32
 
-#define DIV_ICON "::"
-
 #define ALT XCB_MOD_MASK_1
 #ifndef MOD
 #define MOD XCB_MOD_MASK_1
@@ -117,13 +134,6 @@ typedef uint8_t strlen_t;
 #define ITEM_FLG_LOCKED (1 << 4)
 
 /* data structures */
-
-struct color {
-	const char *fname;
-	void *val;
-	uint32_t def;
-	uint8_t type;
-};
 
 struct sprop { /* string property */
 	char *str;
@@ -149,11 +159,10 @@ struct panel_item {
 
 struct panel {
 	int16_t y;
-	uint16_t w;
-	uint16_t h;
 	xcb_gcontext_t gc;
 	xcb_drawable_t win;
-	XftDraw *draw;
+	struct text *text;
+	struct text *tag_text;
 };
 
 //#define LEFT_BTN ""
@@ -208,6 +217,8 @@ static struct toolbar_item toolbar_items[] = {
 struct toolbar {
 	int16_t x;
 	int16_t y;
+	uint16_t w;
+	uint16_t h;
 	struct panel panel;
 	struct screen *scr;
 	struct client *cli;
@@ -227,11 +238,10 @@ enum {
 struct toolbox {
 	xcb_drawable_t win;
 	xcb_gcontext_t gc;
-	XftDraw *draw;
+	struct text *text;
 	struct client *cli;
 	uint8_t size;
 	uint8_t visible;
-	uint16_t xdiv;
 	uint16_t x;
 	uint16_t y;
 	uint8_t gravity;
@@ -239,13 +249,16 @@ struct toolbox {
 
 static struct toolbox toolbox;
 
-static uint16_t text_yoffs;
-
 struct rect {
 	int16_t x;
 	int16_t y;
 	uint16_t w;
 	uint16_t h;
+};
+
+struct area {
+	xcb_rectangle_t rect;
+	uint32_t color;
 };
 
 struct screen { /* per output abstraction */
@@ -277,7 +290,7 @@ struct output {
 	xcb_randr_output_t handle;
 	xcb_randr_get_output_info_reply_t *info;
 	xcb_randr_get_crtc_info_reply_t *crtc;
-	char name[UCHAR_MAX];
+	char name[MAX_OUTPUT_NAME];
 };
 
 #define list2screen(item) list_entry(item, struct screen, head)
@@ -292,7 +305,6 @@ static uint8_t focus_root_;
 static struct client *motion_cli;
 static int16_t motion_init_x;
 static int16_t motion_init_y;
-static uint8_t space_width = 1;
 static int16_t save_x_;
 static int16_t save_y_;
 
@@ -475,11 +487,6 @@ static struct list_head keymap;
 
 /* defaults */
 
-enum colortype {
-	COLOR_TYPE_INT,
-	COLOR_TYPE_XFT,
-};
-
 enum coloridx {
 	NORMAL_FG,
 	NORMAL_BG,
@@ -494,47 +501,53 @@ enum coloridx {
 	TITLE_FG,
 };
 
-static XftColor normal_fg;
-static uint32_t normal_bg;
-static XftColor active_fg;
-static uint32_t active_bg;
-static XftColor alert_fg;
-static uint32_t alert_bg;
-static XftColor notice_fg;
-static uint32_t notice_bg;
-static uint32_t border_fg;
-static uint32_t focus_fg;
-static XftColor title_fg;
-
-static struct color defcolors[] = {
-	{ "normal-fg", &normal_fg, 0xa0a0a0, COLOR_TYPE_XFT, },
-	{ "normal-bg", &normal_bg, 0x202020, COLOR_TYPE_INT, },
-	{ "active-fg", &active_fg, 0xc0c0c0, COLOR_TYPE_XFT, },
-	{ "active-bg", &active_bg, 0x41749c, COLOR_TYPE_INT, },
-	{ "alert-fg", &alert_fg, 0xc32d2d, COLOR_TYPE_XFT, },
-	{ "alert-bg", &alert_bg, 0x90ae2b, COLOR_TYPE_INT, },
-	{ "notice-fg", &notice_fg, 0x101010, COLOR_TYPE_XFT, },
-	{ "notice-bg", &notice_bg, 0x90ae2b, COLOR_TYPE_INT, },
-	{ "border-fg", &border_fg, 0x444444, COLOR_TYPE_INT, },
-	{ "focus-fg", &focus_fg, 0x41749c, COLOR_TYPE_INT, },
-	{ "title-fg", &title_fg, 0x90ae2b, COLOR_TYPE_XFT, },
-	{ NULL, NULL, 0, 0, },
+struct color {
+	const char *fname;
+	uint32_t val;
+	uint32_t def;
 };
 
-#define color2int(idx) *((uint32_t *) defcolors[idx].val)
-#define color2xft(idx) *((XftColor *) defcolors[idx].val)
-#define color2ptr(idx) &defcolors[idx]
+static struct color defcolors[] = {
+	{ "normal-fg", 0, 0xa0a0a0 },
+	{ "normal-bg", 0, 0x202020 },
+	{ "active-fg", 0, 0xc0c0c0 },
+	{ "active-bg", 0, 0x41749c },
+	{ "alert-fg", 0, 0xc32d2d },
+	{ "alert-bg", 0, 0x90ae2b },
+	{ "notice-fg", 0, 0x101010 },
+	{ "notice-bg", 0, 0x90ae2b },
+	{ "border-fg", 0, 0x444444 },
+	{ "focus-fg", 0, 0x41749c },
+	{ "title-fg", 0, 0x90ae2b },
+	{ NULL, 0, 0 },
+};
 
-#define MENU_ICON_DEF "="
-#define MENU_ICON_DOWN ""
-#define MENU_ICON_UP ""
-//#define MENU_ICON_DEF " "
+#define get_color(idx) defcolors[idx].val
 
-static XftFont *menu_font;
-static char *menu_icon = MENU_ICON_DEF;
-static uint8_t menu_icon_len = sizeof(MENU_ICON_DEF) - 1;
+static uint16_t menu_w;
+static uint16_t menu_h;
+static struct text *menu_text;
+
+static const char *div_icon = DIV_ICON;
+static uint16_t div_icon_len = sizeof(DIV_ICON) - 1;
+static uint16_t div_w;
+static uint16_t div_h;
+static struct text *div_text;
+
+static uint16_t font_size = DEFAULT_FONT_SIZE;
+static fontid_t text_font = INVALID_FONT_ID;
+static fontid_t icon_font = INVALID_FONT_ID;
+
+static char *menu_icon;
+static uint8_t menu_icon_len;
+static uint16_t icon_text_y;
 static uint16_t panel_height;
+static uint16_t panel_space;
+static uint16_t panel_text_y;
 static uint8_t panel_top;
+static uint8_t tag_rect_y;
+static uint8_t tag_rect_h;
+static uint8_t tag_text_margin = 2;
 static xcb_timestamp_t tag_time;
 static xcb_timestamp_t toolbox_time;
 
@@ -547,11 +560,6 @@ enum winstatus {
 	WIN_STATUS_MAX,
 };
 
-static XftFont *font1;
-static XftFont *font2;
-
-static int xscr;
-static Display *xdpy;
 static xcb_connection_t *dpy;
 static uint8_t disp;
 
@@ -782,65 +790,24 @@ static struct client *front_client(struct tag *tag)
 }
 #endif
 
-static void text_exts(const char *text, int len, uint16_t *w, uint16_t *h,
-		      XftFont *font)
+static void clear_area(xcb_window_t win, xcb_gcontext_t gc, struct area *area)
 {
-	XGlyphInfo ext;
-
-	XftTextExtentsUtf8(xdpy, font, (XftChar8 *) text, len, &ext);
-
-	dd("text: %s\n  x = %d\n  y = %d\n  width = %d\n  height = %d\n"
-	   "  xOff = %d\n  yOff = %d\n",
-	   text, ext.x, ext.y, ext.width, ext.height, ext.xOff, ext.yOff);
-
-	*w = ext.width;
-	*h = ext.height;
+	xcb_change_gc(dpy, gc, XCB_GC_FOREGROUND, &area->color);
+	xcb_poly_fill_rectangle_checked(dpy, win, gc, 1, &area->rect);
 }
 
-static void fill_rect(xcb_window_t win, xcb_gcontext_t gc, struct color *color,
-		      int16_t x, int16_t y, uint16_t w, uint16_t h)
+static void draw_panel_text(struct panel *panel, struct text *text)
 {
-	xcb_rectangle_t rect = { x, y, w, h, };
-	xcb_change_gc_checked(dpy, gc, XCB_GC_FOREGROUND, color->val);
-	xcb_poly_fill_rectangle_checked(dpy, win, gc, 1, &rect);
-}
+	struct xcb xcb;
 
-static void draw_panel_text(struct panel *panel, struct color *fg,
-			    struct color *bg, int16_t x, uint16_t w,
-			    const char *text, int len, XftFont *font,
-			    uint8_t xpad)
-{
-	if (panel->win == XCB_WINDOW_NONE || panel->gc == XCB_NONE)
+	if (!text || panel->win == XCB_WINDOW_NONE || panel->gc == XCB_NONE)
 		return;
 
-	fill_rect(panel->win, panel->gc, bg, x, ITEM_V_MARGIN, w,
-		  panel_height - 2 * ITEM_V_MARGIN);
+	xcb.dpy = dpy;
+	xcb.win = panel->win;
+	xcb.gc = panel->gc;
 
-	x += xpad;
-
-	XftDrawStringUtf8(panel->draw, fg->val, font, x, text_yoffs,
-			  (XftChar8 *) text, len);
-	XSync(xdpy, 0);
-}
-
-static void title_width(struct screen *scr)
-{
-	int16_t end = scr->items[PANEL_AREA_DOCK].x;
-	uint16_t x, h, i;
-	char *tmp;
-	struct panel_item *title = &scr->items[PANEL_AREA_TITLE];
-
-	i = 1;
-	x = 0;
-	while (x + title->x < end) {
-		tmp = calloc(1, i + 1);
-		memset(tmp, 'w', i);
-		text_exts(tmp, strlen(tmp), &x, &h, font1);
-		free(tmp);
-		i++;
-	}
-
-	title->w = x - 4 * space_width;
+	draw_text_xcb(&xcb, text);
 }
 
 static inline void free_window_title(struct sprop *title)
@@ -865,15 +832,19 @@ static uint8_t get_window_title(xcb_window_t win, struct sprop *title)
 static void print_title(struct screen *scr, xcb_window_t win)
 {
 	struct sprop title;
+	int16_t x;
 	uint16_t w, h;
+	struct area area;
 
 	if (scr->panel.win == XCB_WINDOW_NONE || scr->panel.gc == XCB_NONE)
 		return; /* nothing to do here */
 
-	/* clean area */
-	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG),
-		  scr->items[PANEL_AREA_TITLE].x, 0,
-		  scr->items[PANEL_AREA_DOCK].x, panel_height);
+	area.color = get_color(NORMAL_BG);
+	area.rect.x = scr->items[PANEL_AREA_TITLE].x;
+	area.rect.y = 0;
+	area.rect.width = scr->items[PANEL_AREA_DOCK].x;
+	area.rect.height = panel_height;
+	clear_area(scr->panel.win, scr->panel.gc, &area);
 
 	if (win == XCB_WINDOW_NONE)
 		return;
@@ -884,23 +855,28 @@ static void print_title(struct screen *scr, xcb_window_t win)
 		if (!title.ptr || !title.len)
 			goto out;
 	}
-	text_exts(title.str, title.len, &w, &h, font1);
 
-	if (w > scr->items[PANEL_AREA_TITLE].w) {
+	set_text_str(scr->panel.text, title.str, title.len);
+	get_text_size(scr->panel.text, &w, &h);
+
+	if (w <= scr->items[PANEL_AREA_TITLE].w) {
+		set_text_fade(scr->panel.text, 0);
+	} else {
 		do {
-			text_exts(title.str, title.len--, &w, &h, font1);
+			set_text_str(scr->panel.text, title.str, title.len--);
+			get_text_size(scr->panel.text, &w, &h);
 		} while (w > scr->items[PANEL_AREA_TITLE].w);
-		title.str[title.len - 3] = '.';
-		title.str[title.len - 2] = '.';
-		title.str[title.len - 1] = '.';
+
+		set_text_fade(scr->panel.text, title.len / 3);
 	}
 
-	draw_panel_text(&scr->panel, color2ptr(TITLE_FG),
-			color2ptr(NORMAL_BG),
-			scr->items[PANEL_AREA_TITLE].x + TAG_GAP,
-			scr->items[PANEL_AREA_TITLE].w,
-			title.str, title.len, font1, space_width);
+	x = scr->items[PANEL_AREA_TITLE].x + panel_space;
+	set_text_pos(scr->panel.text, x, panel_text_y);
+	set_text_color(scr->panel.text, get_color(TITLE_FG), area.color);
+	draw_panel_text(&scr->panel, scr->panel.text);
+
 out:
+	set_text_str(scr->panel.text, NULL, 0);
 	free(title.ptr);
 }
 
@@ -1314,7 +1290,7 @@ static void unfocus_window(xcb_window_t win)
 	else if (win == toolbar.panel.win)
 		return;
 	else
-		border_color(win, border_fg);
+		border_color(win, get_color(BORDER_FG));
 
 	xcb_window_t tmp = XCB_WINDOW_NONE;
 	xcb_change_property(dpy, XCB_PROP_MODE_REPLACE, rootscr->root,
@@ -1326,7 +1302,7 @@ static void focus_window(xcb_window_t win)
 	if (win == toolbar.panel.win)
 		return;
 	else
-		border_color(win, focus_fg);
+		border_color(win, get_color(FOCUS_FG));
 
 	xcb_change_property_checked(dpy, XCB_PROP_MODE_REPLACE,
 				    rootscr->root, a_active_win,
@@ -1372,50 +1348,53 @@ static void stash_window(struct arg *arg)
 
 static void print_menu(struct screen *scr)
 {
-	uint16_t x, w;
+	uint16_t x = scr->items[PANEL_AREA_MENU].x + tag_text_margin;
+	uint16_t y = (panel_height - menu_h) / 2 - 1;
 
-	x = scr->items[PANEL_AREA_MENU].x;
-	w = scr->items[PANEL_AREA_MENU].w;
-
-	draw_panel_text(&scr->panel, color2ptr(NORMAL_FG),
-			color2ptr(NORMAL_BG), x, w, menu_icon, menu_icon_len,
-			menu_font, space_width);
+	set_text_pos(menu_text, x, y);
+	draw_panel_text(&scr->panel, menu_text);
 }
 
 static void print_tag(struct screen *scr, struct tag *tag, uint8_t flag)
 {
-	struct color *fg;
-	struct color *bg;
+	uint32_t fg;
+	struct area area;
 
 	if (flag == ITEM_FLG_ACTIVE) {
-		fg = color2ptr(ACTIVE_FG);
-		bg = color2ptr(ACTIVE_BG);
+		fg = get_color(ACTIVE_FG);
+		area.color = get_color(ACTIVE_BG);
 		tag->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_NORMAL);
 	} else if (flag == ITEM_FLG_FOCUSED) {
-		fg = color2ptr(NOTICE_FG);
-		bg = color2ptr(NOTICE_BG);
+		fg = get_color(NOTICE_FG);
+		area.color = get_color(NOTICE_BG);
 		tag->flags &= ~(ITEM_FLG_ACTIVE | ITEM_FLG_NORMAL);
 	} else {
-		fg = color2ptr(NORMAL_FG);
-		bg = color2ptr(NORMAL_BG);
+		fg = get_color(NORMAL_FG);
+		area.color = get_color(NORMAL_BG);
 		tag->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_ACTIVE);
 	}
 
 	tag->flags |= flag;
-	draw_panel_text(&scr->panel, fg, bg, tag->x, tag->w, tag->name,
-			tag->nlen, font1, space_width);
+
+	area.rect.x = tag->x;
+	area.rect.y = tag_rect_y;
+	area.rect.width = tag->w;
+	area.rect.height = tag_rect_h;
+	clear_area(scr->panel.win, scr->panel.gc, &area);
+
+	set_text_str(scr->panel.tag_text, tag->name, tag->nlen);
+	set_text_pos(scr->panel.tag_text, tag->x + tag_text_margin,
+	 panel_text_y);
+	set_text_color(scr->panel.tag_text, fg, area.color);
+	draw_panel_text(&scr->panel, scr->panel.tag_text);
 }
 
 static void print_div(struct screen *scr)
 {
-	uint16_t x, w;
+	uint16_t x = scr->items[PANEL_AREA_DIV].x + tag_text_margin;
 
-	x = scr->items[PANEL_AREA_DIV].x;
-	w = scr->items[PANEL_AREA_DIV].w;
-
-	draw_panel_text(&scr->panel, color2ptr(NORMAL_FG),
-			color2ptr(NORMAL_BG), x, w, DIV_ICON,
-			sizeof(DIV_ICON) - 1, font1, space_width);
+	set_text_pos(div_text, x, tag_text_margin);
+	draw_panel_text(&scr->panel, div_text);
 }
 
 static void raise_panel(struct screen *scr)
@@ -1432,13 +1411,18 @@ static void raise_panel(struct screen *scr)
 
 static void redraw_panel(struct screen *scr, struct client *cli, uint8_t raise)
 {
+	struct area area;
 	struct list_head *cur;
 
 	if (scr->panel.gc == XCB_NONE)
 		return;
 
-	fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG), scr->x,
-		  0, scr->w, panel_height);
+	area.color = get_color(NORMAL_BG);
+	area.rect.x = scr->x;
+	area.rect.y = 0;
+	area.rect.width = scr->w;
+	area.rect.height = panel_height;
+	clear_area(scr->panel.win, scr->panel.gc, &area);
 
 	print_menu(scr);
 
@@ -1589,36 +1573,35 @@ static int find_toolbox(struct client *cli)
 	uint16_t ww = curscr->x + curscr->w;
 	int16_t yy = curscr->y;
 	uint16_t hh = curscr->y + curscr->h;
-	uint16_t bb = 2 * BORDER_WIDTH;
-	uint16_t d = toolbox.size - bb;
+	uint16_t toolbox_size = toolbox.size + TOOLBOX_OFFSET;
 
 	if (cli->x + cli->w >= xx && cli->x + cli->w <= ww &&
-		   cli->y >= yy && cli->y <= hh &&
-		   !toolbox_obscured(cli, cli->x + cli->w - d, cli->y)) {
-		toolbox.x = cli->x + cli->w - d - bb;
-		toolbox.y = cli->y + bb;
+	 cli->y >= yy && cli->y <= hh &&
+	 !toolbox_obscured(cli, cli->x + cli->w - toolbox_size, cli->y)) {
+		toolbox.x = cli->x + cli->w - toolbox_size;
+		toolbox.y = cli->y + TOOLBOX_OFFSET;
 		toolbox.gravity = TOP_RIGHT;
 		dd("TOP RIGHT is OK win %#x\n", cli->win);
 	} else if (cli->x >= xx && cli->x <= ww &&
 	    cli->y >= yy && cli->y <= hh &&
 	    !toolbox_obscured(cli, cli->x, cli->y)) {
-		toolbox.x = cli->x + bb;
-		toolbox.y = cli->y + bb;
+		toolbox.x = cli->x + TOOLBOX_OFFSET;
+		toolbox.y = cli->y + TOOLBOX_OFFSET;
 		toolbox.gravity = TOP_LEFT;
 		dd("TOP LEFT is OK win %#x\n", cli->win);
 	} else if (cli->x + cli->w >= xx && cli->x + cli->w <= ww &&
-		   cli->y + cli->h >= yy && cli->y + cli->h <= hh &&
-		   !toolbox_obscured(cli, cli->x + cli->w - d,
-				     cli->y + cli->h - d)) {
-		toolbox.x = cli->x + cli->w - d - bb;
-		toolbox.y = cli->y + cli->h - d - bb;
+	 cli->y + cli->h >= yy && cli->y + cli->h <= hh &&
+	 !toolbox_obscured(cli, cli->x + cli->w - toolbox_size,
+	 cli->y + cli->h - toolbox_size)) {
+		toolbox.x = cli->x + cli->w - toolbox_size;
+		toolbox.y = cli->y + cli->h - toolbox_size;
 		toolbox.gravity = BOTTOM_RIGHT;
 		dd("BOT RIGHT is OK win %#x\n", cli->win);
 	} else if (cli->x >= xx && cli->x <= ww &&
-		   cli->y + cli->h >= yy && cli->y + cli->h <= hh &&
-		   !toolbox_obscured(cli, cli->x, cli->y + cli->h - d)) {
-		toolbox.x = cli->x + bb;
-		toolbox.y = cli->y + cli->h - d - bb;
+	 cli->y + cli->h >= yy && cli->y + cli->h <= hh &&
+	 !toolbox_obscured(cli, cli->x, cli->y + cli->h - toolbox_size)) {
+		toolbox.x = cli->x + TOOLBOX_OFFSET;
+		toolbox.y = cli->y + cli->h - toolbox_size;
 		toolbox.gravity = BOTTOM_LEFT;
 		dd("BOT LEFT is OK win %#x\n", cli->win);
 	} else {
@@ -1641,15 +1624,40 @@ static void hide_toolbox()
 
 static void draw_toolbox(const char *str, uint8_t len)
 {
-	struct color *fg = color2ptr(NOTICE_FG);
-	uint16_t x = (toolbox.size - FONT2_SIZE) / toolbox.xdiv;
+	struct xcb xcb;
+	struct area area;
+	uint16_t x;
+	uint16_t y;
+	uint16_t w;
+	uint16_t h;
 
-	fill_rect(toolbox.win, toolbox.gc, color2ptr(NOTICE_BG), 1, 1,
-	 toolbox.size - ITEM_V_MARGIN, toolbox.size - ITEM_V_MARGIN);
+	area.color = get_color(NOTICE_BG);
+	area.rect.x = 1;
+	area.rect.y = 1;
+	area.rect.width = toolbox.size - ITEM_V_MARGIN;
+	area.rect.height = toolbox.size - ITEM_V_MARGIN;
+	clear_area(toolbox.win, toolbox.gc, &area);
 
-	XftDrawStringUtf8(toolbox.draw, fg->val, font2, x, text_yoffs,
-			  (XftChar8 *) str, len);
-	XSync(xdpy, 0);
+	set_text_str(toolbox.text, str, len);
+	get_text_size(toolbox.text, &w, &h);
+
+	x = toolbox.size - w;
+	if (x % 2)
+		x++;
+	x /= 2;
+
+	y = toolbox.size - h;
+	if (y % 2)
+		y++;
+	y /= 2;
+
+	set_text_pos(toolbox.text, x, y);
+
+	xcb.dpy = dpy;
+	xcb.win = toolbox.win;
+	xcb.gc = toolbox.gc;
+
+	draw_text_xcb(&xcb, toolbox.text);
 }
 
 static void show_toolbox(struct client *cli)
@@ -1669,8 +1677,8 @@ static void show_toolbox(struct client *cli)
 
 	raise_window(toolbox.win);
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
-	val[0] = toolbox.x - BORDER_WIDTH * 3;
-	val[1] = toolbox.y + BORDER_WIDTH;
+	val[0] = toolbox.x;
+	val[1] = toolbox.y;
 	xcb_configure_window(dpy, toolbox.win, mask, val);
 	xcb_map_window_checked(dpy, toolbox.win);
 
@@ -1715,10 +1723,8 @@ static void hide_toolbar(void)
 
 	disable_events(toolbar.panel.win);
 	xcb_flush(dpy);
-	XftDrawDestroy(toolbar.panel.draw);
 	xcb_free_gc(dpy, toolbar.panel.gc);
 	xcb_destroy_window_checked(dpy, toolbar.panel.win);
-	title_width(toolbar.scr);
 
 	if (toolbar.cli) {
 		struct arg arg = { .cli = toolbar.cli, .kmap = NULL, };
@@ -1726,7 +1732,6 @@ static void hide_toolbar(void)
 		raise_client(&arg);
 		center_pointer(arg.cli);
 		show_toolbox(arg.cli);
-		print_title(toolbar.scr, arg.cli->win);
 	}
 
 	xcb_flush(dpy);
@@ -1794,8 +1799,14 @@ static void focus_any(pid_t pid)
 
 static void draw_hintbox(uint16_t x, uint16_t y, uint16_t w, uint16_t h)
 {
-	fill_rect(toolbox.win, toolbox.gc, color2ptr(ALERT_BG), x + 1, y + 1,
-		  w - 2 , h - 2);
+	struct area area;
+
+	area.color = get_color(ALERT_BG);
+	area.rect.x = x + 1;
+	area.rect.y = y + 1;
+	area.rect.width = w - 2;
+	area.rect.height = h - 2;
+	clear_area(toolbox.win, toolbox.gc, &area);
 }
 
 static uint8_t hintbox_pos_;
@@ -1877,7 +1888,7 @@ static void init_toolbox(void)
 	toolbox.size = panel_height;
 	toolbox.win = xcb_generate_id(dpy);
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
-	val[0] = color2int(NORMAL_BG);
+	val[0] = get_color(NORMAL_BG);
 	val[1] = XCB_EVENT_MASK_BUTTON_PRESS;
 	val[1] |= XCB_EVENT_MASK_BUTTON_RELEASE;
 	val[1] |= XCB_EVENT_MASK_LEAVE_WINDOW;
@@ -1887,17 +1898,13 @@ static void init_toolbox(void)
 			  XCB_WINDOW_CLASS_INPUT_OUTPUT, rootscr->root_visual,
 			  mask, val);
 
-	border_color(toolbox.win, notice_bg);
+	border_color(toolbox.win, get_color(NOTICE_BG));
 	border_width(toolbox.win, BORDER_WIDTH);
 	xcb_flush(dpy);
 	mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND;
-	val[0] = val[1] = color2int(NORMAL_BG);
+	val[0] = val[1] = get_color(NORMAL_BG);
 	toolbox.gc = xcb_generate_id(dpy);
 	xcb_create_gc(dpy, toolbox.gc, toolbox.win, mask, val);
-	toolbox.draw = XftDrawCreate(xdpy, toolbox.win,
-				     DefaultVisual(xdpy, xscr),
-				     DefaultColormap(xdpy, xscr));
-	XSync(xdpy, 0);
 	xcb_flush(dpy);
 }
 
@@ -1923,7 +1930,8 @@ static void reset_toolbar_item(struct toolbar_item *item, uint16_t w)
 		item->flags = ITEM_FLG_LOCKED;
 
 	item->x = w;
-	text_exts(item->str, item->len, &item->w, &h, font2);
+	set_text_str(toolbar.panel.text, item->str, item->len);
+	get_text_size(toolbar.panel.text, &item->w, &h);
 }
 
 static void reset_toolbar(void)
@@ -1938,7 +1946,7 @@ static void reset_toolbar(void)
 		w =  ARRAY_SIZE(toolbar_items) * panel_height - panel_height;
 	} else {
 		reverse = 0;
-		w = 0;
+		w = 1;
 	}
 
 	while (ptr < end) {
@@ -2041,8 +2049,9 @@ static struct screen *cli2scr(struct client *cli)
 
 static void draw_toolbar_text(struct toolbar_item *item, uint8_t flag)
 {
-	struct color *fg;
-	struct color *bg;
+	struct area area;
+	struct xcb xcb;
+	uint32_t fg;
 	uint16_t item_w;
 	uint16_t xx;
 
@@ -2050,24 +2059,24 @@ static void draw_toolbar_text(struct toolbar_item *item, uint8_t flag)
 		return;
 
 	if (flag == ITEM_FLG_ALERT) {
-		fg = color2ptr(ALERT_FG);
-		bg = color2ptr(ALERT_BG);
+		fg = get_color(ALERT_FG);
+		area.color = get_color(ALERT_BG);
 		item->flags &= ~(ITEM_FLG_ACTIVE | ITEM_FLG_NORMAL);
 		item->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_ALERT);
 	} else if (flag == ITEM_FLG_FOCUSED || flag == ITEM_FLG_LOCKED) {
-		fg = color2ptr(NOTICE_FG);
-		bg = color2ptr(NOTICE_BG);
+		fg = get_color(NOTICE_FG);
+		area.color = get_color(NOTICE_BG);
 		item->flags &= ~(ITEM_FLG_ACTIVE | ITEM_FLG_NORMAL);
 		item->flags &= ~ITEM_FLG_ALERT;
 	} else {
-		fg = color2ptr(NORMAL_FG);
-		bg = color2ptr(NORMAL_BG);
+		fg = get_color(NORMAL_FG);
+		area.color = get_color(NORMAL_BG);
 		item->flags &= ~(ITEM_FLG_FOCUSED | ITEM_FLG_ACTIVE);
 		item->flags &= ~ITEM_FLG_ALERT;
 	}
 
 	if (item->str == (const char *) BTN_CLOSE)
-		fg = color2ptr(ALERT_FG);
+		fg = get_color(ALERT_FG);
 
 	item->flags |= flag;
 	item_w = panel_height - ITEM_V_MARGIN;
@@ -2079,11 +2088,21 @@ static void draw_toolbar_text(struct toolbar_item *item, uint8_t flag)
 
 	xx = (panel_height - item_w) / 2;
 
-	fill_rect(toolbar.panel.win, toolbar.panel.gc, bg, item->x, 1,
-	 toolbox.size - ITEM_V_MARGIN, toolbox.size - ITEM_V_MARGIN);
-	XftDrawStringUtf8(toolbar.panel.draw, fg->val, font2, item->x + xx,
-	 text_yoffs, (XftChar8 *) item->str, item->len);
-	XSync(xdpy, 0);
+	area.rect.x = item->x;
+	area.rect.y = 1;
+	area.rect.width = toolbox.size - ITEM_V_MARGIN;
+	area.rect.height = toolbox.size - ITEM_V_MARGIN;
+	clear_area(toolbar.panel.win, toolbar.panel.gc, &area);
+
+	set_text_str(toolbar.panel.text, item->str, item->len);
+	set_text_color(toolbar.panel.text, fg, area.color);
+	set_text_pos(toolbar.panel.text, item->x + xx, icon_text_y);
+
+	xcb.dpy = dpy;
+	xcb.win = toolbar.panel.win;
+	xcb.gc = toolbar.panel.gc;
+
+	draw_text_xcb(&xcb, toolbar.panel.text);
 }
 
 static void focus_toolbar_item(struct toolbar_item *item, int16_t x)
@@ -2201,11 +2220,6 @@ static void show_menu(void)
 static void clean(void)
 {
 	xcb_disconnect(dpy);
-
-	if (font1)
-		XftFontClose(xdpy, font1);
-	if (font2)
-		XftFontClose(xdpy, font2);
 }
 
 #define panic(fmt, ...) {\
@@ -2536,7 +2550,7 @@ static void window_state(xcb_window_t win, uint8_t state)
 
 static void setup_toolbar(struct client *cli)
 {
-	uint16_t w = ARRAY_SIZE(toolbar_items) * panel_height;
+	uint16_t w = ARRAY_SIZE(toolbar_items) * toolbox.size;
 	uint32_t val[2], mask;
 
 	reset_toolbar();
@@ -2545,18 +2559,18 @@ static void setup_toolbar(struct client *cli)
 	toolbar.scr = curscr;
 
 	if (toolbox.gravity == TOP_LEFT || toolbox.gravity == BOTTOM_LEFT)
-		toolbar.x = toolbox.x + toolbox.size + BORDER_WIDTH;
+		toolbar.x = toolbox.x + toolbox.size + TOOLBOX_OFFSET - 1;
 	else
-		toolbar.x = toolbox.x - w - BORDER_WIDTH;
+		toolbar.x = toolbox.x - w - BORDER_WIDTH * 2;
 
 	toolbar.y = toolbox.y;
 
-	toolbar.panel.w = w;
-	toolbar.panel.h = panel_height;
+	toolbar.w = w;
+	toolbar.h = toolbox.size;
 	toolbar.panel.win = xcb_generate_id(dpy);
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
-	val[0] = color2int(NORMAL_BG);
+	val[0] = get_color(NORMAL_BG);
 	val[1] = XCB_EVENT_MASK_VISIBILITY_CHANGE;
 	val[1] |= XCB_EVENT_MASK_PROPERTY_CHANGE;
 	val[1] |= XCB_EVENT_MASK_STRUCTURE_NOTIFY;
@@ -2566,27 +2580,23 @@ static void setup_toolbar(struct client *cli)
 	val[1] |= XCB_EVENT_MASK_KEY_PRESS;
 	val[1] |= XCB_EVENT_MASK_POINTER_MOTION;
 
-	border_color(toolbar.cli->win, notice_bg);
+	border_color(toolbar.cli->win, get_color(NOTICE_BG));
 	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, toolbar.panel.win,
 			  rootscr->root,
-			  0, 0, toolbar.panel.w, toolbar.panel.h,
+			  0, 0, toolbar.w, toolbar.h,
 			  0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			  rootscr->root_visual, mask, val);
-	border_color(toolbar.panel.win, notice_bg);
+	border_color(toolbar.panel.win, get_color(NOTICE_BG));
 	border_width(toolbar.panel.win, BORDER_WIDTH);
 	xcb_flush(dpy);
 
 	toolbar.panel.gc = xcb_generate_id(dpy);
 	mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND;
-	val[0] = val[1] = color2int(NORMAL_BG);
+	val[0] = val[1] = get_color(NORMAL_BG);
         xcb_create_gc(dpy, toolbar.panel.gc, toolbar.panel.win, mask, val);
 
-	toolbar.panel.draw = XftDrawCreate(xdpy, toolbar.panel.win,
-					   DefaultVisual(xdpy, xscr),
-					   DefaultColormap(xdpy, xscr));
-
 	ii("toolbar %#x geo %ux%u+%d+%d target %#x\n", toolbar.panel.win,
-	   toolbar.panel.w, toolbar.panel.h, toolbar.x, toolbar.y,
+	   toolbar.w, toolbar.h, toolbar.x, toolbar.y,
 	   toolbar.cli->win);
 }
 
@@ -2603,17 +2613,15 @@ static void show_toolbar(struct arg *arg)
 	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
 	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
 	val[0] = toolbar.x;
-	val[1] = toolbar.y + BORDER_WIDTH;
-	val[2] = toolbar.panel.w;
-	val[3] = toolbar.panel.h;
+	val[1] = toolbar.y;
+	val[2] = toolbar.w;
+	val[3] = toolbar.h;
 	xcb_configure_window(dpy, toolbar.panel.win, mask, val);
 
 	ii("toolbar %#x on scr %d, tag %s\n", toolbar.panel.win,
 	   toolbar.scr->id, toolbar.scr->tag->name);
 	xcb_map_window_checked(dpy, toolbar.panel.win);
 	draw_toolbar();
-	title_width(toolbar.scr);
-	print_title(toolbar.scr, toolbar.cli->win);
 	raise_window(toolbar.panel.win);
 	focus_window(toolbar.panel.win);
 	toolbar_grab_input();
@@ -2871,7 +2879,7 @@ static void flag_window(struct arg *arg)
 	struct toolbar_item *end;
 
 	if (curscr->tag->anchor)
-		border_color(curscr->tag->anchor->win, active_bg);
+		border_color(curscr->tag->anchor->win, get_color(ACTIVE_BG));
 
 	if (arg->cli == curscr->tag->anchor) {
 		curscr->tag->anchor = NULL;
@@ -2893,7 +2901,7 @@ static void flag_window(struct arg *arg)
 				arg->cli->pos = WIN_POS_BOTTOM_FILL;
 			}
 
-			border_color(arg->cli->win, notice_bg);
+			border_color(arg->cli->win, get_color(NOTICE_BG));
 		}
 
 		last_winpos = arg->cli->pos; /* to avoid div reset */
@@ -2968,7 +2976,7 @@ static void update_flagged_window(struct arg *arg, int16_t x, int16_t y,
 		center_pointer(arg->cli);
 
 	if (arg->cli->div == POS_DIV_MAX || arg->cli->div <= GROW_STEP_GLOW)
-		border_color(arg->cli->win, alert_bg);
+		border_color(arg->cli->win, get_color(ALERT_BG));
 
 	if (!(arg->cli->flags & CLI_FLG_CENTER))
 		arg->cli->inc = 0;
@@ -3422,14 +3430,21 @@ static void arrange_dock(struct screen *scr)
 
 	list_walk(cur, &scr->dock) {
 		struct client *cli = list2cli(cur);
+		uint16_t w;
 
-		x -= (cli->w + space_width + space_width * BORDER_WIDTH);
+		if (cli == ranchor)
+			w = cli->w + tag_text_margin + BORDER_WIDTH;
+		else
+			w = cli->w + tag_text_margin * 3;
+
+		x -= w;
+		scr->items[PANEL_AREA_DOCK].w += w;
 		client_moveresize(cli, x, y, cli->w, cli->h);
 	}
 
 	scr->items[PANEL_AREA_DOCK].x = x;
-	scr->items[PANEL_AREA_DOCK].w = scr->items[PANEL_AREA_DOCK].x - x;
-	title_width(scr);
+	x = scr->w - scr->items[PANEL_AREA_DOCK].w;
+	scr->items[PANEL_AREA_TITLE].w = x - scr->items[PANEL_AREA_TITLE].x;
 	print_title(scr, XCB_WINDOW_NONE);
 }
 
@@ -3473,7 +3488,7 @@ static void add_dock(struct client *cli, uint8_t bw)
 
 	if (bw > 0) { /* adjust width if client desires to have a border */
 		border_width(cli->win, BORDER_WIDTH);
-		border_color(cli->win, border_fg);
+		border_color(cli->win, get_color(BORDER_FG));
 		cli->flags |= CLI_FLG_BORDER;
 	}
 
@@ -4052,7 +4067,7 @@ out:
 static int tag_pointed(struct tag *tag, int16_t x, int16_t y)
 {
 	if (tag && 0 <= y && y <= curscr->panel.y + panel_height &&
-	    x >= tag->x && x <= tag->x + tag->w + TAG_GAP) {
+	    x >= tag->x && x <= tag->x + tag->w + panel_space) {
 		return 1;
 	}
 
@@ -4159,11 +4174,17 @@ static void select_tag(struct screen *scr, int16_t x, int16_t y)
 	xcb_set_input_focus(dpy, XCB_NONE, scr->panel.win, XCB_CURRENT_TIME);
 }
 
-static void clean_tag_area(struct screen *scr, struct tag *tag)
+static void clear_tag_area(struct screen *scr, struct tag *tag)
 {
 	if (scr->panel.win != XCB_WINDOW_NONE && scr->panel.gc != XCB_NONE) {
-		fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG),
-		 tag->x, 0, tag->w, panel_height);
+		struct area area;
+
+		area.color = get_color(NORMAL_BG);
+		area.rect.x = tag->x;
+		area.rect.y = 0;
+		area.rect.width = tag->w;
+		area.rect.height = panel_height;
+		clear_area(scr->panel.win, scr->panel.gc, &area);
 	}
 }
 
@@ -4180,7 +4201,7 @@ static struct tag *get_tag(struct screen *scr, const char *name, uint8_t id)
 			else if (tag->name)
 				free(tag->name);
 
-			clean_tag_area(scr, tag);
+			clear_tag_area(scr, tag);
 
 			tag->nlen = strlen(name);
 			tag->name = strdup(name);
@@ -4225,8 +4246,10 @@ static int add_tag(struct screen *scr, const char *name, uint8_t id,
 	if (!tag)
 		return 0;
 
-	text_exts(name, tag->nlen, &tag->w, &h, font1);
-	tag->w += space_width * 2;
+	set_text_str(scr->panel.tag_text, name, tag->nlen);
+	get_text_size(scr->panel.tag_text, &tag->w, &h);
+
+	tag->w += tag_text_margin * 2;
 	ii("screen %u '%s' tag '%s' len %u width %u\n", scr->id, scr->name,
 	 name, tag->nlen, tag->w);
 
@@ -4241,7 +4264,7 @@ static int add_tag(struct screen *scr, const char *name, uint8_t id,
 	tag->flags = 0;
 	print_tag(scr, tag, flg);
 
-	return pos + tag->w + TAG_GAP;
+	return pos + tag->w + panel_space;
 }
 
 static int tag_del(struct screen *scr, uint8_t id)
@@ -4361,37 +4384,41 @@ static void move_panel(struct screen *scr)
 	xcb_flush(dpy);
 }
 
-static inline void clean_panel_area(struct screen *scr)
+static inline void clear_panel_area(struct screen *scr)
 {
 	if (scr->panel.gc != XCB_NONE) {
-		fill_rect(scr->panel.win, scr->panel.gc, color2ptr(NORMAL_BG),
-		 0, 0, scr->w, panel_height);
+		struct area area;
+
+		area.color = get_color(NORMAL_BG);
+		area.rect.x = 0;
+		area.rect.y = 0;
+		area.rect.width = scr->w;
+		area.rect.height = panel_height;
+		clear_area(scr->panel.win, scr->panel.gc, &area);
 	}
 }
 
 static void reinit_panel(struct screen *scr)
 {
 	int16_t x = 0;
-	uint16_t h, w;
+	uint16_t w = div_w + tag_text_margin * 2;
 
-	clean_panel_area(scr);
-	text_exts(menu_icon, menu_icon_len, &w, &h, menu_font);
+	clear_panel_area(scr);
 
-	scr->items[PANEL_AREA_MENU].x = TAG_GAP;
-	scr->items[PANEL_AREA_MENU].w = w + 2 * space_width;
-	x += scr->items[PANEL_AREA_MENU].w + 2 * TAG_GAP;
+	scr->items[PANEL_AREA_MENU].x = 0;
+	scr->items[PANEL_AREA_MENU].w = menu_w + tag_text_margin * 2;
+	x += scr->items[PANEL_AREA_MENU].w + panel_space;
 	print_menu(scr);
 
 	scr->items[PANEL_AREA_TAGS].x = x;
 	scr->items[PANEL_AREA_TAGS].w = init_tags(scr);
 
 	scr->items[PANEL_AREA_DIV].x = scr->items[PANEL_AREA_TAGS].w;
-	text_exts(DIV_ICON, sizeof(DIV_ICON) - 1, &w, &h, font1);
-	w += scr->items[PANEL_AREA_DIV].x + 2 * space_width;
-	scr->items[PANEL_AREA_DIV].w = w;
+	scr->items[PANEL_AREA_DIV].w += scr->items[PANEL_AREA_DIV].x + w;
 	print_div(scr);
 
-	scr->items[PANEL_AREA_TITLE].x = scr->items[PANEL_AREA_DIV].w;
+	scr->items[PANEL_AREA_TITLE].x = scr->items[PANEL_AREA_DIV].x;
+	scr->items[PANEL_AREA_TITLE].x += panel_space + w;
 
 	arrange_dock(scr);
 	move_panel(scr);
@@ -4618,22 +4645,58 @@ static void destroy_panel(struct screen *scr)
 		xcb_destroy_window_checked(dpy, scr->panel.win);
 		scr->panel.win = XCB_WINDOW_NONE;
 	}
+
+	if (scr->panel.text) {
+		destroy_text(&scr->panel.text);
+		scr->panel.text = NULL;
+	}
+
+	if (scr->panel.tag_text) {
+		destroy_text(&scr->panel.tag_text);
+		scr->panel.tag_text = NULL;
+	}
 }
 
 static void create_panel(struct screen *scr)
 {
 	uint32_t val[2], mask;
+	uint16_t h;
 
-	panel_height = font1->ascent + font1->descent + 2 * ITEM_V_MARGIN;
+	destroy_panel(scr); /* clean up previous setup */
 
+	if (!(scr->panel.text = create_text())) {
+		ww("failed to allocate panel text\n");
+		h = 20;
+		panel_space = 4;
+	} else {
+		set_text_font(scr->panel.text, text_font, font_size);
+		set_text_str(scr->panel.text, "|", 1);
+		get_text_size(scr->panel.text, &panel_space, &h);
+		panel_space *= 4;
+		set_text_str(scr->panel.text, NULL, 0);
+	}
+
+	if (!(scr->panel.tag_text = create_text())) {
+		ww("failed to allocate tag text\n");
+	} else {
+		set_text_font(scr->panel.tag_text, text_font, font_size);
+	}
+
+	tag_text_margin = h / 3;
+	panel_height = h + tag_text_margin;
 	if (panel_height % 2)
 		panel_height++;
 
-	destroy_panel(scr); /* clean up previous setup */
+	/* some magic numbers to make text aligments look nice */
+	icon_text_y = (panel_height - h) / 2 + 1;
+	panel_text_y = icon_text_y + 2;
+	tag_rect_h = panel_height - 4;
+	tag_rect_y = 2;
+
 	scr->panel.win = xcb_generate_id(dpy);
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
-	val[0] = color2int(NORMAL_BG);
+	val[0] = get_color(NORMAL_BG);
 	val[1] = XCB_EVENT_MASK_BUTTON_PRESS;
 	val[1] |= XCB_EVENT_MASK_BUTTON_RELEASE;
 	val[1] |= XCB_EVENT_MASK_POINTER_MOTION;
@@ -4666,14 +4729,10 @@ static void create_panel(struct screen *scr)
 
 	scr->panel.gc = xcb_generate_id(dpy);
 	mask = XCB_GC_FOREGROUND | XCB_GC_BACKGROUND;
-	val[0] = val[1] = color2int(NORMAL_BG);
+	val[0] = val[1] = get_color(NORMAL_BG);
 	xcb_create_gc(dpy, scr->panel.gc, scr->panel.win, mask, val);
 
 	xcb_map_window_checked(dpy, scr->panel.win);
-
-	scr->panel.draw = XftDrawCreate(xdpy, scr->panel.win,
-					DefaultVisual(xdpy, xscr),
-					DefaultColormap(xdpy, xscr));
 
 	ii("screen %d, panel %#x geo %ux%u+%d+%d\n", scr->id, scr->panel.win,
 	   scr->w, panel_height, scr->x, scr->panel.y);
@@ -4730,11 +4789,83 @@ static void init_tray(void)
 	free(r);
 }
 
+static void init_fonts(void)
+{
+	const char *font_size_str;
+	const char *icons;
+	const char *font;
+
+	if (!(font = getenv("FWM_FONT"))) {
+		ww("FWM_FONT variable is not set\n");
+	} else {
+		text_font = open_font(font, defscr->hdpi, defscr->vdpi);
+		if (invalid_font_id(text_font)) {
+			ww("FWM_FONT points to unusable font file '%s'\n",
+			 font);
+		}
+	}
+
+	if (!(icons = getenv("FWM_ICONS"))) {
+		ww("FWM_ICONS variable is not set\n");
+	} else {
+		icon_font = open_font(icons, defscr->hdpi, defscr->vdpi);
+		if (invalid_font_id(icon_font)) {
+			ww("FWM_ICONS points to unusable font file '%s'\n",
+			 icons);
+		}
+	}
+
+	if (!invalid_font_id(icon_font)) {
+		menu_icon = MENU_ICON_HOME;
+		menu_icon_len = sizeof(MENU_ICON_HOME) - 1;
+	} else {
+		icon_font = text_font;
+		menu_icon = MENU_ICON_DEF;
+		menu_icon_len = sizeof(MENU_ICON_DEF) - 1;
+	}
+
+	if (!(font_size_str = getenv("FWM_FONT_SIZE"))) {
+		ww("FWM_FONT_SIZE variable is not set\n");
+	} else if ((font_size = strtof(font_size_str, NULL)) == 0) {
+		font_size = DEFAULT_FONT_SIZE;
+	}
+
+	if (!(menu_text = create_text())) {
+		ww("failed to allocate menu text\n");
+	} else {
+		set_text_font(menu_text, icon_font, font_size);
+		set_text_str(menu_text, menu_icon, menu_icon_len);
+		set_text_color(menu_text, get_color(NORMAL_FG), get_color(NORMAL_BG));
+		get_text_size(menu_text, &menu_w, &menu_h);
+	}
+
+	if (!(div_text = create_text())) {
+		ww("failed to allocate divider text\n");
+	} else {
+		set_text_font(div_text, text_font, font_size);
+		set_text_str(div_text, div_icon, div_icon_len);
+		set_text_color(div_text, get_color(NORMAL_FG), get_color(NORMAL_BG));
+		get_text_size(div_text, &div_w, &div_h);
+	}
+
+	if (!(toolbar.panel.text = create_text())) {
+		ww("failed to allocate toolbar text\n");
+	} else {
+		set_text_font(toolbar.panel.text, icon_font, font_size);
+	}
+
+	if (!(toolbox.text = create_text())) {
+		ww("failed to allocate toolbox text\n");
+	} else {
+		set_text_font(toolbox.text, icon_font, font_size);
+		set_text_color(toolbox.text, get_color(NOTICE_FG), get_color(NOTICE_BG));
+	}
+}
+
 static void add_screen(struct screen *scr)
 {
 	list_init(&scr->dock);
 	list_init(&scr->tags);
-	create_panel(scr);
 
 	if (!list_empty(&scr->tags)) {
 		ii("current tag %p %s\n", list2tag(scr->tags.next),
@@ -4938,15 +5069,10 @@ static void init_outputs(void)
 
 	chdir(homedir);
 
-	if (stat("panel/top", &st) == 0) {
+	if (stat("panel/top", &st) == 0)
 		panel_top = 1;
-		menu_icon = MENU_ICON_DOWN;
-		menu_icon_len = sizeof(MENU_ICON_DOWN) - 1;
-	} else {
+	else
 		panel_top = 0;
-		menu_icon = MENU_ICON_UP;
-		menu_icon_len = sizeof(MENU_ICON_UP) - 1;
-	}
 
 	/* reset geometry of previously found screens */
 	list_walk(cur, &screens) {
@@ -4971,8 +5097,10 @@ static void init_outputs(void)
 	if (!curscr)
 		curscr = defscr;
 
+	init_fonts();
 	list_walk(cur, &screens) {
 		scr = list2screen(cur);
+		create_panel(scr);
 		scr->h -= panel_height + PANEL_SCREEN_GAP;
 
 		struct list_head *c;
@@ -5003,38 +5131,25 @@ static void init_outputs(void)
 
 static void load_color(const char *path, struct color *color)
 {
-	uint32_t val;
-	XRenderColor ref;
 	uint8_t buf[sizeof("0xffffff")];
 	int fd;
 	FILE *f;
 
 	fd = open(path, O_RDONLY);
 	if (fd < 3) {
-		val = color->def;
 		if ((f = fopen(path, "w"))) {
-			fprintf(f, "%#x", val);
+			fprintf(f, "%#x", color->def);
 			fclose(f);
 		}
 	} else { /* at least 0x0 */
 		memset(buf, 0, sizeof(buf));
 		read(fd, buf, sizeof(buf));
 		close(fd);
-		val = strtol((const char *) buf, NULL, 16);
+		color->val = strtol((const char *) buf, NULL, 16);
 	}
 
-	if (color->type == COLOR_TYPE_INT) {
-		*((uint32_t *) color->val) = val;
-	} else {
-		color->def = val;
-		ref.alpha = 0xffff;
-		ref.red = (val & 0xff0000) >> 8;
-		ref.green = val & 0xff00;
-		ref.blue = (val & 0xff) << 8;
-		XftColorAllocValue(xdpy, DefaultVisual(xdpy, xscr),
-				   DefaultColormap(xdpy, xscr), &ref,
-				   color->val);
-	}
+	if (color->val == 0)
+		color->val = color->def;
 }
 
 static void init_colors(void)
@@ -5650,7 +5765,7 @@ static void handle_panel_motion(int16_t x, int16_t y)
 
 static void motion_place(struct client *cli, int16_t x, int16_t y)
 {
-	uint32_t color = notice_bg;
+	uint32_t color = get_color(NOTICE_BG);
 	uint16_t dw = curscr->w / MOTION_ZONE_DIV;
 	uint16_t dh = curscr->h / MOTION_ZONE_DIV;
 	uint16_t sw = curscr->x + curscr->w;
@@ -5678,7 +5793,7 @@ static void motion_place(struct client *cli, int16_t x, int16_t y)
 		cli->pos = WIN_POS_RIGHT_FILL;
 	} else {
 		cli->pos = 0;
-		color = active_bg;
+		color = get_color(ACTIVE_BG);
 	}
 
 	cli->div = 1;
@@ -5960,20 +6075,40 @@ static void handle_leave_notify(xcb_leave_notify_event_t *e)
 	}
 }
 
+static void handle_wmname_cli(struct client *cli)
+{
+	struct area area;
+
+	area.color = get_color(ALERT_BG);
+	area.rect.x = cli->tag->x;
+	area.rect.y = tag_rect_y;
+	area.rect.width = cli->tag->w;
+	area.rect.height = tag_rect_h;
+	clear_area(cli->scr->panel.win, cli->scr->panel.gc, &area);
+
+	set_text_str(cli->scr->panel.text, cli->tag->name, cli->tag->nlen);
+	set_text_pos(cli->scr->panel.text, cli->tag->x + tag_text_margin,
+	 panel_text_y);
+	set_text_color(cli->scr->panel.text, get_color(NOTICE_FG), area.color);
+	draw_panel_text(&cli->scr->panel, cli->scr->panel.text);
+}
+
 static void handle_wmname(xcb_property_notify_event_t *e)
 {
-	struct color *bg, *fg;
 	struct client *cli = win2cli(e->window);
 
+/* FIXME: sometimes event window contains wrong title
+ * Reproduce:
+ * 1. Run terminal on another tag
+ * 2. In shell: cd; sleep 5; cd /usr/share/icons/gnome/scalable/places/
+ * 3. Switch to another tag
+ * 4. See current window gets title of window from another tag
+ */
 	if (cli && cli->tag == curscr->tag) {
 		print_title(cli->scr, e->window);
 		xcb_flush(dpy);
 	} else if (cli) {
-		fg = color2ptr(NOTICE_FG);
-		bg = color2ptr(NOTICE_BG);
-		draw_panel_text(&cli->scr->panel, fg, bg, cli->tag->x,
-				cli->tag->w, cli->tag->name, cli->tag->nlen,
-				font1, space_width);
+		handle_wmname_cli(cli);
 		xcb_flush(dpy);
 	}
 }
@@ -6438,35 +6573,6 @@ static int handle_events(void)
 	return 1;
 }
 
-static void init_font(void)
-{
-	char *env = getenv("FWM_SCALE");
-	float font_scale;
-
-	env ? (font_scale = atof(env)) : (font_scale = 1);
-	space_width = ITEM_H_MARGIN * font_scale;
-	ii("space width %u font scale %f\n", space_width, font_scale);
-
-	font1 = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
-			    FONT1_NAME, XFT_SIZE, XftTypeDouble,
-			    FONT1_SIZE * font_scale, NULL);
-	if (!font1)
-		panic("XftFontOpen(%s)\n", FONT1_NAME);
-
-	text_yoffs = font1->ascent + ITEM_V_MARGIN;
-	toolbox.xdiv = 2 * font_scale;
-
-	font2 = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
-			    FONT2_NAME, XFT_SIZE, XftTypeDouble,
-			    FONT2_SIZE * font_scale, NULL);
-	if (font2) {
-		menu_font = font2;
-	} else {
-		menu_font = font1;
-		ee("XftFontOpen(%s)\n", FONT2_NAME);
-	}
-}
-
 static void init_keys_def(void)
 {
 	strlen_t tmp;
@@ -6688,21 +6794,8 @@ int main()
 		panic("SIGCHLD handler failed\n");
 
 	disp = getdisplay();
-	xdpy = XOpenDisplay(NULL);
-
-	if (!xdpy) {
-		ee("XOpenDisplay(%u) failed\n", disp);
-		return 1;
-	}
-
-	xscr = DefaultScreen(xdpy);
-	init_font();
 	init_colors();
-#if 0
 	dpy = xcb_connect(NULL, NULL);
-#else
-	dpy = XGetXCBConnection(xdpy);
-#endif
 	if (!dpy) {
 		ee("xcb_connect() failed\n");
 		return 1;

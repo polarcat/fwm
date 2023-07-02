@@ -1,8 +1,8 @@
 out = fwm
-src = src/fwm.c
-cflags += $(xftcflags)
+src = src/fwm.c src/text.c
+cflags += $(ftcflags)
 ldflags += -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms -lpthread
-ldflags += -lX11 -lX11-xcb $(xftldflags)
+ldflags += $(ftldflags)
 note = \033[0;31mdo not forget to rename .xinitrc-fwm -> .xinitrc\033[0m\n
 
 .PHONY: FORCE
