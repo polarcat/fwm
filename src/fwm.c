@@ -163,6 +163,8 @@ struct panel {
 	xcb_drawable_t win;
 	struct text *text;
 	struct text *tag_text;
+	uint8_t visibility_state;
+	uint8_t refresh;
 };
 
 //#define LEFT_BTN ""
@@ -722,12 +724,12 @@ static struct client *win2cli(xcb_window_t win)
 	return NULL;
 }
 
-static void timestamp(struct client *cli)
+static uint64_t time_us(void)
 {
-	struct timespec ts;
+	struct timespec t;
 
-	clock_gettime(CLOCK_MONOTONIC_COARSE, &ts);
-	cli->ts = (ts.tv_sec * 1000000000 + ts.tv_nsec) / 1000; /* us */
+	clock_gettime(CLOCK_MONOTONIC_COARSE, &t);
+	return (t.tv_sec * 1000000000 + t.tv_nsec) / 1000; /* us */
 }
 
 static enum winstatus window_status(xcb_window_t win)
@@ -1406,6 +1408,15 @@ static void raise_panel(struct screen *scr)
 
 		list_walk(cur, &scr->dock)
 			raise_window((list2cli(cur))->win);
+	}
+}
+
+static void raise_all_panels(void)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		raise_panel(list2screen(cur));
 	}
 }
 
@@ -2832,7 +2843,7 @@ static void make_grid(struct arg *arg)
 		if (ts) { /* equalize timestamps so toolbox will not be hidden */
 			cli->ts = ts;
 		} else {
-			timestamp(cli);
+			cli->ts = time_us();
 			ts = cli->ts;
 		}
 
@@ -3839,8 +3850,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		cli->flags |= CLI_FLG_CENTER; /* show such windows in center */
 	}
 
-	ignore_panel = 0;
-
 	if (cli->flags & CLI_FLG_CENTER && !(winflags & WIN_FLG_SCAN)) {
 		g->x = scr->x + scr->w / 2 - g->width / 2;
 		g->y = scr->top + scr->h / 2 - g->height / 2;
@@ -3861,7 +3870,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		cli->h = g->height;
 		ii("add dock win %#x pid %u\n", cli->win, cli->pid);
 		add_dock(cli, g->border_width);
-		ignore_panel = 1; /* do not handle panel visibility */
 		goto out;
 	} else if (!(winflags & WIN_FLG_SCAN)) {
 		g->x += scr->x;
@@ -3917,7 +3925,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	   cli->x, cli->y, cli, cli->leader);
 
 	if (winflags & WIN_FLG_SCAN) {
-		timestamp(cli);
+		cli->ts = time_us();
 	} else if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)) &&
 		   !(winflags & WIN_FLG_SCAN)) {
 		struct arg arg = { .cli = cli, .kmap = NULL, };
@@ -3938,6 +3946,9 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	}
 
 out:
+	if (!cli || (cli && (!(cli->flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))))
+		redraw_panel(curscr, NULL, 0);
+
 	free(a);
 	free(g);
 	return cli;
@@ -3961,7 +3972,7 @@ static void raise_client(struct arg *arg)
 	update_head(arg->cli);
 	raise_window(arg->cli->win);
 	focus_window(arg->cli->win);
-	timestamp(arg->cli);
+	arg->cli->ts = time_us();
 	store_client(arg->cli, 0);
 
 	if (arg->kmap && arg->kmap->arg == 1)
@@ -4147,9 +4158,9 @@ static void select_tag(struct screen *scr, int16_t x, int16_t y)
 	list_walk(cur, &scr->tags) { /* refresh labels */
 		struct tag *tag = list2tag(cur);
 
-		if (!tag_pointed(tag, x, y)) {
+		if (tag == prev) {
 			print_tag(scr, tag, ITEM_FLG_NORMAL);
-		} else {
+		} else if (tag_pointed(tag, x, y)) {
 			print_tag(scr, tag, ITEM_FLG_ACTIVE);
 			scr->tag = tag;
 			break;
@@ -5530,6 +5541,19 @@ static void handle_user_request(int fd)
 }
 #endif
 
+static void prepare_motion(struct client *cli)
+{
+	cli->flags |= CLI_FLG_MOVE;
+	hide_toolbar();
+	raise_window(cli->win);
+	center_pointer(cli);
+	init_motion(cli->win);
+	raise_all_panels();
+	redraw_panel(cli->scr, NULL, 0);
+	xcb_flush(dpy);
+	ignore_panel = 1;
+}
+
 static void toolbar_button_press(void)
 {
 	struct arg arg;
@@ -5580,12 +5604,7 @@ static void toolbar_button_press(void)
 		}
 	} else if (focused_item->str == (const char *) BTN_MOVE) {
 		toolbar_pressed = 1; /* client window handles button release */
-		arg.cli->flags |= CLI_FLG_MOVE;
-		hide_toolbar(); /* special case */
-		center_pointer(arg.cli);
-		init_motion(arg.cli->win);
-		raise_panel(curscr);
-		xcb_flush(dpy);
+		prepare_motion(arg.cli);
 		return; /* special case */
 	}
 
@@ -5609,8 +5628,7 @@ static void panel_button_press(xcb_button_press_event_t *e)
 	} else if area(curscr, PANEL_AREA_DOCK, e->event_x) {
 		ii("dock\n");
 	} else if area(curscr, PANEL_AREA_DIV, e->event_x) {
-		struct arg arg = { .cli = toolbox.cli, };
-		show_toolbar(&arg);
+		redraw_panel(curscr, front_client(curscr->tag), 0);
 	}
 }
 
@@ -5624,19 +5642,13 @@ static void handle_button_release(xcb_button_release_event_t *e)
 	} else if (e->event == rootscr->root && motion_cli &&
 		   e->child == motion_cli->win) {
 			motion_cli->flags &= ~CLI_FLG_MOVE;
+			ignore_panel = 0;
 	} else if (e->event == toolbox.win || e->child == toolbox.win) {
 		if (e->time - toolbox_time < TAG_LONG_PRESS) {
 			struct arg arg = { .cli = toolbox.cli, };
 			show_toolbar(&arg);
 		} else if (toolbox.cli) {
-			struct arg arg = { .cli = toolbox.cli, .kmap = NULL, };
-			arg.cli->flags |= CLI_FLG_MOVE;
-			motion_cli = toolbox.cli;
-			hide_toolbar();
-			raise_client(&arg);
-			center_pointer(arg.cli);
-			init_motion(arg.cli->win);
-			xcb_flush(dpy);
+			prepare_motion(toolbox.cli);
 		}
 
 		return;
@@ -5862,7 +5874,7 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	val[0] = cli->x;
 	val[1] = cli->y;
 	xcb_configure_window_checked(dpy, cli->win, mask, val);
-	timestamp(cli);
+	cli->ts = time_us();
 
 	if (cli->scr != curscr && !(cli->flags & CLI_FLG_DOCK)) { /* retag */
 		list_del(&cli->head);
@@ -5967,26 +5979,55 @@ static void handle_key_press(xcb_key_press_event_t *e)
 	}
 }
 
-static void handle_visibility(xcb_window_t win)
+static void handle_visibility(xcb_visibility_notify_event_t *e)
 {
-	struct list_head *cur;
-
-	if (win == toolbar.panel.win) {
+	if (toolbar.panel.win == e->window) {
 		draw_toolbar();
 	} else if (!ignore_panel) {
+		struct list_head *cur;
+
 		list_walk(cur, &screens) {
 			struct screen *scr = list2screen(cur);
 
-			if (scr->panel.win == win) {
-				redraw_panel(scr, front_client(curscr->tag), 0);
+			if (scr->panel.win != e->window) {
+				continue;
+			}
+
+			if (scr->panel.visibility_state != e->state) {
+				scr->panel.refresh = 1;
+			}
+
+			scr->panel.visibility_state = e->state;
+			break;
+		}
+	}
+}
+
+static void handle_exposure(xcb_expose_event_t *e)
+{
+	if (toolbar.panel.win == e->window) {
+		draw_toolbar();
+	} else {
+		struct list_head *cur;
+
+		list_walk(cur, &screens) {
+			struct screen *scr = list2screen(cur);
+
+			if (scr->panel.win != e->window) {
+				continue;
+			}
+
+			if (scr->panel.refresh) {
 				struct client *cli = pointer2cli();
 				if (cli) {
 					unfocus_clients(scr->tag);
 					focus_window(cli->win);
 				}
-				xcb_flush(dpy);
-				return;
+
+				redraw_panel(scr, front_client(scr->tag), 0);
+				scr->panel.refresh = 0;
 			}
+			break;
 		}
 	}
 }
@@ -6058,7 +6099,6 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 	show_toolbox(cli);
 	unfocus_clients(curscr->tag);
 	focus_window(cli->win);
-	redraw_panel(cli->scr, cli, 1);
 	xcb_flush(dpy);
 }
 
@@ -6434,24 +6474,13 @@ static int handle_events(void)
 	type = XCB_EVENT_RESPONSE_TYPE(e);
 	dd("got event %d (%d)\n", e->response_type, type);
 
-#define WIN(struct_ptr) ((struct_ptr *) e)->window
-
 	switch (type) {
 	case 0: break; /* NO EVENT */
 	case XCB_VISIBILITY_NOTIFY:
-		te("XCB_VISIBILITY_NOTIFY: win %#x, state %d\n",
-		   WIN(xcb_visibility_notify_event_t),
-		   ((xcb_visibility_notify_event_t *) e)->state);
-                switch (((xcb_visibility_notify_event_t *) e)->state) {
-                case XCB_VISIBILITY_FULLY_OBSCURED:
-                case XCB_VISIBILITY_PARTIALLY_OBSCURED: /* fall through */
-		default:
-			handle_visibility(WIN(xcb_visibility_notify_event_t));
-                }
+		handle_visibility((xcb_visibility_notify_event_t *) e);
 		break;
 	case XCB_EXPOSE:
-		te("XCB_EXPOSE: win %#x\n", WIN(xcb_expose_event_t));
-		handle_visibility(WIN(xcb_expose_event_t));
+		handle_exposure((xcb_expose_event_t *) e);
 		break;
 	case XCB_BUTTON_PRESS:
 		handle_button_press((xcb_button_press_event_t *) e);
