@@ -10,4 +10,4 @@ normbg
 normfg
 
 exec fwm-clock -n $name_ -bg $normbg_ -fg $normfg_ -f "%Y-%m-%d/%W %a %H:%M"\
-	       -c $comm_ &
+ -c $comm_ -fs $FWM_FONT_SIZE -hd $FWM_HDPI -vd $FWM_VDPI &

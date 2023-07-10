@@ -5,6 +5,9 @@
  * Released under the GNU General Public License, version 2
  */
 
+#include "text.h"
+#include "misc.h"
+
 #include <stdio.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -15,16 +18,10 @@
 
 #include <xcb/xcb.h>
 
-#include <X11/Xlib-xcb.h>
-#include <X11/Xft/Xft.h>
+#define DEFAULT_FONT_SIZE 10.5
+#define DEFAULT_DPI 96
+#define DEFAULT_STR "0000-00-00/00 Nil 00:00"
 
-#include "fwm.h"
-#include "misc.h"
-
-#define FONT_H_MARGIN 2
-
-static int xscr;
-static Display *xdpy;
 static xcb_connection_t *dpy;
 static xcb_drawable_t win;
 static xcb_gcontext_t gc;
@@ -35,29 +32,15 @@ static uint16_t height;
 
 static uint32_t bg = 0x202020;
 static uint32_t fg = 0xa0a0a0;
-static XftFont *font;
-static XftDraw *draw;
-static XftColor fgx;
+
+static struct text *text;
+static struct xcb xcb;
 
 static const char *timefmt;
 static const char *cmd;
-static uint16_t xpos;
-static uint16_t ypos;
 
 static char str[200];
-
-static void textexts(const char *text, int len, uint16_t *w, uint16_t *h)
-{
-	XGlyphInfo ext;
-
-	XftTextExtentsUtf8(xdpy, font, (XftChar8 *) text, len, &ext);
-
-	dd("text: %s, geo (%d,%d %d,%d) off (%d,%d)\n",
-	   text, ext.x, ext.y, ext.width, ext.height, ext.xOff, ext.yOff);
-
-        ext.width % 2 ? (*w = ext.width + 1) : (*w = ext.width);
-        ext.height % 2 ? (*h = ext.height + 1) : (*h = ext.height);
-}
+static char prev_str[200];
 
 static void clear(int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
@@ -66,7 +49,7 @@ static void clear(int16_t x, int16_t y, uint16_t w, uint16_t h)
 	xcb_poly_fill_rectangle(dpy, win, gc, 1, &rect);
 }
 
-static void printtime(void)
+static void print_time(uint8_t force)
 {
 	time_t t;
 	struct tm *tmp;
@@ -79,10 +62,12 @@ static void printtime(void)
 	if (!strftime(str, sizeof(str), timefmt, tmp))
 		return;
 
-	clear(0, 0, width, height);
-	XftDrawStringUtf8(draw, &fgx, font, xpos, ypos, (XftChar8 *) str,
-			  strlen(str));
-	XSync(xdpy, 0);
+	if (strncmp(prev_str, str, sizeof(str)) == 0 && !force)
+		return;
+
+	memcpy(prev_str, str, sizeof(prev_str));
+	set_text_str(text, str, strlen(str));
+	draw_text_xcb(&xcb, text);
 }
 
 static void wait(void)
@@ -104,6 +89,37 @@ static void wait(void)
 	}
 }
 
+static void handle_configure_notify(xcb_configure_notify_event_t *e)
+{
+	if (e->height > height) {
+		set_text_pos(text, 0, (e->height - height) / 2);
+	}
+
+	dd("prop:\n"
+	   " response_type=%u\n"
+	   " sequence=%u\n"
+	   " event=%#x\n"
+	   " window=%#x\n"
+	   " above_sibling=%#x\n"
+	   " x=%d\n"
+	   " y=%d\n"
+	   " width=%u\n"
+	   " height=%u\n"
+	   " border_width=%u\n"
+	   " override_redirect=%u\n",
+	   e->response_type,
+	   e->sequence,
+	   e->event,
+	   e->window,
+	   e->above_sibling,
+	   e->x,
+	   e->y,
+	   e->width,
+	   e->height,
+	   e->border_width,
+	   e->override_redirect);
+}
+
 static int events(void)
 {
 	xcb_generic_event_t *e = xcb_poll_for_event(dpy);
@@ -120,12 +136,15 @@ static int events(void)
 		case XCB_VISIBILITY_PARTIALLY_OBSCURED: /* fall through */
 		case XCB_VISIBILITY_UNOBSCURED:
 			dd("XCB_VISIBILITY_UNOBSCURED\n");
-			printtime();
+			print_time(1);
 			break;
 		}
 		break;
+	case XCB_CONFIGURE_NOTIFY:
+		handle_configure_notify((xcb_configure_notify_event_t *) e);
+		break;
 	case XCB_EXPOSE:
-		printtime();
+		print_time(1);
 		break;
 	case XCB_KEY_PRESS:
 		if (((xcb_key_press_event_t *)e)->detail == 9)
@@ -166,17 +185,18 @@ static xcb_atom_t getatom(xcb_connection_t *dpy, const char *str, uint8_t len)
 
 int main(int argc, char *argv[])
 {
-	time_t t;
-	struct tm *tm;
+	fontid_t font_id;
 	struct pollfd pfd;
 	uint32_t mask;
 	xcb_screen_t *scr;
 	uint32_t val[2];
-	XRenderColor ref;
 	const char *arg;
 	const char *name;
 	uint8_t name_len;
 	xcb_atom_t atom;
+	uint16_t hdpi = 0;
+	uint16_t vdpi = 0;
+	float font_size = 0;
 
 	name = "clock";
 
@@ -192,94 +212,76 @@ int main(int argc, char *argv[])
 			bg = strtol(argv[argc + 1], NULL, 16);
 		} else if (opt(arg, "-fg", "--fgcolor")) {
 			fg = strtol(argv[argc + 1], NULL, 16);
+		} else if (opt(arg, "-fs", "--font-size")) {
+			font_size = strtof(argv[argc + 1], NULL);
+		} else if (opt(arg, "-hd", "--horiz-dpi")) {
+			hdpi = atoi(argv[argc + 1]);
+		} else if (opt(arg, "-vd", "--vert-dpi")) {
+			vdpi = atoi(argv[argc + 1]);
 		}
+	}
+
+	if (font_size == 0) {
+		font_size = DEFAULT_FONT_SIZE;
+		ww("using default size %.02f\n", font_size);
+	}
+
+	if (hdpi == 0 || vdpi == 0) {
+		hdpi = DEFAULT_DPI;
+		vdpi = DEFAULT_DPI;
+		ww("using default dpi %u\n", hdpi);
 	}
 
 	if (!timefmt) {
 		printf("Usage: %s <options>\n"
 			"Options:\n"
-			"-n, --name <str>      window name (%s)\n"
-			"-f, --fmt <str>       RFC 2822-compliant date format\n"
-			"-c, --cmd <str>       command to run on mouse click\n"
-			"-bg, --bgcolor <hex>  clock background color (0x%x)\n"
-			"-fg, --fgcolor <hex>  clock foreground color (0x%x)\n\n"
-			, argv[0], name, bg, fg);
+			"-n, --name <str>          window name (%s)\n"
+			"-fs, --font-size <float>  font size (%.02f)\n"
+			"-hd, --horiz-dpi <int>    horizontal display DPI (%u)\n"
+			"-vd, --vert-dpi <int>     vertical display DPI (%u)\n"
+			"-f, --fmt <str>           RFC 2822-compliant date format\n"
+			"-c, --cmd <str>           command to run on mouse click\n"
+			"-bg, --bgcolor <hex>      clock background color (0x%x)\n"
+			"-fg, --fgcolor <hex>      clock foreground color (0x%x)\n\n"
+			, argv[0], name, font_size, hdpi, vdpi, bg, fg);
 		return 1;
 	}
 
-	xdpy = XOpenDisplay(NULL);
-	if (!xdpy) {
-		ee("XOpenDisplay() failed\n");
+	font_id = open_font(getenv("FWM_FONT"), hdpi, vdpi);
+	if (invalid_font_id(font_id)) {
 		return 1;
 	}
-	xscr = DefaultScreen(xdpy);
-	dpy = XGetXCBConnection(xdpy);
+
+	if (!(text = create_text())) {
+		return 1;
+	}
+	set_text_font(text, font_id, font_size);
+	set_text_pos(text, 0, 0);
+
+	dpy = xcb_connect(NULL, NULL);
 	if (!dpy) {
 		ee("xcb_connect() failed\n");
 		return 1;
 	}
 
-	font = XftFontOpen(xdpy, xscr, XFT_FAMILY, XftTypeString,
-			   FONT1_NAME, XFT_SIZE, XftTypeDouble,
-			   FONT1_SIZE, NULL);
-	if (!font) {
-		ee("XftFontOpen(%s)\n", FONT1_NAME);
-		return 1;
-	}
-
-	ref.alpha = 0xffff;
-	ref.red = (fg & 0xff0000) >> 8;
-	ref.green = fg & 0xff00;
-	ref.blue = (fg & 0xff) << 8;
-	XftColorAllocValue(xdpy, DefaultVisual(xdpy, xscr),
-			DefaultColormap(xdpy, xscr), &ref,
-			&fgx);
-
 	scr = xcb_setup_roots_iterator(xcb_get_setup(dpy)).data;
 	gc = xcb_generate_id(dpy);
 
-	mask = XCB_GC_FOREGROUND;
-	val[0] = fg;
-	mask |= XCB_GC_GRAPHICS_EXPOSURES;
-	val[1] = 0;
+	mask = XCB_GC_GRAPHICS_EXPOSURES;
+	val[0] = 0;
 	xcb_create_gc(dpy, gc, scr->root, mask, val);
-
 	win = xcb_generate_id(dpy);
-	draw = XftDrawCreate(xdpy, win,
-			     DefaultVisual(xdpy, xscr),
-			     DefaultColormap(xdpy, xscr));
-	if (!draw) {
-		ee("XftDrawCreate() failed\n");
-		return 1;
-	}
 
-	t = time(NULL);
-
-	if (!(tm = localtime(&t))) {
-		ee("localtime() failed\n");
-		return 1;
-	}
-
-	if (!strftime(str, sizeof(str), timefmt, tm)) {
-		ee("strftime() failed\n");
-		return 1;
-	}
-
-	textexts(str, strlen(str), &width, &height);
-
-	xpos = 2;
-	width += 2;
-
-	ypos = font->ascent;
-	height = font->ascent + font->descent + 2 * FONT_H_MARGIN;
-
-	dd("win dim (%d,%d) text pos (%d,%d)\n", width, height, xpos, ypos);
+	set_text_str(text, DEFAULT_STR, sizeof(DEFAULT_STR));
+	get_text_size(text, &width, &height);
+	set_text_color(text, fg, bg);
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
 	val[0] = bg;
 	val[1] = XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_VISIBILITY_CHANGE |
 		 XCB_EVENT_MASK_KEY_PRESS  | XCB_EVENT_MASK_BUTTON_PRESS |
 		 XCB_EVENT_MASK_POINTER_MOTION;
+	val[1] |= XCB_EVENT_MASK_STRUCTURE_NOTIFY;
 	xcb_create_window(dpy, XCB_COPY_FROM_PARENT, win, scr->root,
 			  0, 0, width, height, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
 			  scr->root_visual, mask, val);
@@ -303,16 +305,21 @@ int main(int argc, char *argv[])
 	}
 
 	xcb_map_window(dpy, win);
+	clear(0, 0, width, height);
 	xcb_flush(dpy);
 
 	pfd.fd = xcb_get_file_descriptor(dpy);
 	pfd.events = POLLIN;
 	pfd.revents = 0;
 
+	xcb.dpy = dpy;
+	xcb.win = win;
+	xcb.gc = gc;
+
 	while (!done) {
 		int rc = poll(&pfd, 1, 5000);
 		if (rc == 0) { /* timeout */
-			printtime();
+			print_time(0);
 		} else if (rc < 0) {
 			if (errno == EINTR)
 				continue;
@@ -328,9 +335,9 @@ int main(int argc, char *argv[])
 		pfd.revents = 0;
 	}
 
+	destroy_text(&text);
 	xcb_destroy_window(dpy, win);
-	if (font)
-		XftFontClose(xdpy, font);
-
+	xcb_disconnect(dpy);
+	close_font(font_id);
 	return 0;
 }
