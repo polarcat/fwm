@@ -6,6 +6,7 @@ ctl_=$FWM_HOME/.control$DISPLAY
 cli_=$FWM_HOME/tmp/clients
 
 echo list-clients > $ctl_
+sync
 
 startmenu -b -s 5 -d $cli_ | while read scr tag win info; do
 	echo "focus-window $win" > $ctl_

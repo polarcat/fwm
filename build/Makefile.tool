@@ -42,7 +42,7 @@ install:
 	touch $(basedir)/popup/popup; \
 	cd $(basedir)/screens/$(defscr)/dock; \
 	ln -sfv clock-dock right-anchor; \
-	ln -sfv bat-dock left-anchor; \
+	ln -sfv cpu-dock left-anchor; \
 	if pidof fwm && [ -p $(basedir)/.control$(DISPLAY) ]; then \
 		echo "reload-keys" > $(basedir)/.control$(DISPLAY); \
 	fi

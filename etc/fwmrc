@@ -2,13 +2,17 @@
 
 export FWM_HOME=$HOME/.fwm
 export FWM_LOG=$HOME/fwm${DISPLAY}.log
+export FWM_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
+export FWM_ICONS=$HOME/.fonts/fontawesome/fontawesome-webfont.ttf
+export FWM_FONT_SIZE=7
 
 if [ -f $FWM_HOME/screenrc ]; then
 	# provides screen specific variables in order to maintain readable
 	# font size for hight resolution displays, e.g. for 4K displays:
 	#
 	# export GDK_SCALE=2
-	# export FWM_SCALE=1.8
+	# export FWM_HDPI=266
+	# export FWM_VDPI=266
 	# 
 	. $FWM_HOME/screenrc
 fi

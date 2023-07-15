@@ -15,7 +15,7 @@ ifstatus()
 {
 	ifconfig $1 | while read line; do
 		case $line in
-		*inet*addr:[0-9]*) return 1;;
+		*inet*[0-9]*mask*[0-9]*) return 1;;
 		esac
 	done
 }
