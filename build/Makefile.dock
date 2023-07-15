@@ -1,7 +1,7 @@
 out = fwm-dock
-src = src/dock.c
-cflags += $(xftcflags)
-ldflags += $(xftldflags) -lxcb -lX11 -lX11-xcb -lpthread
+src = src/dock.c src/text.c
+cflags += $(ftcflags)
+ldflags += $(ftldflags) -lxcb
 
 .PHONY: FORCE clean
 
