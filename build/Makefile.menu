@@ -1,7 +1,7 @@
 out = fwm-menu
-src = src/menu.c
-cflags += $(xftcflags)
-ldflags = $(xftldflags) -lxcb -lX11 -lX11-xcb -lxcb-keysyms
+src = src/menu.c src/text.c
+cflags += $(ftcflags)
+ldflags = $(ftldflags) -lxcb -lxcb-keysyms
 ldflags += -lxkbcommon -lxkbcommon-x11
 
 .PHONY: FORCE clean

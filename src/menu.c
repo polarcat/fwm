@@ -5,6 +5,11 @@
  * Released under the GNU General Public License, version 2
  */
 
+#define USE_CRC32
+#include "misc.h"
+#include "text.h"
+#include "fwm.h"
+
 #include <stdio.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -23,11 +28,12 @@
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-x11.h>
 
-#include <X11/Xlib-xcb.h>
-#include <X11/Xft/Xft.h>
+#define XK_MISCELLANY
+#include <X11/keysymdef.h>
 
-#include "fwm.h"
-#include "misc.h"
+#ifndef UCHAR_MAX
+#define UCHAR_MAX 255
+#endif
 
 #ifdef DEBUG
 #undef dd
@@ -42,13 +48,53 @@
 
 #define PROMPT_LEN 2
 
-static int xscr_;
-static Display *xdpy_;
-static xcb_connection_t *dpy_;
-static xcb_drawable_t win_;
-static xcb_gcontext_t gc_;
-static xcb_key_symbols_t *syms_;
-static uint8_t done_;
+#define DEFAULT_FONT_SIZE 10.5
+#define DEFAULT_DPI 96
+
+struct text_info {
+	fontid_t font_id;
+	struct text *txt;
+	char *str;
+	uint8_t len;
+	uint8_t x;
+};
+
+struct ctx {
+	xcb_connection_t *dpy;
+	xcb_screen_t *scr;
+	pid_t pid;
+	const char *name;
+	const char *cmd;
+	const char *path;
+	xcb_drawable_t win;
+	xcb_gcontext_t gc;
+	xcb_key_symbols_t *syms;
+	struct xkb_context *xkb;
+	struct xkb_keymap *keymap;
+	uint16_t w;
+	uint16_t h;
+	uint32_t fg;
+	uint32_t bg;
+	uint32_t selfg;
+	uint32_t selbg;
+	uint32_t curbg;
+	uint8_t done;
+	uint16_t hdpi;
+	uint16_t vdpi;
+	float font_size;
+	const char *text_font;
+	const char *icon_font;
+	int16_t text_y;
+	int16_t icon_y;
+	uint16_t text_h;
+	uint16_t row_h;
+	uint8_t space_w;
+};
+
+static struct ctx ctx_;
+static struct text_info text_;
+static struct text_info icon_;
+
 static uint8_t warp_ = 1;
 
 static char search_buf_[UCHAR_MAX];
@@ -74,24 +120,8 @@ static uint8_t search_bar_;
 static uint8_t append_;
 static uint8_t print_input_;
 static uint8_t interlace_;
-static uint32_t fg_ = 0xa0a0a0;
-static uint32_t bg_ = 0x050505;
-static uint32_t selfg_ = 0xe0e0e0;
-static uint32_t selbg_ = 0x303030;
-static XftFont *font1_;
-static XftFont *font2_;
-static XftDraw *draw_;
-static XftColor selfg_xft_;
-static XftColor fg_xft_;
 
-static char *font1_name_ = FONT1_NAME;
-static float font1_size_ = FONT1_SIZE;
-static char *font2_name_ = FONT2_NAME;
-static float font2_size_ = FONT1_SIZE;
-
-static struct xkb_context *xkb_;
-static struct xkb_keymap *keymap_;
-#if 0
+#ifdef DEBUG
 static struct xkb_state *state_;
 #endif
 static uint8_t level_;
@@ -99,13 +129,11 @@ static uint8_t control_;
 
 static uint16_t x_pad_;
 static uint16_t y_pad_;
-static uint16_t row_h_;
-static int16_t text_y_;
 
 struct column {
 	char *str;
 	uint8_t len;
-	XftFont *font;
+	struct text *text;
 };
 
 struct row {
@@ -136,32 +164,42 @@ static uint8_t selidx_;
 static uint8_t page_idx_;
 static uint8_t follow_;
 
-static const char *path_;
-static const char *name_ = "menu";
-
-static void text_size(XftFont *font, const char *text, int len, uint16_t *w,
-		      uint16_t *h)
+static void get_space_width(fontid_t font_id)
 {
-	XGlyphInfo ext;
+	uint16_t w;
+	uint16_t h;
+	struct text *text = create_text();
 
-	XftTextExtentsUtf8(xdpy_, font, (XftChar8 *) text, len, &ext);
-	ext.width % 2 ? (*w = ext.width + 1) : (*w = ext.width);
-	ext.height % 2 ? (*h = ext.height + 1) : (*h = ext.height);
+	if (!text)
+		return;
+
+	set_text_font(text, font_id, ctx_.font_size);
+
+	set_text_str(text, "=", sizeof("="));
+	get_text_size(text, &w, &h);
+	ctx_.space_w = w;
+
+	set_text_str(text, "|", sizeof("|"));
+	get_text_size(text, &w, &h);
+	ctx_.text_h = h;
+
+	destroy_text(&text);
 }
 
-static void fill_rect(uint32_t *c, int16_t x, int16_t y, uint16_t w, uint16_t h)
+static void fill_rect(uint32_t c, int16_t x, int16_t y, uint16_t w, uint16_t h)
 {
 	xcb_rectangle_t rect = { x, y, w, h, };
-	xcb_change_gc(dpy_, gc_, XCB_GC_FOREGROUND, c);
-	xcb_poly_fill_rectangle(dpy_, win_, gc_, 1, &rect);
+	xcb_change_gc(ctx_.dpy, ctx_.gc, XCB_GC_FOREGROUND, &c);
+	xcb_poly_fill_rectangle(ctx_.dpy, ctx_.win, ctx_.gc, 1, &rect);
+	xcb_flush(ctx_.dpy);
 }
 
 static int16_t draw_rect(uint8_t idx, uint8_t focus)
 {
-	int16_t y = idx * row_h_ + y_pad_;
+	int16_t y = idx * ctx_.row_h + y_pad_;
 	uint32_t bg;
 
-	focus ? (bg = selbg_) : (bg = bg_);
+	focus ? (bg = ctx_.selbg) : (bg = ctx_.bg);
 
 	if (interlace_ && !focus && idx % 2) {
 		bg = ((((bg >> 16) & 0xff) + COLOR_DISTANCE) << 16) |
@@ -169,51 +207,68 @@ static int16_t draw_rect(uint8_t idx, uint8_t focus)
 		     ((bg & 0xff) + COLOR_DISTANCE);
 	}
 
-	fill_rect(&bg, x_pad_, y, page_w_, row_h_);
-
+	fill_rect(bg, x_pad_, y, page_w_, ctx_.row_h);
+	ctx_.curbg = bg;
 	return y;
 }
 
-static int16_t draw_col(XftFont *font, int16_t x, int16_t y, const char *str,
-			uint8_t len, uint8_t focus)
+static int16_t draw_col(struct column *col, uint8_t i, int16_t x, int16_t y,
+ uint8_t focus)
 {
-	XftColor *fg;
 	uint16_t w;
 	uint16_t h;
+	uint32_t fg;
+	uint32_t bg;
+	uint8_t len;
+	struct xcb xcb = { ctx_.dpy, ctx_.win, ctx_.gc };
 
-	if (!str || !len)
+	if (!col->str || !col->len)
 		return 0;
-
-	if (*str == '\a') {
-		str++;
-		len--;
+	else if (*col->str == '\a') {
+		col->str++;
+		col->len--;
 	}
 
-	focus ? (fg = &selfg_xft_) : (fg = &fg_xft_);
-	XftDrawStringUtf8(draw_, fg, font, x, y, (XftChar8 *) str, len);
-	XSync(xdpy_, 0);
-	text_size(font, str, len, &w, &h);
+	if (focus) {
+		fg = ctx_.selfg;
+		bg = ctx_.selbg;
+	} else {
+		fg = ctx_.fg;
+		bg = ctx_.bg;
+	}
+
+	set_text_str(col->text, col->str, col->len);
+	get_text_size(col->text, &w, &h);
+
+	if (w > cols_px_[i])
+		len = cols_len_[i];
+	else
+		len = col->len;
+
+	set_text_str(col->text, col->str, len);
+	set_text_pos(col->text, x, y);
+	set_text_color(col->text, fg, bg);
+	draw_text_xcb(&xcb, col->text);
 
 	return x + w + x_pad_;
 }
 
 static void draw_search_bar(void)
 {
-	if (!search_bar_)
-		return;
-
+	struct xcb xcb = { ctx_.dpy, ctx_.win, ctx_.gc };
 	int16_t x = x_pad_ * 2;
-	int16_t y = draw_rect(rows_per_page_, 0) + text_y_;
+	int16_t y = draw_rect(rows_per_page_, 0) + ctx_.text_y;
 	uint8_t len = search_idx_ + 1;
 	char *str = search_buf_;
-	XftColor *fg = &fg_xft_;
 
 	search_buf_[0] = '>';
 	search_buf_[1] = ' ';
 	search_buf_[search_idx_] = '_';
 
-	XftDrawStringUtf8(draw_, fg, font1_, x, y, (XftChar8 *) str, len);
-	XSync(xdpy_, 0);
+	set_text_str(text_.txt, str, len);
+	set_text_pos(text_.txt, x, y);
+	set_text_color(text_.txt, ctx_.fg, ctx_.curbg);
+	draw_text_xcb(&xcb, text_.txt);
 }
 
 static void swap_cols(struct row *row, uint8_t dst, uint8_t src)
@@ -246,8 +301,8 @@ static void swap_cols(struct row *row, uint8_t dst, uint8_t src)
 static void warp_pointer(int16_t x, int16_t y)
 {
 	if (warp_) {
-		xcb_warp_pointer(dpy_, XCB_NONE, win_, 0, 0, 0, 0, x, y);
-		xcb_flush(dpy_);
+		xcb_warp_pointer(ctx_.dpy, XCB_NONE, ctx_.win, 0, 0, 0, 0, x, y);
+		xcb_flush(ctx_.dpy);
 		warp_ = 0;
 	}
 }
@@ -261,20 +316,19 @@ static void draw_row(struct row *row, uint8_t idx, uint8_t focus)
 	int16_t x;
 	int16_t y;
 	uint8_t i;
-	uint8_t len;
 
 	col->str = start;
-	col->font = font1_;
+	col->text = text_.txt;
 
 	while (ptr < end) {
 		if (*ptr == '\a') {
-			col->font = font2_;
+			col->text = icon_.txt;
 		} else if (*ptr == '\t' || *ptr == '\n') {
 			col->len = ptr - start;
 			col++;
 			start = ptr + 1;
 			col->str = start;
-			col->font = font1_;
+			col->text = text_.txt;
 		}
 
 		ptr++;
@@ -283,25 +337,19 @@ static void draw_row(struct row *row, uint8_t idx, uint8_t focus)
 	if (ptr == end)
 		col->len = ptr - start;
 
-	y = draw_rect(idx, focus) + text_y_;
+	y = draw_rect(idx, focus) + ctx_.text_y;
 	x = x_pad_ * 2;
 
 	if (swap_col_idx_)
 		swap_cols(row, 0, swap_col_idx_);
 
 	for (i = 0; i < cols_per_row_; i++) {
-		uint16_t w;
-		uint16_t h;
+		int16_t start_y = y;
 
-		col = &row->cols[i];
-		text_size(col->font, col->str, col->len, &w, &h);
+		if (row->cols[i].text == icon_.txt)
+			start_y--; /* HACK: icon is better aligned ths way */
 
-		if (w > cols_px_[i])
-			len = cols_len_[i];
-		else
-			len = col->len;
-
-		draw_col(col->font, x, y, col->str, len, focus);
+		draw_col(&row->cols[i], i, x, start_y, focus);
 		x += cols_px_[i];
 	}
 
@@ -345,12 +393,11 @@ static void draw_menu(void)
 
 			if (rowidx >= rows_num_) { /* fill dummy rows ... */
 				for (; i < rows_per_page_; i++) {
-					int16_t y = i * row_h_ + y_pad_;
-					uint32_t bg = bg_;
-					fill_rect(&bg, x_pad_, y, page_w_, row_h_);
+					int16_t y = i * ctx_.row_h + y_pad_;
+					fill_rect(ctx_.bg, x_pad_, y, page_w_,
+					 ctx_.row_h);
 				}
 
-				xcb_flush(dpy_);
 				break; /* ... and return */
 			}
 
@@ -361,8 +408,10 @@ static void draw_menu(void)
 		ptr++;
 	}
 
-	warp_pointer(page_w_ + x_pad_, row_h_ - y_pad_);
-	draw_search_bar();
+	if (search_bar_)
+		draw_search_bar();
+
+	warp_pointer(page_w_ + x_pad_, ctx_.row_h - y_pad_);
 }
 
 static uint8_t match_col(const char *col, uint8_t len)
@@ -433,7 +482,8 @@ static void find_row(xcb_keysym_t sym)
 		search_buf_[search_idx_++] = sym;
 	}
 
-	draw_search_bar();
+	if (search_bar_)
+		draw_search_bar();
 
 	while (ptr < end) {
 		if (find_col(row, search_col_idx_)) {
@@ -560,10 +610,11 @@ static xcb_keysym_t get_keysyms(xcb_keycode_t code)
 	const xkb_keysym_t *syms;
 	int len;
 
-	if (!keymap_)
+	if (!ctx_.keymap)
 		return (xcb_keysym_t) 0;
 
-	len = xkb_keymap_key_get_syms_by_level(keymap_, code, 0, level_, &syms);
+	len = xkb_keymap_key_get_syms_by_level(ctx_.keymap, code, 0, level_,
+	 &syms);
 
 #ifdef DEBUG
 	int i;
@@ -585,12 +636,12 @@ static void key_release(xcb_key_press_event_t *e)
 {
 	xcb_keysym_t sym;
 
-	if (!syms_) {
+	if (!ctx_.syms) {
 		ww("key symbols not available\n");
 		return;
 	}
 
-	sym = xcb_key_release_lookup_keysym(syms_, e, 0);
+	sym = xcb_key_release_lookup_keysym(ctx_.syms, e, 0);
 
 	if (sym == XK_Shift_L || sym == XK_Shift_R) {
 		level_ = 0; /* expect lower-case symbols */
@@ -609,12 +660,12 @@ static void key_press(xcb_key_press_event_t *e)
 	get_keysyms(e->detail);
 #endif
 
-	if (!syms_) {
+	if (!ctx_.syms) {
 		ww("key symbols not available\n");
 		return;
 	}
 
-	sym = xcb_key_press_lookup_keysym(syms_, e, 0);
+	sym = xcb_key_press_lookup_keysym(ctx_.syms, e, 0);
 
 	if (sym == XK_Shift_L || sym == XK_Shift_R) {
 		level_ = 1; /* expect upper-case symbols */
@@ -627,7 +678,7 @@ static void key_press(xcb_key_press_event_t *e)
 		control_ = 1; /* expect command */
 		return;
 	} else if (sym == XK_Escape) {
-		done_ = 1;
+		ctx_.done = 1;
 	} else if (sym == XK_Next && pages_num_ > 1 &&
 		   page_idx_ < pages_num_ - 1) {
 		page_down();
@@ -645,7 +696,8 @@ static void key_press(xcb_key_press_event_t *e)
 			search_idx_ = col->len + 2;
 
 		memcpy(&search_buf_[PROMPT_LEN], col->str, search_idx_);
-		draw_search_bar();
+		if (search_bar_)
+			draw_search_bar();
 	} else if (sym == XK_Return) {
 		char *str = selrow_->str;
 		*(str + selrow_->len) = '\0';
@@ -665,7 +717,7 @@ static void key_press(xcb_key_press_event_t *e)
 			printf("\n");
 		}
 
-		done_ = 1;
+		ctx_.done = 1;
 	} else {
 		if ((sym = get_keysyms(e->detail))) {
 			warp_ = 1;
@@ -687,8 +739,8 @@ static void follow_pointer(xcb_motion_notify_event_t *e)
 		rows_num = rows_per_page_;
 
 	for (i = 0; i < rows_num; i++) {
-		int16_t lolim = i * row_h_ + y_pad_;
-		int16_t uplim = lolim + row_h_;
+		int16_t lolim = i * ctx_.row_h + y_pad_;
+		int16_t uplim = lolim + ctx_.row_h;
 
 		if (e->event_y >= lolim && e->event_y <= uplim) {
 			struct row *row = view_[i];
@@ -724,50 +776,14 @@ static void follow_pointer(xcb_motion_notify_event_t *e)
 
 static void grab_pointer(void)
 {
-	xcb_grab_pointer(dpy_, XCB_NONE, win_,
+	xcb_grab_pointer(ctx_.dpy, XCB_NONE, ctx_.win,
 			 XCB_EVENT_MASK_POINTER_MOTION |
 			 XCB_EVENT_MASK_BUTTON_PRESS |
 			 XCB_EVENT_MASK_BUTTON_RELEASE,
 			 XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
-			 win_, XCB_NONE, XCB_CURRENT_TIME);
-	xcb_flush(dpy_);
+			 ctx_.win, XCB_NONE, XCB_CURRENT_TIME);
+	xcb_flush(ctx_.dpy);
 	return;
-}
-
-static XftFont *load_font(char *info, float defsize)
-{
-	XftFont *font;
-	float size = 0.f;
-	char *ptr = info;
-	char *end = info + strlen(info);
-	char *size_ptr = NULL;
-
-	while (ptr < end) {
-		if (*ptr == ':') {
-			size_ptr = ptr + 1;
-			*ptr = '\0';
-			break;
-		}
-
-		ptr++;
-	}
-
-	if (size_ptr && strlen(size_ptr))
-		size = strtof(size_ptr, NULL);
-
-	if (!size)
-		size = defsize;
-
-	font = XftFontOpen(xdpy_, xscr_, XFT_FAMILY, XftTypeString, info,
-			    XFT_SIZE, XftTypeDouble, size, NULL);
-
-	if (!font) {
-		ee("XftFontOpen(%s) failed\n", info);
-		return NULL;
-	}
-
-	dd("loaded font %s size %f\n", info, size);
-	return font;
 }
 
 static int init_rows(void)
@@ -782,14 +798,18 @@ static int init_rows(void)
 	uint16_t h;
 	uint8_t row_max_len;
 	uint8_t icon;
-	XftFont *font;
+	struct text *text;
 
-	x_pad_ = font1_size_ - 2;
+	x_pad_ = ctx_.space_w;
 	y_pad_ = x_pad_;
-	row_h_ = font1_->ascent + font1_->descent + 2 * FONT_H_MARGIN;
-	text_y_ = font1_->ascent + FONT_H_MARGIN;
-	ptr = data_;
+	ctx_.row_h = ctx_.text_h + 2 * (ctx_.space_w / 3);
+	ctx_.text_y = (ctx_.row_h - ctx_.text_h) / 2;
+	ctx_.icon_y = ctx_.text_y;
 
+	if (!(ctx_.text_y % 2))
+		ctx_.text_y++;
+
+	ptr = data_;
 	while (ptr < end) { /* calc number of items in row */
 		if (*ptr == '\t') {
 			cols_per_row_++;
@@ -845,28 +865,23 @@ static int init_rows(void)
 	pages_[0].rowidx = 0;
 
 	icon = 0;
-	font = font1_;
+	text = text_.txt;
 
 	while (ptr < end) { /* get everything done in one pass */
 		if (*ptr == '\a') {
 			icon = 1;
 		} else if (*ptr == '\t' || *ptr == '\n') {
 			if (!icon) {
-				font = font1_;
+				text = text_.txt;
 			} else {
-				font = font2_;
+				text = icon_.txt;
 				col_start++;
 				icon = 0;
 			}
 
 			cols_len_[i] = ptr - col_start + 1;
-			text_size(font, col_start, cols_len_[i], &w, &h);
-
-#ifdef DEBUG
-			char tmp[256] = {0};
-			snprintf(tmp, cols_len_[i], "%s", col_start);
-			dd("size: %ux%u str: %s\n", w, h, tmp);
-#endif
+			set_text_str(text, col_start, cols_len_[i]);
+			get_text_size(text, &w, &h);
 
 			if (w > cols_px_[i])
 				cols_px_[i] = w;
@@ -984,11 +999,11 @@ static int init_rows(void)
 
 	if (row_len_ > row_max_len) {
 		uint16_t diff = page_w_ - cols_px_[i - 1];
-		page_w_ += (row_len_ - row_max_len) * font1_size_; /* using default font */
+		page_w_ += (row_len_ - row_max_len) * ctx_.space_w;
 		cols_px_[i - 1] = page_w_ - diff;
 	}
 
-	dd("text y: %u row width %u pages num %u\n", text_y_, page_w_,
+	dd("text y: %u row width %u pages num %u\n", ctx_.text_y, page_w_,
 	   pages_num_);
 
 	return 0;
@@ -998,26 +1013,27 @@ static int init_xkb(void)
 {
 	int32_t dev;
 
-	if (!(xkb_ = xkb_context_new(XKB_CONTEXT_NO_FLAGS))) {
+	if (!(ctx_.xkb = xkb_context_new(XKB_CONTEXT_NO_FLAGS))) {
 		ee("xkb_context_new() failed\n");
 		return -1;
 	}
 
-	if ((dev = xkb_x11_get_core_keyboard_device_id(dpy_)) < 0) {
+	if ((dev = xkb_x11_get_core_keyboard_device_id(ctx_.dpy)) < 0) {
 		ee("xkb_x11_get_core_keyboard_device_id() failed\n");
 		return -1;
 	}
 
-	keymap_ = xkb_x11_keymap_new_from_device(xkb_, dpy_, dev,
-						 XKB_KEYMAP_COMPILE_NO_FLAGS);
-	if (!keymap_) {
+	ctx_.keymap = xkb_x11_keymap_new_from_device(ctx_.xkb, ctx_.dpy, dev,
+	 XKB_KEYMAP_COMPILE_NO_FLAGS);
+	if (!ctx_.keymap) {
 		ee("xkb_x11_keymap_new_from_device() failed\n");
 		return -1;
 	}
 
-#if 0
+#ifdef DEBUG
 	dd("DEBUG %s:%d\n", __func__, __LINE__);
-	if (!(state_ = xkb_x11_state_new_from_device(keymap_, dpy_, dev))) {
+	state_ = xkb_x11_state_new_from_device(ctx_.keymap, ctx_.dpy, dev);
+	if (!state_) {
 		ee("xkb_x11_state_new_from_device() failed\n");
 		return -1;
 	}
@@ -1031,13 +1047,13 @@ static int init_menu(void)
 	int fd;
 	struct stat st;
 
-	if ((fd = open(path_, O_RDONLY)) < 0) {
-		ee("open(%s) failed\n", path_);
+	if ((fd = open(ctx_.path, O_RDONLY)) < 0) {
+		ee("open(%s) failed\n", ctx_.path);
 		return -1;
 	}
 
 	if (fstat(fd, &st) < 0) {
-		ee("fstat(%s) failed\n", path_);
+		ee("fstat(%s) failed\n", ctx_.path);
 		goto err;
 	}
 
@@ -1046,7 +1062,7 @@ static int init_menu(void)
 	data_ = mmap(NULL, st.st_size, MMAP_PROT, MAP_PRIVATE, fd, 0);
 
 	if (data_ == MAP_FAILED) {
-		ee("mmap(%s) failed\n", path_);
+		ee("mmap(%s) failed\n", ctx_.path);
 		data_ = NULL;
 		goto err;
 	}
@@ -1065,39 +1081,53 @@ err:
 	return -1;
 }
 
+static uint8_t init_text(struct text_info *text)
+{
+	if (!(text->txt = create_text()))
+		return 0;
+
+	set_text_font(text->txt, text->font_id, ctx_.font_size);
+	return 1;
+}
+
 static void help(const char *name)
 {
 	printf("Usage: %s [options] <file>\n"
-	   "\nOptions:\n"
-	   "  -h, --help                   print this message\n"
-	   "  -c, --cols <width>           menu width in characters\n"
-	   "  -r, --rows <rows>            menu height in rows\n"
-	   "  -f, --font <font>            menu font (%s:%f)\n"
-	   "  -i, --icon <font>            font for icon columns (%s:%f)\n"
-	   "  -s, --search-column <index>  search column (shown first)\n"
-	   "  -n, --name <name>            window name and class (def '%s')\n"
-	   "  -d, --delineate              alternate color from row to row\n"
-	   "  -a, --append                 append entered text to result\n"
-	   "  -p, --print-input            only print entered text\n"
-	   "  -b, --search-bar             show search bar\n"
-	   "  -0, --normalfg <hex>         rgb color, default 0x%x\n"
-	   "  -1, --normalbg <hex>         rgb color, default 0x%x\n"
-	   "  -2, --activefg <hex>         rgb color, default 0x%x\n"
-	   "  -3, --activebg <hex>         rgb color, default 0x%x\n"
-	   "\nFile format:\n"
-	   "  tab-separated values (max cols %u, max rows %u)\n"
-	   "  font icon columns start with '\\a'\n"
-	   "\nKey bindings:\n"
-	   "  Down/Up    navigate rows\n"
-	   "  PgDn/PgUp  navigate pages\n"
-	   "  Tab        goto next row matching search pattern\n"
-	   "  Right      copy 1st column of selected row to search bar\n"
-	   "  Backspace  delete character before cursor in search bar\n"
-	   "  Ctrl-u     clear search bar\n"
-	   "  Return     print selected row to standard output\n"
-	   "  Esc        exit without result\n\n",
-	   name, font1_name_, font1_size_, font2_name_, font2_size_, name_,
-	   fg_, bg_, selfg_, selbg_, UCHAR_MAX, INT16_MAX);
+	 "\nOptions:\n"
+	 "  -h, --help                   print this message\n"
+	 "  -c, --cols <width>           menu width in characters\n"
+	 "  -r, --rows <rows>            menu height in rows\n"
+	 "  -s, --search-column <index>  search column (shown first)\n"
+	 "  -n, --name <name>            window name and class (def '%s')\n"
+	 "  -d, --delineate              alternate color from row to row\n"
+	 "  -a, --append                 append entered text to result\n"
+	 "  -p, --print-input            only print entered text\n"
+	 "  -b, --search-bar             show search bar\n"
+	 "  -0, --normalfg <hex>         rgb color, default 0x%x\n"
+	 "  -1, --normalbg <hex>         rgb color, default 0x%x\n"
+	 "  -2, --activefg <hex>         rgb color, default 0x%x\n"
+	 "  -3, --activebg <hex>         rgb color, default 0x%x\n"
+	 "\nFile format:\n"
+	 "  Tab-separated values (max cols %u, max rows %u)\n"
+	 "  Font icon columns start with '\\a'\n"
+	 "\nEnvironment:\n"
+	 "  FWM_ICONS=%s\n"
+	 "  FWM_FONT=%s\n"
+	 "  FWM_FONT_SIZE=%f\n"
+	 "  FWM_HDPI=%u\n"
+	 "  FWM_VDPI=%u\n"
+	 "\nKey bindings:\n"
+	 "  Down/Up    navigate rows\n"
+	 "  PgDn/PgUp  navigate pages\n"
+	 "  Tab        goto next row matching search pattern\n"
+	 "  Right      copy 1st column of selected row to search bar\n"
+	 "  Backspace  delete character before cursor in search bar\n"
+	 "  Ctrl-u     clear search bar\n"
+	 "  Return     print selected row to standard output\n"
+	 "  Esc        exit without result\n\n",
+	 name, ctx_.name, ctx_.fg, ctx_.bg, ctx_.selfg, ctx_.selbg, UCHAR_MAX,
+	 INT16_MAX, ctx_.icon_font, ctx_.text_font, ctx_.font_size,
+	 ctx_.hdpi, ctx_.vdpi);
 }
 
 static int opt(const char *arg, const char *args, const char *argl)
@@ -1105,13 +1135,42 @@ static int opt(const char *arg, const char *args, const char *argl)
 	return (strcmp(arg, args) == 0 || strcmp(arg, argl) == 0);
 }
 
-static void opts(int argc, char *argv[])
+static uint8_t opts(int argc, char *argv[])
 {
+	const char *hdpi_str;
+	const char *vdpi_str;
+	const char *font_size_str;
 	int i;
+
+	/* init these defaults before checkig args */
+
+	ctx_.name = "menu";
+	ctx_.fg = 0xa0a0a0;
+	ctx_.bg = 0x0f0f0f;
+	ctx_.selfg = 0xe0e0e0;
+	ctx_.selbg = 0x303030;
+
+	if ((hdpi_str = getenv("FWM_HDPI")))
+		ctx_.hdpi = atoi(hdpi_str);
+	if (ctx_.hdpi == 0)
+		ctx_.hdpi = DEFAULT_DPI;
+
+	if ((vdpi_str = getenv("FWM_VDPI")))
+		ctx_.vdpi = atoi(vdpi_str);
+	if (ctx_.vdpi == 0)
+		ctx_.vdpi = DEFAULT_DPI;
+
+	if ((font_size_str = getenv("FWM_FONT_SIZE")))
+		ctx_.font_size = strtof(font_size_str, NULL);
+	else
+		ctx_.font_size = DEFAULT_FONT_SIZE;
+
+	ctx_.icon_font = getenv("FWM_ICONS");
+	ctx_.text_font = getenv("FWM_FONT");
 
 	if (argc < 2) {
 		help(argv[0]);
-		exit(0);
+		return 0;
 	}
 
 	for (i = 1; i < argc; i++) {
@@ -1126,19 +1185,13 @@ static void opts(int argc, char *argv[])
 		} else if (opt(arg, "-r", "--rows")) {
 			i++;
 			rows_per_page_ = atoi(argv[i]);
-		} else if (opt(arg, "-f", "--font")) {
-			i++;
-			font1_name_ = argv[i];
-		} else if (opt(arg, "-i", "--icon")) {
-			i++;
-			font2_name_ = argv[i];
 		} else if (opt(arg, "-s", "--search-column")) {
 			i++;
 			search_col_idx_ = atoi(argv[i]);
 			swap_col_idx_ = search_col_idx_;
 		} else if (opt(arg, "-n", "--name")) {
 			i++;
-			name_ = argv[i];
+			ctx_.name = argv[i];
 		} else if (opt(arg, "-d", "--delineate")) {
 			interlace_ = 1;
 		} else if (opt(arg, "-a", "--append")) {
@@ -1152,34 +1205,56 @@ static void opts(int argc, char *argv[])
 		} else if (opt(arg, "-0", "--normal-foreground")) {
 			i++;
 			if (argv[i])
-				fg_ = strtol(argv[i], NULL, 16);
-			fg_ &= 0xffffff;
+				ctx_.fg = strtol(argv[i], NULL, 16);
 		} else if (opt(arg, "-1", "--normal-background")) {
 			i++;
 			if (argv[i])
-				bg_ = strtol(argv[i], NULL, 16);
-			bg_ &= 0xffffff;
+				ctx_.bg = strtol(argv[i], NULL, 16);
 		} else if (opt(arg, "-2", "--active-foreground")) {
 			i++;
 			if (argv[i])
-				selfg_ = strtol(argv[i], NULL, 16);
-			selfg_ &= 0xffffff;
+				ctx_.selfg = strtol(argv[i], NULL, 16);
 		} else if (opt(arg, "-3", "--active-background")) {
 			i++;
 			if (argv[i])
-				selbg_ = strtol(argv[i], NULL, 16);
-			selbg_ &= 0xffffff;
+				ctx_.selbg = strtol(argv[i], NULL, 16);
 		}
 	}
 
 	if (!search_bar_)
 		append_ = 0;
 
-	if (!(path_ = argv[i - 1])) {
+	if (!(ctx_.path = argv[i - 1])) {
 		ee("path is not set\n");
 		help(argv[0]);
-		exit(0);
+		return 0;
 	}
+
+	if (!ctx_.icon_font) {
+		ww("Icons font is not set\n");
+	} else {
+		icon_.font_id = open_font(ctx_.icon_font, ctx_.hdpi, ctx_.vdpi);
+		if (invalid_font_id(icon_.font_id))
+			return 0;
+		else if (!init_text(&icon_))
+			return 0;
+
+		get_space_width(icon_.font_id);
+	}
+
+	if (!ctx_.text_font) {
+		ww("Text font is not set\n");
+	} else {
+		text_.font_id = open_font(ctx_.text_font, ctx_.hdpi, ctx_.vdpi);
+		if (invalid_font_id(text_.font_id))
+			return 0;
+		else if (!init_text(&text_))
+			return 0;
+
+		get_space_width(text_.font_id);
+	}
+
+	return 1;
 }
 
 static xcb_atom_t get_atom(const char *str, uint8_t len)
@@ -1188,8 +1263,8 @@ static xcb_atom_t get_atom(const char *str, uint8_t len)
 	xcb_intern_atom_reply_t *r;
 	xcb_atom_t a;
 
-	c = xcb_intern_atom(dpy_, 0, len, str);
-	r = xcb_intern_atom_reply(dpy_, c, NULL);
+	c = xcb_intern_atom(ctx_.dpy, 0, len, str);
+	r = xcb_intern_atom_reply(ctx_.dpy, c, NULL);
 	if (!r) {
 		ee("xcb_intern_atom(%s) failed\n", str);
 		return (XCB_ATOM_NONE);
@@ -1207,7 +1282,7 @@ static void wait(void)
 	xcb_generic_event_t *e;
 
 	while (1) {
-		e = xcb_wait_for_event(dpy_);
+		e = xcb_wait_for_event(ctx_.dpy);
 		if (!e)
 			continue;
 
@@ -1229,7 +1304,7 @@ static void button_press(xcb_button_press_event_t *e)
 	case MOUSE_BTN_RIGHT:
 		*(selrow_->str + selrow_->len) = '\0';
 		printf("%s\n", selrow_->str);
-		done_ = 1;
+		ctx_.done = 1;
 		break;
 	case MOUSE_BTN_FWD:
 		line_up();
@@ -1247,9 +1322,9 @@ static uint8_t events(uint8_t wait)
 	xcb_generic_event_t *e;
 
 	if (wait)
-		e = xcb_wait_for_event(dpy_);
+		e = xcb_wait_for_event(ctx_.dpy);
 	else
-		e = xcb_poll_for_event(dpy_);
+		e = xcb_poll_for_event(ctx_.dpy);
 
 	if (!e)
 		return 0;
@@ -1264,7 +1339,7 @@ static uint8_t events(uint8_t wait)
 #ifdef STAY_OBSCURED
 			wait();
 #else
-			done_ = 1;
+			ctx_.done = 1;
 #endif
 			break;
 		case XCB_VISIBILITY_UNOBSCURED:
@@ -1274,13 +1349,13 @@ static uint8_t events(uint8_t wait)
 		break;
 	case XCB_UNMAP_NOTIFY:
 		dd("XCB_UNMAP_NOTIFY\n");
-		xcb_ungrab_pointer(dpy_, XCB_CURRENT_TIME);
-		done_ = 1;
+		xcb_ungrab_pointer(ctx_.dpy, XCB_CURRENT_TIME);
+		ctx_.done = 1;
 		break;
 	case XCB_DESTROY_NOTIFY:
 		dd("XCB_DESTROY_NOTIFY\n");
-		xcb_ungrab_pointer(dpy_, XCB_CURRENT_TIME);
-		done_ = 1;
+		xcb_ungrab_pointer(ctx_.dpy, XCB_CURRENT_TIME);
+		ctx_.done = 1;
 		break;
 	case XCB_ENTER_NOTIFY:
 		dd("XCB_ENTER_NOTIFY\n");
@@ -1288,8 +1363,8 @@ static uint8_t events(uint8_t wait)
 		break;
 	case XCB_LEAVE_NOTIFY:
 		dd("XCB_LEAVE_NOTIFY\n");
-		xcb_ungrab_pointer(dpy_, XCB_CURRENT_TIME);
-		done_ = 1;
+		xcb_ungrab_pointer(ctx_.dpy, XCB_CURRENT_TIME);
+		ctx_.done = 1;
 		break;
 	case XCB_EXPOSE:
 		dd("XCB_EXPOSE\n");
@@ -1325,91 +1400,48 @@ int main(int argc, char *argv[])
 	uint32_t mask;
 	xcb_screen_t *scr;
 	uint32_t val[2];
-	XRenderColor ref;
 	char *env = getenv("FWM_SCALE");
 	float font_scale;
 
 	env ? (font_scale = atof(env)) : (font_scale = 1);
-	opts(argc, argv);
 
-	xdpy_ = XOpenDisplay(NULL);
-
-	if (!xdpy_) {
-		ee("XOpenDisplay() failed\n");
-		return 255;
-	}
-
-	xscr_ = DefaultScreen(xdpy_);
-	dpy_ = XGetXCBConnection(xdpy_);
-
-	if (!dpy_) {
+	if (!opts(argc, argv))
+		return 1;
+	else if (!(ctx_.dpy = xcb_connect(NULL, NULL))) {
 		ee("xcb_connect() failed\n");
-		return 255;
+		return 1;
 	}
 
-	if (!(font1_ = load_font(font1_name_, font1_size_ * font_scale))) {
-		ee("XftFontOpen(%s) failed\n", font1_name_);
-		goto err;
+	scr = xcb_setup_roots_iterator(xcb_get_setup(ctx_.dpy)).data;
+	if (!scr) {
+		ee("failed to get screen\n");
+		return 1;
 	}
 
-	if (!(font2_ = load_font(font2_name_, font2_size_ * font_scale))) {
-		ee("XftFontOpen(%s) failed\n", font2_name_);
-		/* ignore error */
-		font2_ = font1_;
-	}
+	xkb_x11_setup_xkb_extension(ctx_.dpy, XKB_X11_MIN_MAJOR_XKB_VERSION,
+	 XKB_X11_MIN_MINOR_XKB_VERSION, XKB_X11_SETUP_XKB_EXTENSION_NO_FLAGS,
+	 NULL, NULL, NULL, NULL);
 
-	dd("font: ascent %d descent %d height %d max width %d\n",
-	       font1_->ascent, font1_->descent, font1_->height,
-	       font1_->max_advance_width);
-
-	ref.alpha = 0xffff;
-	ref.red = (fg_ & 0xff0000) >> 8;
-	ref.green = fg_ & 0xff00;
-	ref.blue = (fg_ & 0xff) << 8;
-	XftColorAllocValue(xdpy_, DefaultVisual(xdpy_, xscr_),
-			DefaultColormap(xdpy_, xscr_), &ref,
-			&fg_xft_);
-
-	ref.alpha = 0xffff;
-	ref.red = (selfg_ & 0xff0000) >> 8;
-	ref.green = selfg_ & 0xff00;
-	ref.blue = (selfg_ & 0xff) << 8;
-	XftColorAllocValue(xdpy_, DefaultVisual(xdpy_, xscr_),
-			DefaultColormap(xdpy_, xscr_), &ref,
-			&selfg_xft_);
-
-	scr = xcb_setup_roots_iterator(xcb_get_setup(dpy_)).data;
-	gc_ = xcb_generate_id(dpy_);
+	ctx_.win = xcb_generate_id(ctx_.dpy);
+	ctx_.gc = xcb_generate_id(ctx_.dpy);
 
 	mask = XCB_GC_FOREGROUND;
-	val[0] = fg_;
+	val[0] = ctx_.fg;
 	mask |= XCB_GC_GRAPHICS_EXPOSURES;
 	val[1] = 0;
-	xcb_create_gc(dpy_, gc_, scr->root, mask, val);
-
-	win_ = xcb_generate_id(dpy_);
-	draw_ = XftDrawCreate(xdpy_, win_,
-			     DefaultVisual(xdpy_, xscr_),
-			     DefaultColormap(xdpy_, xscr_));
-
-	if (!draw_) {
-		ee("XftDrawCreate() failed\n");
-		goto err;
-	}
+	xcb_create_gc(ctx_.dpy, ctx_.gc, scr->root, mask, val);
 
 	if ((fd = init_menu()) < 0)
 		goto err;
 
-	dd("padding %u,%u\n", x_pad_, y_pad_);
-
-	page_h_ = row_h_ * rows_per_page_;
+	page_h_ = ctx_.row_h * rows_per_page_;
 
 	dd("menu %ux%u cols %u rows %u/%u glyphs per row %u row height %u\n",
 	   page_w_, page_h_, row_len_, rows_per_page_, rows_num_,
-	   page_w_ / x_pad_, row_h_);
+	   page_w_ / x_pad_, ctx_.row_h);
 
 	mask = XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK;
-	val[0] = bg_;
+	val[0] = ctx_.bg;
 	val[1] = XCB_EVENT_MASK_EXPOSURE;
 	val[1] |= XCB_EVENT_MASK_VISIBILITY_CHANGE;
 	val[1] |= XCB_EVENT_MASK_KEY_PRESS;
@@ -1420,51 +1452,49 @@ int main(int argc, char *argv[])
 	val[1] |= XCB_EVENT_MASK_ENTER_WINDOW;
 
 	uint16_t tmp;
-	search_bar_ ? (tmp = row_h_) : (tmp = 0);
+	search_bar_ ? (tmp = ctx_.row_h) : (tmp = 0);
 
-	xcb_create_window(dpy_, XCB_COPY_FROM_PARENT, win_, scr->root, 0, 0,
-			  page_w_ + 2 * x_pad_, page_h_ + 2 * y_pad_ + tmp,
-			  0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
-			  scr->root_visual, mask, val);
+	xcb_create_window(ctx_.dpy, XCB_COPY_FROM_PARENT, ctx_.win, scr->root,
+	 0, 0, page_w_ + 2 * x_pad_, page_h_ + 2 * y_pad_ + tmp, 0,
+	 XCB_WINDOW_CLASS_INPUT_OUTPUT, scr->root_visual, mask, val);
 
-        xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
-			    XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8,
-                            strlen(name_), name_);
+        xcb_change_property(ctx_.dpy, XCB_PROP_MODE_REPLACE, ctx_.win,
+	 XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, strlen(ctx_.name), ctx_.name);
 
-        xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_,
-			    XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
-                            strlen(name_), name_);
+        xcb_change_property(ctx_.dpy, XCB_PROP_MODE_REPLACE, ctx_.win,
+	 XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8, strlen(ctx_.name), ctx_.name);
 
 	xcb_atom_t atom = get_atom("_NET_WM_PID", sizeof("_NET_WM_PID") - 1);
 	uint32_t data = getpid();
-	xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, win_, atom,
-			    XCB_ATOM_CARDINAL, 32, 1, &data);
+	xcb_change_property(ctx_.dpy, XCB_PROP_MODE_REPLACE, ctx_.win, atom,
+	 XCB_ATOM_CARDINAL, 32, 1, &data);
 
-	xcb_map_window(dpy_, win_);
+	xcb_map_window(ctx_.dpy, ctx_.win);
 	atom = get_atom("_NET_ACTIVE_WINDOW", sizeof("_NET_ACTIVE_WINDOW") - 1);
-	xcb_change_property(dpy_, XCB_PROP_MODE_REPLACE, scr->root, atom,
-			    XCB_ATOM_WINDOW, 32, 1, &win_);
-	xcb_set_input_focus_checked(dpy_, XCB_NONE, win_, XCB_CURRENT_TIME);
-	xcb_flush(dpy_);
+	xcb_change_property(ctx_.dpy, XCB_PROP_MODE_REPLACE, scr->root, atom,
+	 XCB_ATOM_WINDOW, 32, 1, &ctx_.win);
+	xcb_set_input_focus_checked(ctx_.dpy, XCB_NONE, ctx_.win,
+	 XCB_CURRENT_TIME);
+	xcb_flush(ctx_.dpy);
 
-	if (!(syms_ = xcb_key_symbols_alloc(dpy_)))
+	if (!(ctx_.syms = xcb_key_symbols_alloc(ctx_.dpy)))
 		ww("xcb_key_symbols_alloc() failed\n");
 
 	if (init_xkb() < 0)
 		goto err;
 
-	while (!done_)
+	while (!ctx_.done)
 		events(1);
 
 	/* DUNNO: this trick is needed to deliver events in case another
 	 * menu window grabs pointer
 	 */
 
-	pfd.fd = xcb_get_file_descriptor(dpy_);
+	pfd.fd = xcb_get_file_descriptor(ctx_.dpy);
 	pfd.events = POLLIN;
 	pfd.revents = 0;
 
-	while (!done_) {
+	while (!ctx_.done) {
 		errno = 0;
 		poll(&pfd, 1, -1);
 
@@ -1481,10 +1511,10 @@ int main(int argc, char *argv[])
 
 	ret = 0;
 err:
-	if (font1_)
-		XftFontClose(xdpy_, font1_);
-	if (font2_)
-		XftFontClose(xdpy_, font2_);
+	destroy_text(&icon_.txt);
+	destroy_text(&text_.txt);
+	close_font(icon_.font_id);
+	close_font(text_.font_id);
 
 	return ret;
 }
