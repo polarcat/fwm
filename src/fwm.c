@@ -4247,9 +4247,8 @@ static struct tag *get_tag(struct screen *scr, const char *name, uint8_t id)
 }
 
 static int add_tag(struct screen *scr, const char *name, uint8_t id,
-		   uint16_t pos)
+ uint16_t pos, uint8_t active)
 {
-	uint8_t flg;
 	struct tag *tag;
 	uint16_t h;
 
@@ -4260,20 +4259,16 @@ static int add_tag(struct screen *scr, const char *name, uint8_t id,
 	set_text_str(scr->panel.tag_text, name, tag->nlen);
 	get_text_size(scr->panel.tag_text, &tag->w, &h);
 
-	tag->w += tag_text_margin * 2;
-	ii("screen %u '%s' tag '%s' len %u width %u\n", scr->id, scr->name,
-	 name, tag->nlen, tag->w);
-
-	if (pos != scr->items[PANEL_AREA_TAGS].x) {
-		flg = ITEM_FLG_NORMAL;
-	} else {
-		flg = ITEM_FLG_ACTIVE;
+	if (active == ITEM_FLG_ACTIVE)
 		scr->tag = tag;
-	}
 
+	tag->w += tag_text_margin * 2;
 	tag->x = pos;
 	tag->flags = 0;
-	print_tag(scr, tag, flg);
+	print_tag(scr, tag, active);
+
+	ii("screen %u '%s' tag '%s' len %u width %u\n", scr->id, scr->name, name,
+	 tag->nlen, tag->w);
 
 	return pos + tag->w + panel_space;
 }
@@ -4287,6 +4282,8 @@ static int tag_del(struct screen *scr, uint8_t id)
 
 		if (tag->id != id)
 			continue;
+		else if (scr->tag && scr->tag->id == tag->id)
+			scr->tag = NULL;
 
 		if (!list_empty(&tag->clients))
 			return 0; /* do not delete non-empty tag */
@@ -4306,33 +4303,23 @@ static int tag_del(struct screen *scr, uint8_t id)
 /*
  * Tags dir structure:
  *
- * /<homedir>/screens/<screennumber>/tags/<tagnumber>/{.name,<winclass1>,<winclassN>}
+ * /<homedir>/screens/<screennumber>/tags/<tagnumber>/{name,<winclass1>,<winclassN>}
  */
 
 static int init_tags(struct screen *scr)
 {
 	uint16_t pos;
 	uint8_t i;
-	strlen_t len = homelen + sizeof("/screens/255/tags/255/.name");
+	strlen_t len = homelen + sizeof("/screens/255/tags/255/name");
 	char path[len];
 	char name[TAG_NAME_MAX + 1] = "0";
 	int fd;
 	struct stat st;
 	uint8_t delete;
-	struct list_head *cur;
-	struct list_head *tmp;
+	uint8_t cur_id;
+	uint8_t active;
 
-	list_walk_safe(cur, tmp, &scr->tags) { /* reset tag list */
-		struct tag *tag = list2tag(cur);
-		list_del(&tag->head);
-		free(tag->name);
-		free(tag);
-	}
-
-	list_init(&scr->tags);
-	list_init(&scr->dock);
-	list_init(&configs);
-
+	scr->tag ? (cur_id = scr->tag->id) : (cur_id = 0);
 	pos = scr->items[PANEL_AREA_TAGS].x;
 
 	for (i = 0; i < UCHAR_MAX; i++ ) {
@@ -4348,7 +4335,7 @@ static int init_tags(struct screen *scr)
 		if (delete && tag_del(scr, i))
 			continue;
 
-		sprintf(path, "%s/screens/%d/tags/%d/.name", homedir, scr->id, i);
+		sprintf(path, "%s/screens/%d/tags/%d/name", homedir, scr->id, i);
 		fd = open(path, O_RDONLY);
 		if (fd > 0) {
 			read(fd, name, sizeof(name) - 1);
@@ -4361,12 +4348,14 @@ static int init_tags(struct screen *scr)
 			name[strlen(name) - 1] = '\0';
 
 		tt("screen %d tag %d name %s\n", scr->id, i, name);
-		pos = add_tag(scr, name, i,  pos);
+
+		cur_id == i ? (active = ITEM_FLG_ACTIVE) : (active = ITEM_FLG_NORMAL);
+		pos = add_tag(scr, name, i, pos, active);
 		memset(name, 0, TAG_NAME_MAX);
 	}
 
-	if (pos == scr->items[PANEL_AREA_TAGS].x) /* add default tag */
-		pos = add_tag(scr, scr->name, 0, pos);
+	if (pos == scr->items[PANEL_AREA_TAGS].x) /* none found, add default */
+		pos = add_tag(scr, scr->name, 0, pos, ITEM_FLG_ACTIVE);
 
 	return pos;
 }
@@ -4409,6 +4398,23 @@ static inline void clear_panel_area(struct screen *scr)
 	}
 }
 
+static void reset_screen_panel(struct screen *scr)
+{
+	struct list_head *cur;
+	struct list_head *tmp;
+
+	list_walk_safe(cur, tmp, &scr->tags) { /* reset tag list */
+		struct tag *tag = list2tag(cur);
+		list_del(&tag->head);
+		free(tag->name);
+		free(tag);
+	}
+
+	list_init(&scr->tags);
+	list_init(&scr->dock);
+	list_init(&configs);
+}
+
 static void reinit_panel(struct screen *scr)
 {
 	int16_t x = 0;
@@ -4445,9 +4451,7 @@ static void refresh_panel(uint8_t id)
 			continue;
 
 		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
-		hide_windows(scr->tag);
 		reinit_panel(scr);
-		scan_clients(0);
 		break;
 	}
 }
@@ -5121,6 +5125,7 @@ static void init_outputs(void)
 				recalc_client_pos(cli);
 		}
 
+		reset_screen_panel(scr);
 		reinit_panel(scr); /* force reinit panel */
 	}
 	list_init(&clients); /* now can safely reset client's list */
@@ -6217,6 +6222,7 @@ static void reset_all_panels(void)
 		struct screen *scr = list2screen(cur);
 
 		if (is_output_active(scr->out)) {
+			reset_screen_panel(scr);
 			reinit_panel(scr);
 		} else {
 			destroy_panel(scr);
