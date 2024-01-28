@@ -194,6 +194,7 @@ struct panel {
 #define BTN_TOOLS ""
 //#define BTN_PLACE "" /* fa-paperclip [&#xf0c6;] */
 #define BTN_PLACE "" /* fa-plus [&#xf067;] */
+#define BTN_RETAG ""
 
 struct toolbar_item {
 	const char *str;
@@ -212,6 +213,7 @@ static struct toolbar_item toolbar_items[] = {
 	{ BTN_TOP, slen(BTN_TOP), },
 	{ BTN_BOTTOM, slen(BTN_BOTTOM), },
 	{ BTN_EXPAND, slen(BTN_EXPAND), },
+	{ BTN_RETAG, slen(BTN_RETAG), },
 	{ BTN_MOVE, slen(BTN_MOVE), },
 	{ BTN_MOUSE, slen(BTN_MOUSE), },
 };
@@ -304,6 +306,7 @@ struct screen *dockscr;
 static xcb_screen_t *rootscr; /* root window details */
 static struct toolbar toolbar; /* window toolbar */
 static uint8_t focus_root_;
+static struct client *retag_cli;
 static struct client *motion_cli;
 static int16_t motion_init_x;
 static int16_t motion_init_y;
@@ -1301,10 +1304,13 @@ static void unfocus_window(xcb_window_t win)
 
 static void focus_window(xcb_window_t win)
 {
-	if (win == toolbar.panel.win)
+	if (win == toolbar.panel.win) {
 		return;
-	else
+	} else if (retag_cli && retag_cli->win == win) {
+		border_color(win, get_color(ALERT_BG));
+	} else {
 		border_color(win, get_color(FOCUS_FG));
+	}
 
 	xcb_change_property_checked(dpy, XCB_PROP_MODE_REPLACE,
 				    rootscr->root, a_active_win,
@@ -4085,6 +4091,31 @@ static int tag_pointed(struct tag *tag, int16_t x, int16_t y)
 	return 0;
 }
 
+static inline void do_retag(struct tag *tag, struct client *cli)
+{
+	hide_toolbox();
+	window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
+	xcb_unmap_window_checked(dpy, cli->win);
+	xcb_flush(dpy);
+
+	list_del(&cli->head);
+	list_add(&tag->clients, &cli->head); /* re-tag window */
+
+	cli->tag = tag;
+	cli->scr = curscr;
+	store_client(cli, 0);
+}
+
+static void retag_marked_client(struct tag *tag)
+{
+	if (retag_cli == NULL) {
+		return;
+	}
+
+	do_retag(tag, retag_cli);
+	retag_cli = NULL;
+}
+
 static void motion_retag(int16_t x, int16_t y)
 {
 	struct client *cli;
@@ -4110,10 +4141,6 @@ static void motion_retag(int16_t x, int16_t y)
 	if (!tag)
 		return;
 
-	switch_window(curscr, DIR_NEXT); /* focus window */
-	list_del(&cli->head);
-	list_add(&tag->clients, &cli->head); /* re-tag window */
-
 	if (cli->scr != curscr) {
 		/* new screen can have different size so place window in
 		 * top-left corner */
@@ -4125,15 +4152,8 @@ static void motion_retag(int16_t x, int16_t y)
 	}
 
 	motion_init_x = motion_init_y = 0;
-
-	cli->scr = curscr;
-	cli->tag = tag;
-
 	client_moveresize(cli, x, y, cli->w, cli->h);
-	window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
-	xcb_unmap_window_checked(dpy, cli->win);
-	xcb_flush(dpy);
-	store_client(cli, 0);
+	do_retag(tag, cli);
 }
 
 static void select_tag(struct screen *scr, int16_t x, int16_t y)
@@ -4149,6 +4169,15 @@ static void select_tag(struct screen *scr, int16_t x, int16_t y)
 		curscr->flags |= SCR_FLG_SWITCH_WINDOW_NOWARP;
 		switch_window(curscr, DIR_NEXT);
 		return;
+	} else if (retag_cli != NULL) {
+		list_walk(cur, &scr->tags) { /* find tag */
+			struct tag *tag = list2tag(cur);
+
+			if (tag_pointed(tag, x, y)) {
+				retag_marked_client(tag);
+				return; /* no more actions */
+			}
+		}
 	} else if (scr->tag) { /* deselect current tag instantly */
 		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
 	}
@@ -5592,6 +5621,8 @@ static void toolbar_button_press(void)
 	} else if (focused_item->str == (const char *) BTN_EXPAND) {
 		arg.cli->pos = WIN_POS_FILL;
 		place_window(&arg);
+	} else if (focused_item->str == (const char *) BTN_RETAG) {
+		retag_cli = toolbar.cli;
 	} else if (focused_item->str == (const char *) BTN_FLAG) {
 		if (toolbar.cli &&
 		    (!curscr->tag->anchor ||
@@ -5611,6 +5642,8 @@ static void toolbar_button_press(void)
 		toolbar_pressed = 1; /* client window handles button release */
 		prepare_motion(arg.cli);
 		return; /* special case */
+	} else if (focused_item->str == (const char *) BTN_MOUSE) {
+		retag_cli = NULL;
 	}
 
 	hide_toolbar();
