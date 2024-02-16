@@ -39,6 +39,18 @@
 
 /* defines */
 
+#ifndef bool
+typedef uint8_t bool;
+#endif
+
+#ifndef true
+#define true 1
+#endif
+
+#ifndef false
+#define false 0
+#endif
+
 #ifndef DEFAULT_FONT_SIZE
 #define DEFAULT_FONT_SIZE 10.5f
 #endif
@@ -5557,11 +5569,14 @@ static void handle_user_request(int fd)
 
 #undef match
 
-#define area(scr, area, ex)\
-	(ex >= scr->items[area].x &&\
-	 ex <= scr->items[area + 1].x)
+static bool match_area(struct screen *scr, enum panel_area area, int16_t x)
+{
+	int x1 = scr->items[area].x + scr->x;
+	int x2 = x1 + scr->items[area].w;
+	return (x >= x1 && x <= x2);
+}
 
-#ifndef VERBOSE
+#ifdef VERBOSE
 #define dump_coords(scr, x) ;
 #else
 #define dump_coords(scr, ex) {\
@@ -5569,7 +5584,7 @@ static void handle_user_request(int fd)
 	for (i = 0; i < PANEL_AREA_MAX; i++) {\
 		ii("%d: %d <= %d <= %d (w = %d)\n", i, scr->items[i].x, ex,\
 		   scr->items[i + 1].x, scr->items[i].w);\
-		if area(scr, i, ex)\
+		if (match_area(scr, i, ex))\
 			ii("inside element %d\n", i);\
 	}\
 }
@@ -5649,24 +5664,38 @@ static void toolbar_button_press(void)
 	hide_toolbar();
 }
 
-static void panel_button_press(xcb_button_press_event_t *e)
+static bool match_screen(xcb_button_press_event_t *e, struct screen *scr)
 {
-	motion_cli = NULL;
-	dd("screen %d, press at %d,%d\n", curscr->id, e->event_x, e->event_y);
-	dump_coords(curscr, e->event_x);
-
-	if area(curscr, PANEL_AREA_TAGS, e->event_x) {
+	if (match_area(scr, PANEL_AREA_TAGS, e->root_x)) {
 		dd("panel press time %u\n", e->time);
 		tag_time = e->time;
-		select_tag(curscr, e->event_x, e->event_y);
+		select_tag(scr, e->event_x, e->root_y);
 		xcb_flush(dpy);
-	} else if area(curscr, PANEL_AREA_TITLE, e->event_x) {
-		curscr->flags |= SCR_FLG_SWITCH_WINDOW_NOWARP;
-		switch_window(curscr, DIR_NEXT);
-	} else if area(curscr, PANEL_AREA_DOCK, e->event_x) {
-		ii("dock\n");
-	} else if area(curscr, PANEL_AREA_DIV, e->event_x) {
-		redraw_panel(curscr, front_client(curscr->tag), 0);
+	} else if (match_area(scr, PANEL_AREA_TITLE, e->root_x)) {
+		scr->flags |= SCR_FLG_SWITCH_WINDOW_NOWARP;
+		switch_window(scr, DIR_NEXT);
+	} else if (match_area(scr, PANEL_AREA_DOCK, e->root_x)) {
+		return true;
+	} else if (match_area(scr, PANEL_AREA_DIV, e->root_x)) {
+		redraw_panel(scr, front_client(scr->tag), 0);
+	} else {
+		dd("event is outside of screen '%s'\n", scr->name);
+		return false;
+	}
+
+	return true;
+}
+
+static void panel_button_press(xcb_button_press_event_t *e)
+{
+	struct list_head *cur;
+
+	motion_cli = NULL;
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if (match_screen(e, scr)) {
+			return;
+		}
 	}
 }
 
@@ -5702,12 +5731,12 @@ static void handle_button_release(xcb_button_release_event_t *e)
 	curscr = coord2scr(e->root_x, e->root_y);
 
 	if (curscr->panel.win == e->event || curscr->panel.win == e->child) {
-		if area(curscr, PANEL_AREA_TAGS, e->event_x) {
+		if (match_area(curscr, PANEL_AREA_TAGS, e->root_x)) {
 			dd("panel release time %u\n", e->time - tag_time);
 			if (e->time - tag_time > TAG_LONG_PRESS)
 				ii("panel long press\n");
 			motion_retag(e->event_x, e->event_y);
-		} else if area(curscr, PANEL_AREA_MENU, e->event_x) {
+		} else if (match_area(curscr, PANEL_AREA_MENU, e->root_x)) {
 			show_menu(); /* show menu on button release otherwise
 					app will fail to grab pointer */
 		}
