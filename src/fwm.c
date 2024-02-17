@@ -5154,6 +5154,7 @@ static void init_outputs(void)
 		curscr = defscr;
 
 	init_fonts();
+
 	list_walk(cur, &screens) {
 		scr = list2screen(cur);
 		create_panel(scr);
@@ -5169,6 +5170,7 @@ static void init_outputs(void)
 		reset_screen_panel(scr);
 		reinit_panel(scr); /* force reinit panel */
 	}
+
 	list_init(&clients); /* now can safely reset client's list */
 
 	init_tray();
@@ -6128,32 +6130,16 @@ static void handle_enter_notify(xcb_enter_notify_event_t *e)
 {
 	struct client *cli;
 
-	if (e->event == toolbox.win)
+	if (e->event == toolbox.win) {
 		return;
-
-	if (e->event == toolbar.panel.win) {
+	} else if (e->event == toolbar.panel.win) {
 		focus_window(e->event);
 		toolbar_grab_input();
 		xcb_flush(dpy);
 		return;
-	}
-
-	if (!(curscr = coord2scr(e->root_x, e->root_y))) {
-		ww("set up unmanaged screen\n");
-		/* Handle situation when wm started with monitors being
-		 * set in clone mode and then switched into tiling mode
-		 * with the same resolution; the latter aparently is not
-		 * associated with any xrandr event.
-		 *
-		 * Initialize outputs as soon as any window is moved in. */
-		init_outputs();
+	} else if (curscr && curscr->panel.win == e->event) {
 		return;
-	}
-
-	if (curscr && curscr->panel.win == e->event)
-		return;
-
-	if (!(cli = pointer2cli())) {
+	} else if (!(cli = pointer2cli())) {
 		if (!(cli = win2cli(e->event))) {
 			ww("enter unmanaged window %#x\n", e->event);
 			return;
