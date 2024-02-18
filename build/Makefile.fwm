@@ -25,6 +25,7 @@ install: FORCE
 	cp -v etc/xinitrc $(homedir)/.xinitrc-fwm; \
 	printf "$(note)"; \
 	cp -v etc/fwmrc $(homedir)/.fwmrc; \
+	chmod 0755 $(homedir)/.fwmrc; \
 	cp -v etc/autostart $(basedir)/; \
 	mkdir -p $(basedir)/panel; \
 	touch $(basedir)/panel/top; \

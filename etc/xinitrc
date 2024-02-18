@@ -5,6 +5,7 @@ xsetroot -solid black -cursor_name left_ptr
 xscreensaver -no-splash &
 rm -f ~/.fwm/.session/*
 
+set -e
 while :; do
-	. ~/.fwmrc
+	~/.fwmrc
 done

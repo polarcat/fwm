@@ -2,6 +2,8 @@
 
 . $FWM_HOME/lib/menu-utils
 
+script_=$FWM_RANDR_SCRIPT
+
 disconnect_monitor()
 {
 	xrandr | while read name status prim rest; do
@@ -9,7 +11,7 @@ disconnect_monitor()
 		[0-9]*|Screen|eDP*) continue;;
 		esac
 
-		xrandr --output "$name" --off
+		echo "xrandr --output \"$name\" --off" >> $script_
 	done
 	echo reinit-outputs > $ctl_
 }
@@ -45,7 +47,7 @@ connect_monitor()
 			auto=$((auto + 1))
 		fi
 
-		xrandr --output "$name" --auto $pos "$primary"
+		echo "xrandr --output \"$name\" --auto $pos \"$primary\"" >> $script_
 
 		if [ $auto -gt 2 ]; then
 			break
@@ -53,6 +55,9 @@ connect_monitor()
 	done
 	echo reinit-outputs > $ctl_
 }
+
+echo -n > $script_
+chmod 0755 $script_
 
 ctl_=$FWM_HOME/.control$DISPLAY
 tmp_=$FWM_HOME/tmp

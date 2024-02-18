@@ -5,35 +5,7 @@ export FWM_LOG=$HOME/fwm${DISPLAY}.log
 export FWM_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
 export FWM_ICONS=$HOME/.fonts/fontawesome/fontawesome-webfont.ttf
 export FWM_FONT_SIZE=7
-
-on_fwm_exit()
-{
-	local menu=$FWM_HOME/tmp/on-session-error
-
-	mkdir -p $FWM_HOME/tmp
-
-	cat > $menu << EOF
-#!/bin/bash
-xdotool mousemove 0 0
-
-printf "\n"
-printf " 1. Restart window manager \033[2m(default)\033[0m\n"
-printf " 2. Enter shell\n"
-printf " 3. Leave session\n"
-
-printf "\n\033[1;36m > Select action:\033[0m "
-
-read str
-case \$str in
-2) exec sudo su \$USER;;
-3) touch \$FWM_SESSION_CLOSE_FLAG;;
-esac
-EOF
-
-	chmod 0755 $menu
-
-	xterm -bg black -geom 37x7 -e $menu
-}
+export FWM_RANDR_SCRIPT=$FWM_HOME/tmp/randr.sh
 
 if [ -f $FWM_HOME/screenrc ]; then
 	# provides screen specific variables in order to maintain readable
@@ -58,11 +30,7 @@ fi
 fwm
 fwm-cleanup
 
-export FWM_SESSION_CLOSE_FLAG=/tmp/.close-fwm-session-$USER-$DISPLAY
-rm -f $FWM_SESSION_CLOSE_FLAG
-on_fwm_exit
-
-if [ -f $FWM_SESSION_CLOSE_FLAG ]; then
-	fwm-cleanup
-	exit 0
+if [ -x $FWM_RANDR_SCRIPT ]; then
+	$FWM_RANDR_SCRIPT
+	echo -n > $FWM_RANDR_SCRIPT
 fi
