@@ -579,6 +579,7 @@ enum winstatus {
 
 static xcb_connection_t *dpy;
 static uint8_t disp;
+static bool shutdown;
 
 static xcb_atom_t a_state;
 static xcb_atom_t a_client_list;
@@ -5474,6 +5475,36 @@ static void dump_clients(uint8_t all)
 	update_seq();
 }
 
+void handle_reinit_outputs(void)
+{
+	int i;
+	int n;
+	xcb_query_tree_cookie_t c;
+	xcb_query_tree_reply_t *tree;
+	xcb_window_t *wins;
+
+	/* walk through windows tree */
+	c = xcb_query_tree(dpy, rootscr->root);
+	if (!(tree = xcb_query_tree_reply(dpy, c, 0))) {
+		ee("xcb_query_tree_reply(...) failed\n");
+		goto out;
+	}
+
+	n = xcb_query_tree_children_length(tree);
+	if (!(wins = xcb_query_tree_children(tree))) {
+		ee("xcb_query_tree_children(...) failed\n");
+		goto out;
+	}
+
+	for (i = 0; i < n; i++) {
+		window_state(wins[i], XCB_ICCCM_WM_STATE_ICONIC);
+		xcb_unmap_window_checked(dpy, wins[i]);
+	}
+
+out:
+	free(tree);
+}
+
 #define match(str0, str1) strncmp(str0, str1, sizeof(str1) - 1) == 0
 
 static void handle_user_request(int fd)
@@ -5506,7 +5537,8 @@ static void handle_user_request(int fd)
 	} else if (match(name.str, "lock")) {
 		run(strdup("xscreensaver-command -lock"));
 	} else if (match(name.str, "reinit-outputs")) {
-		init_outputs();
+		handle_reinit_outputs();
+		shutdown = true;
 	} else if (match(name.str, "list-clients")) {
 		dump_clients(0);
 	} else if (match(name.str, "list-clients-all")) {
@@ -6914,7 +6946,7 @@ int main()
 	ii("defscr %d curscr %d display %u\n", defscr->id, curscr->id, disp);
 	ii("enter events loop\n");
 
-	while (1) {
+	while (!shutdown) {
 		errno = 0;
 		int rc = poll(pfds, ARRAY_SIZE(pfds), -1);
 		if (rc == 0) { /* timeout */
