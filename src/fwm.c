@@ -125,6 +125,7 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_LANCHOR (1 << 13)
 #define CLI_FLG_RANCHOR (1 << 14)
 #define CLI_FLG_LDOCK (1 << 15)
+#define CLI_FLG_TINY (1 << 16)
 
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
@@ -1472,34 +1473,41 @@ static void redraw_panel(struct screen *scr, struct client *cli, uint8_t raise)
 
 static int16_t adjust_x(struct screen *scr, int16_t x, uint16_t w)
 {
-	if (x < scr->x || x > scr->x + scr->w || x + w > scr->x + scr->w)
+	if (x < scr->x || x > scr->x + scr->w || x + w > scr->x + scr->w) {
+		scr->panel.refresh = 1;
 		return scr->x;
+	}
 	return x;
 }
 
 static int16_t adjust_y(struct screen *scr, int16_t y, uint16_t h)
 {
-	if (y < scr->top || y > scr->top + scr->h || y + h > scr->top + scr->h)
+	if (y < scr->top || y > scr->top + scr->h || y + h > scr->top + scr->h) {
+		scr->panel.refresh = 1;
 		return scr->top;
-	else
-		return y;
+	}
+	return y;
 }
 
 static uint16_t adjust_w(struct screen *scr, uint16_t w)
 {
-	if (w > scr->w)
+	if (w > scr->w) {
+		scr->panel.refresh = 1;
 		return scr->w - 2 * BORDER_WIDTH;
-	else if (w < WIN_WIDTH_MIN)
+	} else if (w < WIN_WIDTH_MIN) {
 		return scr->w / 2 - 2 * BORDER_WIDTH;
+	}
 	return w;
 }
 
 static uint16_t adjust_h(struct screen *scr, uint16_t h)
 {
-	if (h > scr->h)
+	if (h > scr->h) {
+		scr->panel.refresh = 1;
 		return scr->h - 2 * BORDER_WIDTH;
-	else if (h < WIN_HEIGHT_MIN)
+	} else if (h < WIN_HEIGHT_MIN) {
 		return scr->h / 2 - 2 * BORDER_WIDTH;
+	}
 	return h;
 }
 
@@ -1528,12 +1536,37 @@ static inline void recalc_client_pos(struct client *cli)
 	xcb_configure_window_checked(dpy, cli->win, mask, val);
 }
 
-static void client_moveresize(struct client *cli, int16_t x, int16_t y,
-			      uint16_t w, uint16_t h)
+static void window_moveresize(xcb_window_t win, int16_t x, int16_t y,
+ uint16_t w, uint16_t h)
 {
 	uint32_t val[4];
 	uint16_t mask;
 
+	val[0] = x;
+	val[1] = y;
+	val[2] = w;
+	val[3] = h;
+	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
+	xcb_configure_window_checked(dpy, win, mask, val);
+}
+
+static void adjust_window_geom(xcb_window_t win, int16_t x, int16_t y,
+ uint16_t w, uint16_t h)
+{
+	if (!curscr)
+		return;
+
+	x = adjust_x(curscr, x, w);
+	y = adjust_y(curscr, y, h);
+	w = adjust_w(curscr, w);
+	h = adjust_h(curscr, h);
+	window_moveresize(win, x, y, w, h);
+}
+
+static void client_moveresize(struct client *cli, int16_t x, int16_t y,
+			      uint16_t w, uint16_t h)
+{
 	if (!(cli->flags & CLI_FLG_DOCK)) {
 		/* fit into monitor space */
 		x = adjust_x(cli->scr, x, w);
@@ -1542,13 +1575,12 @@ static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 		h = adjust_h(cli->scr, h);
 	}
 
-	val[0] = cli->x = x;
-	val[1] = cli->y = y;
-	val[2] = cli->w = w;
-	val[3] = cli->h = h;
-	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
-	mask |= XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
-	xcb_configure_window_checked(dpy, cli->win, mask, val);
+	cli->x = x;
+	cli->y = y;
+	cli->w = w;
+	cli->h = h;
+
+	window_moveresize(cli->win, x, y, w, h);
 
 	dd("win %#x new geo %ux%u+%d+%d scr %d cli %p\n", cli->win, cli->w,
 	   cli->h, cli->x, cli->y, cli->scr->id, cli);
@@ -2382,7 +2414,7 @@ static uint8_t tray_window(xcb_window_t win)
 	} else {
 #ifdef TRACE
 		uint32_t *val = xcb_get_property_value(r);
-		tt("fmt %u, len %u, ver %u, flg %x\n", r->format, r->length,
+		ii("fmt %u, len %u, ver %u, flg %x\n", r->format, r->length,
 		   val[0], val[1]);
 #endif
 		ret = 1;
@@ -3547,6 +3579,7 @@ static void del_window(xcb_window_t win)
 		curscr->tag->prev = NULL;
 
 	scr = curscr;
+	scr->panel.refresh = 1;
 
 	if (!(cli = win2cli(win))) {
 		ii("deleted unmanaged win %#x\n", win);
@@ -3619,7 +3652,7 @@ static void map_window(xcb_window_t win)
 
 	if (g) {
 		warp_pointer(win, g->width / 2, g->height / 2);
-		ii("map win %#x geo %ux%u+%d+%d\n", win, g->width, g->height,
+		tt("map win %#x geo %ux%u+%d+%d\n", win, g->width, g->height,
 		   g->x, g->y);
 		free(g);
 	}
@@ -3786,11 +3819,12 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 					    rootscr->root, a_client_list,
 					    XCB_ATOM_WINDOW, 32, 1, &win);
 		xcb_flush(dpy);
+		flags |= CLI_FLG_TINY;
 		goto out;
 	}
 
 	if (leader != XCB_WINDOW_NONE && !win2cli(leader)) {
-		ww("ignore win %#x with hidden leader %#x\n", win, leader);
+		tt("ignore win %#x with hidden leader %#x\n", win, leader);
 		map_window(win);
 	}
 
@@ -3965,8 +3999,15 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	}
 
 out:
-	if (!cli || (cli && (!(cli->flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))))
-		redraw_panel(curscr, NULL, 0);
+	if (!cli && g && !(flags & CLI_FLG_TINY)) {
+		/* Do not let any window to overlay panel */
+		adjust_window_geom(win, g->x, g->y, g->width, g->height);
+	}
+
+	if (!cli || (cli && (!(cli->flags & (CLI_FLG_TRAY | CLI_FLG_DOCK))))) {
+		if (!rescan_)
+			scr->panel.refresh = 1;
+	}
 
 	free(a);
 	free(g);
@@ -6092,9 +6133,7 @@ static void handle_visibility(xcb_visibility_notify_event_t *e)
 
 			if (scr->panel.win != e->window) {
 				continue;
-			}
-
-			if (scr->panel.visibility_state != e->state) {
+			} else if (scr->panel.visibility_state != e->state) {
 				scr->panel.refresh = 1;
 			}
 
@@ -6116,9 +6155,7 @@ static void handle_exposure(xcb_expose_event_t *e)
 
 			if (scr->panel.win != e->window) {
 				continue;
-			}
-
-			if (scr->panel.refresh) {
+			} else if (scr->panel.refresh) {
 				struct client *cli = pointer2cli();
 				if (cli) {
 					unfocus_clients(scr->tag);
@@ -6331,13 +6368,10 @@ static void tray_add(xcb_window_t win)
 {
 	struct client *cli;
 
-	ii("%s: win %#x\n", __func__, win);
+	ii("\033[1;32madd tray win %#x\033[0m\n", win);
 
 	if (!(cli = win2cli(win))) {
-		if (!(cli = add_window(win, WIN_FLG_TRAY))) {
-			ee("add_window(%#x) failed\n", win);
-			return;
-		}
+		add_window(win, WIN_FLG_TRAY);
 	}
 }
 
