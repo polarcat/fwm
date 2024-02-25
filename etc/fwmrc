@@ -5,7 +5,6 @@ export FWM_LOG=$HOME/fwm${DISPLAY}.log
 export FWM_FONT=/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf
 export FWM_ICONS=$HOME/.fonts/fontawesome/fontawesome-webfont.ttf
 export FWM_FONT_SIZE=7
-export FWM_RANDR_SCRIPT=$FWM_HOME/tmp/randr.sh
 
 if [ -f $FWM_HOME/screenrc ]; then
 	# provides screen specific variables in order to maintain readable
@@ -19,8 +18,10 @@ if [ -f $FWM_HOME/screenrc ]; then
 fi
 
 case $PATH in
-*$FWM_HOME/bin*) ;;
-*) export PATH=$PATH:$FWM_HOME/bin;;
+*$FWM_HOME/bin*)
+	;;
+*) export PATH=$PATH:$FWM_HOME/bin
+	;;
 esac
 
 if [ -f $HOME/bin/xkbmap ]; then
@@ -29,8 +30,3 @@ fi
 
 fwm
 fwm-cleanup
-
-if [ -x $FWM_RANDR_SCRIPT ]; then
-	$FWM_RANDR_SCRIPT
-	echo -n > $FWM_RANDR_SCRIPT
-fi

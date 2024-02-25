@@ -2,18 +2,57 @@
 
 . $FWM_HOME/lib/menu-utils
 
-script_=$FWM_RANDR_SCRIPT
+blank_screen()
+{
+	# This helps to avoid unpleasant screen flickering.
+	echo "xrandr --output \"$1\" --brightness 0" >> $script1_
+	echo "xrandr --output \"$1\" --brightness 1" >> $script2_
+}
+
+init_scripts()
+{
+	echo -n > $script_
+	chmod 0755 $script_
+
+	echo -n > $script1_
+	chmod 0755 $script1_
+
+	echo -n > $script2_
+	chmod 0755 $script2_
+}
+
+run_script()
+{
+	if [ -s $script_ ]; then
+		$script1_ >/dev/null 2>&1
+		$script_
+
+		for i in 1 2 3 4 5; do
+			if [ -f $tmp_/outputs-ready ]; then
+				break
+			fi
+			sleep 1
+		done
+
+		$script2_ >/dev/null 2>&1
+		rm -f $tmp_/outputs-ready
+	fi
+}
 
 disconnect_monitor()
 {
 	xrandr | while read name status prim rest; do
+		blank_screen $name
 		case $name in
-		[0-9]*|Screen|eDP*) continue;;
+		[0-9]*|Screen|eDP*)
+			continue
+			;;
 		esac
 
 		echo "xrandr --output \"$name\" --off" >> $script_
 	done
-	echo reinit-outputs > $ctl_
+
+	run_script
 }
 
 connect_monitor()
@@ -27,16 +66,24 @@ connect_monitor()
 	esac
 
 	xrandr | while read name status role rest; do
+		blank_screen $name
 		case $role in
-		primary) primary=$name; continue;;
+		primary)
+			primary=$name
+			continue
+			;;
 		esac
 
 		case $name in
-		[0-9]*|Screen|eDP*) continue;;
+		[0-9]*|Screen|eDP*)
+			continue
+			;;
 		esac
 
 		case $status in
-		*disconnected*) continue;;
+		*disconnected*)
+			continue
+			;;
 		esac
 
 		if [ $auto -eq 1 ]; then
@@ -53,15 +100,18 @@ connect_monitor()
 			break
 		fi
 	done
-	echo reinit-outputs > $ctl_
-}
 
-echo -n > $script_
-chmod 0755 $script_
+	run_script
+}
 
 ctl_=$FWM_HOME/.control$DISPLAY
 tmp_=$FWM_HOME/tmp
 out_=$tmp_/menu
+script_=$tmp_/randr.sh
+script1_=$tmp_/blank-screen.sh
+script2_=$tmp_/unblank-screen.sh
+
+init_scripts
 
 #printf "\a\t\n" > $out_
 printf "\a\t\n" > $out_
