@@ -1586,19 +1586,6 @@ static void client_moveresize(struct client *cli, int16_t x, int16_t y,
 	   cli->h, cli->x, cli->y, cli->scr->id, cli);
 }
 
-static void move_toolbox(struct client *cli)
-{
-	uint32_t val[2];
-	uint32_t mask;
-
-	toolbox.x = (cli->x + cli->w) - toolbox.size;
-	toolbox.y = (cli->y + cli->h) - toolbox.size;
-	val[0] = toolbox.x;
-	val[1] = toolbox.y;
-	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
-	xcb_configure_window_checked(dpy, toolbox.win, mask, val);
-}
-
 static int toolbox_obscured(struct client *cli, int16_t x, int16_t y)
 {
 	struct list_head *cur;
@@ -1682,6 +1669,20 @@ static void hide_toolbox()
 
 	if (toolbox.win != XCB_WINDOW_NONE)
 		xcb_unmap_window_checked(dpy, toolbox.win);
+}
+
+static void move_toolbox(struct client *cli)
+{
+	uint32_t val[2];
+	uint32_t mask;
+
+	if (!find_toolbox(cli))
+		return;
+
+	val[0] = toolbox.x;
+	val[1] = toolbox.y;
+	mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y;
+	xcb_configure_window_checked(dpy, toolbox.win, mask, val);
 }
 
 static void draw_toolbox(const char *str, uint8_t len)
