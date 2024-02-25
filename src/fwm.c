@@ -317,6 +317,8 @@ struct screen *curscr;
 struct screen *defscr;
 struct screen *dockscr;
 static xcb_screen_t *rootscr; /* root window details */
+static uint16_t root_w;
+static uint16_t root_h;
 static struct toolbar toolbar; /* window toolbar */
 static uint8_t focus_root_;
 static struct client *retag_cli;
@@ -628,34 +630,6 @@ static void get_sprop(struct sprop *ret, xcb_window_t win,
 		ret->str = xcb_get_property_value(ret->ptr);
 		ret->len = xcb_get_property_value_length(ret->ptr);
 	}
-}
-
-static uint8_t is_output_active(xcb_randr_output_t out)
-{
-	uint8_t ret;
-	xcb_randr_get_output_info_cookie_t c;
-	xcb_randr_get_output_info_reply_t *r;
-
-	c = xcb_randr_get_output_info_unchecked(dpy, out, XCB_CURRENT_TIME);
-	r = xcb_randr_get_output_info_reply(dpy, c, NULL);
-	if (!r)
-		return 0;
-
-	ret = r->connection == XCB_RANDR_CONNECTION_CONNECTED;
-	if (ret) {
-		xcb_randr_get_crtc_info_cookie_t c;
-		xcb_randr_get_crtc_info_reply_t *rr;
-
-		c = xcb_randr_get_crtc_info(dpy, r->crtc, r->timestamp);
-		rr = xcb_randr_get_crtc_info_reply(dpy, c, NULL);
-		if (!rr)
-			ret = 0; /* output is not in use */
-		else
-			free(rr);
-	}
-
-	free(r);
-	return ret;
 }
 
 static void select_default_screen(void)
@@ -5144,6 +5118,20 @@ static void init_output(struct output *out)
 	out->info = NULL;
 }
 
+static void outputs_ready(void)
+{
+	FILE *f;
+	char path[homelen + sizeof("/tmp/outputs-ready")];
+
+	sprintf(path, "%s/tmp/outputs-ready", homedir);
+
+	if ((f = fopen(path, "w+"))) {
+		fclose(f);
+	} else {
+		ee("failed to create '%s'\n", path);
+	}
+}
+
 static void init_outputs(void)
 {
 	struct stat st;
@@ -5229,6 +5217,8 @@ static void init_outputs(void)
 		ii("screen %d geo %ux%u+%d+%d size (%d %d)\n", scr->id, scr->w,
 		 scr->h, scr->x, scr->y, scr->x + scr->w, scr->y + scr->h);
 	}
+
+	outputs_ready();
 }
 
 static void load_color(const char *path, struct color *color)
@@ -5517,36 +5507,6 @@ static void dump_clients(uint8_t all)
 	update_seq();
 }
 
-void handle_reinit_outputs(void)
-{
-	int i;
-	int n;
-	xcb_query_tree_cookie_t c;
-	xcb_query_tree_reply_t *tree;
-	xcb_window_t *wins;
-
-	/* walk through windows tree */
-	c = xcb_query_tree(dpy, rootscr->root);
-	if (!(tree = xcb_query_tree_reply(dpy, c, 0))) {
-		ee("xcb_query_tree_reply(...) failed\n");
-		goto out;
-	}
-
-	n = xcb_query_tree_children_length(tree);
-	if (!(wins = xcb_query_tree_children(tree))) {
-		ee("xcb_query_tree_children(...) failed\n");
-		goto out;
-	}
-
-	for (i = 0; i < n; i++) {
-		window_state(wins[i], XCB_ICCCM_WM_STATE_ICONIC);
-		xcb_unmap_window_checked(dpy, wins[i]);
-	}
-
-out:
-	free(tree);
-}
-
 #define match(str0, str1) strncmp(str0, str1, sizeof(str1) - 1) == 0
 
 static void handle_user_request(int fd)
@@ -5578,9 +5538,6 @@ static void handle_user_request(int fd)
 		init_keys();
 	} else if (match(name.str, "lock")) {
 		run(strdup("xscreensaver-command -lock"));
-	} else if (match(name.str, "reinit-outputs")) {
-		handle_reinit_outputs();
-		shutdown = true;
 	} else if (match(name.str, "list-clients")) {
 		dump_clients(0);
 	} else if (match(name.str, "list-clients-all")) {
@@ -6332,33 +6289,13 @@ static void print_configure_notify(xcb_configure_notify_event_t *e)
 }
 #endif
 
-static void reset_all_panels(void)
-{
-	struct list_head *cur;
-
-	list_walk(cur, &screens) {
-		struct screen *scr = list2screen(cur);
-
-		if (is_output_active(scr->out)) {
-			reset_screen_panel(scr);
-			reinit_panel(scr);
-		} else {
-			destroy_panel(scr);
-
-			if (curscr == scr)
-				curscr = defscr;
-
-		}
-	}
-}
-
 static void handle_configure_notify(xcb_configure_notify_event_t *e)
 {
 	print_configure_notify(e);
 
 	if (e->event == rootscr->root && e->window == rootscr->root) {
-		/* reset panel because screen geometry could change */
-		reset_all_panels();
+		ii("root size changed wh (%u, %u)\n", e->width, e->height);
+		shutdown = true;
 	} else if (e->window != rootscr->root && e->border_width) {
 		border_width(e->window, BORDER_WIDTH);
 		xcb_flush(dpy);
@@ -6560,23 +6497,9 @@ static void handle_configure_request(xcb_configure_request_event_t *e)
 
 static void handle_randr_notify(xcb_randr_screen_change_notify_event_t *e)
 {
-	/* Do not call init_outputs() here just print message for information.
-         ^
-	 * The reason for this is that CRTC info is not always available upon
-	 * this notification which causes some not so very nice side effects
-	 * during output initialization.
-	 *
-	 * Instead allow user to refresh outputs info in controlled way by
-	 * issuing 'reinit-outputs' command via IPC
-	 */
 	ii("root %#x, win %#x, sizeID %u, w %u, h %u, mw %u, mh %u\n",
 	   e->root, e->request_window, e->sizeID, e->width, e->height,
 	   e->mwidth, e->mheight);
-	if (!defscr)
-		select_default_screen();
-
-	/* In all cases reset current screen to default */
-	curscr = defscr;
 }
 
 static int handle_events(void)
@@ -6957,6 +6880,8 @@ int main()
 
 	ii("root %#x, size %dx%d\n", rootscr->root, rootscr->width_in_pixels,
 	   rootscr->height_in_pixels);
+	root_w = rootscr->width_in_pixels;
+	root_h = rootscr->height_in_pixels;
 
 	list_init(&screens);
 	list_init(&clients);
