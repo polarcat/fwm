@@ -12,6 +12,7 @@
 #include "list.h"
 #include "text.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -281,6 +282,7 @@ struct area {
 struct screen { /* per output abstraction */
 	uint8_t id;
 	xcb_randr_output_t out;
+	xcb_randr_crtc_t crtc;
 	char *name;
 
 	struct list_head head;
@@ -317,6 +319,7 @@ struct screen *curscr;
 struct screen *defscr;
 struct screen *dockscr;
 static xcb_screen_t *rootscr; /* root window details */
+static bool fresh_start;
 static uint16_t root_w;
 static uint16_t root_h;
 static struct toolbar toolbar; /* window toolbar */
@@ -612,7 +615,7 @@ static uint8_t ignore_panel;
 
 static uint8_t randrbase;
 
-static void scan_clients(uint8_t rescan);
+static void scan_clients(bool rescan);
 
 /* ... and the mess begins */
 
@@ -630,6 +633,270 @@ static void get_sprop(struct sprop *ret, xcb_window_t win,
 		ret->str = xcb_get_property_value(ret->ptr);
 		ret->len = xcb_get_property_value_length(ret->ptr);
 	}
+}
+
+struct gamma_info {
+	size_t size;
+
+	uint16_t *r;
+	uint16_t *g;
+	uint16_t *b;
+
+	float red;
+	float green;
+	float blue;
+};
+
+/**
+ * Inspired by xrandr/xrandr.c implementation
+ */
+static uint16_t find_last_non_clamped(uint16_t *array, size_t size)
+{
+	size_t i;
+	for (i = size - 1; i > 0; i--) {
+		if (array[i] < 0xffff)
+			return i;
+	}
+	return 0;
+}
+
+static inline
+double calc_gamma_brightness(double i1, double v1, double i2, double v2)
+{
+	if (i1 == 0 || v1 == 0 || i2 == 0 || v2 == 0)
+		return 0;
+
+	return exp((log(v2) * log(i1) - log(v1) * log(i2)) / log(i1 / i2));
+}
+
+static inline
+double calc_gamma_color(double c, double last_c, double brightness, double size)
+{
+	if (c == 0 || brightness == 0 || size == 0)
+		return 0;
+
+	return log(c / brightness / 65535.) / log((last_c / 2. + 1.) / size);
+}
+
+static size_t get_crtc_gamma_size(xcb_randr_crtc_t crtc)
+{
+	size_t size = 0;
+	xcb_randr_get_crtc_gamma_size_reply_t *r;
+	xcb_randr_get_crtc_gamma_size_cookie_t c;
+
+	c = xcb_randr_get_crtc_gamma_size_unchecked(dpy, crtc);
+	r = xcb_randr_get_crtc_gamma_size_reply(dpy, c, NULL);
+
+	if (!r) {
+		ww("--> Gamma correction table is not available\n");
+		return 0;
+	} else if (r->size == 0) {
+		ww("--> Gamma correction table is 0\n");
+		goto out;
+	} else if (r->size > 0xffff) {
+		ww("--> Gamma correction table is too large\n");
+		goto out;
+	}
+
+	size = r->size;
+out:
+	free(r);
+	return size;
+}
+
+static void get_crtc_gamma(xcb_randr_crtc_t crtc, struct gamma_info *gamma)
+{
+	xcb_generic_error_t *e;
+	xcb_randr_get_crtc_gamma_reply_t *r;
+	xcb_randr_get_crtc_gamma_cookie_t c;
+
+	errno = 0;
+	c = xcb_randr_get_crtc_gamma(dpy, crtc);
+	r = xcb_randr_get_crtc_gamma_reply(dpy, c, &e);
+	if (e) {
+		ee("get crtc %u gamma err %d\n", crtc, e->error_code);
+		goto out;
+	}
+
+	gamma->r = xcb_randr_get_crtc_gamma_red(r);
+	gamma->g = xcb_randr_get_crtc_gamma_green(r);
+	gamma->b = xcb_randr_get_crtc_gamma_blue(r);
+out:
+	free(r);
+}
+
+static bool init_gamma(xcb_randr_crtc_t crtc, struct gamma_info *gamma)
+{
+	float i1;
+	float v1;
+	float i2;
+	float v2;
+	int middle;
+	uint16_t last_best;
+	uint16_t last_red;
+	uint16_t last_green;
+	uint16_t last_blue;
+	uint16_t *best_array;
+
+	gamma->size = get_crtc_gamma_size(crtc);
+	if (gamma->size == 0)
+		return false;
+
+	gamma->r = gamma->g = gamma->b = NULL;
+	get_crtc_gamma(crtc, gamma);
+	if (!gamma->r || !gamma->g || !gamma->b)
+		return false;
+
+	if (gamma->red == 0)
+	    gamma->red = 1.f;
+	if (gamma->green == 0)
+	    gamma->green = 1.f;
+	if (gamma->blue == 0)
+	    gamma->blue = 1.f;
+
+	last_red = find_last_non_clamped(gamma->r, gamma->size);
+	last_green = find_last_non_clamped(gamma->g, gamma->size);
+	last_blue = find_last_non_clamped(gamma->b, gamma->size);
+	best_array = gamma->r;
+	last_best = last_red;
+
+	if (last_green > last_best) {
+		last_best = last_green;
+		best_array = gamma->g;
+	}
+
+	if (last_blue > last_best) {
+		last_best = last_blue;
+		best_array = gamma->b;
+	}
+
+	if (last_best == 0)
+		last_best = 1;
+
+
+	middle = last_best / 2;
+	i1 = (middle + 1.f) / gamma->size;
+	v1 = best_array[middle] / 65535.f;
+	i2 = (last_best + 1.f) / gamma->size;
+	v2 = best_array[last_best] / 65535.f;
+
+	if (v2 < .0001f) { /* The screen is black */
+		gamma->red = 1.f;
+		gamma->green = 1.f;
+		gamma->blue = 1.f;
+	} else {
+		float brightness;
+		if ((last_best + 1) == gamma->size) {
+			brightness = v2;
+		} else {
+			brightness = calc_gamma_brightness(i1, v1, i2, v2);
+		}
+
+		gamma->red = calc_gamma_color(gamma->r[last_red / 2],
+		 last_red, brightness, gamma->size);
+
+		gamma->green = calc_gamma_color(gamma->g[last_green / 2],
+		 last_green, brightness, gamma->size);
+
+		gamma->blue = calc_gamma_color(gamma->b[last_blue / 2],
+		 last_blue, brightness, gamma->size);
+	}
+
+	return true;
+}
+
+static inline
+uint16_t calc_gamma(float c, float brightness, size_t i, float k)
+{
+	return fmin(pow(i / k, c) * brightness, 1.f) * k;
+}
+
+static void set_crtc_brightness(xcb_randr_crtc_t crtc, float brightness)
+{
+	struct gamma_info gamma;
+	float red;
+	float green;
+	float blue;
+	float k;
+	int shift;
+	xcb_generic_error_t *e;
+	xcb_void_cookie_t c;
+	size_t i;
+
+	if (!init_gamma(crtc, &gamma))
+		return;
+
+	red = 1.f / gamma.red;
+	green = 1.f / gamma.green;
+	blue = 1.f / gamma.blue;
+	k = gamma.size - 1.f;
+	shift = 16 - (ffs(gamma.size) - 1);
+
+	for (i = 0; i < gamma.size; i++) {
+		if (red == 1.f && brightness == 1.f) {
+			gamma.r[i] = i;
+		} else {
+			gamma.r[i] = calc_gamma(red, brightness, i, k);
+		}
+
+		if (green == 1.f && brightness == 1.f) {
+			gamma.g[i] = i;
+		} else {
+			gamma.g[i] = calc_gamma(green, brightness, i, k);
+		}
+
+		if (blue == 1.f && brightness == 1.f) {
+			gamma.b[i] = i;
+		} else {
+			gamma.b[i] = calc_gamma(blue, brightness, i, k);
+		}
+
+		gamma.r[i] <<= shift;
+		gamma.g[i] <<= shift;
+		gamma.b[i] <<= shift;
+	}
+
+	c = xcb_randr_set_crtc_gamma_checked(dpy, crtc, gamma.size,
+	 gamma.r, gamma.g, gamma.b);
+
+	e = xcb_request_check(dpy, c);
+	if (e) {
+		ee("set crtc %u gamma err %d\n", crtc, e->error_code);
+	}
+}
+
+static void set_root_brightness(float brightness)
+{
+	struct list_head *cur;
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		tt("--> set brightness %f\n", brightness);
+		set_crtc_brightness(scr->crtc, brightness);
+	}
+}
+
+/*
+ * y = .5 / (sin(x) * sin(x)) - .5
+ */
+static void root_fade_in(uint32_t speed, struct screen *scr)
+{
+	float x = 2.f;
+	float y = 0;
+	do {
+		if (scr)
+			set_crtc_brightness(scr->crtc, y);
+		else
+			set_root_brightness(y);
+
+		usleep(speed);
+		y = .5f / (sin(x) * sin(x)) - .5f;
+		x += .05f;
+	} while (y < 1.f);
+
+	if (scr)
+		set_crtc_brightness(scr->crtc, 1.f);
+	else
+		set_root_brightness(1.f);
 }
 
 static void select_default_screen(void)
@@ -829,7 +1096,9 @@ static void print_title(struct screen *scr, xcb_window_t win)
 	uint16_t w, h;
 	struct area area;
 
-	if (scr->panel.win == XCB_WINDOW_NONE || scr->panel.gc == XCB_NONE)
+	if (fresh_start)
+		return;
+	else if (scr->panel.win == XCB_WINDOW_NONE || scr->panel.gc == XCB_NONE)
 		return; /* nothing to do here */
 
 	area.color = get_color(NORMAL_BG);
@@ -948,7 +1217,7 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 	sprintf(path, "%s/.session/%#x", homedir, win);
 
 	if (!(f = fopen(path, "r"))) {
-		ww("skip restore win %#x, %s\n", win, strerror(errno));
+		tt("skip restore win %#x, %s\n", win, strerror(errno));
 		return;
 	}
 
@@ -1112,7 +1381,7 @@ static void update_dock(pid_t pid, char *msg)
 			       (const char *) &e);
 	xcb_flush(dpy);
 
-	ii("win %#x message '%s' len %zu\n", cli->win, msg, len);
+	tt("win %#x message '%s' len %zu\n", cli->win, msg, len);
 }
 
 #if 0
@@ -1292,7 +1561,9 @@ static void unfocus_window(xcb_window_t win)
 
 static void focus_window(xcb_window_t win)
 {
-	if (win == toolbar.panel.win) {
+	if (fresh_start) {
+		return;
+	} else if (win == toolbar.panel.win) {
 		return;
 	} else if (retag_cli && retag_cli->win == win) {
 		border_color(win, get_color(ALERT_BG));
@@ -1322,7 +1593,8 @@ static void raise_window(xcb_window_t win)
 	uint32_t val[1] = { XCB_STACK_MODE_ABOVE, };
 	uint16_t mask = XCB_CONFIG_WINDOW_STACK_MODE;
 
-	xcb_configure_window_checked(dpy, win, mask, val);
+	if (!fresh_start)
+		xcb_configure_window_checked(dpy, win, mask, val);
 }
 
 static void stash_window(struct arg *arg)
@@ -3535,7 +3807,7 @@ static void add_dock(struct client *cli, uint8_t bw)
 	xcb_flush(dpy);
 }
 
-static uint8_t rescan_;
+static bool rescan_;
 
 static void del_window(xcb_window_t win)
 {
@@ -3557,7 +3829,7 @@ static void del_window(xcb_window_t win)
 	scr->panel.refresh = 1;
 
 	if (!(cli = win2cli(win))) {
-		ii("deleted unmanaged win %#x\n", win);
+		tt("deleted unmanaged win %#x\n", win);
 		xcb_unmap_subwindows_checked(dpy, win);
 		goto flush;
 	}
@@ -3572,7 +3844,7 @@ static void del_window(xcb_window_t win)
 
 	scr = cli2scr(cli); /* do it before client is freed */
 	free_client(&cli);
-	ii("deleted win %#x\n", win);
+	tt("deleted win %#x\n", win);
 
 	if (scr)
 		print_title(scr, XCB_WINDOW_NONE);
@@ -3606,7 +3878,7 @@ static uint32_t window_exclusive(xcb_window_t win)
 		cli = glob2client(cur);
 
 		if (cli->win == win) {
-			ii("cleanup cli %p win %#x\n", cli, win);
+			tt("cleanup cli %p win %#x\n", cli, win);
 			free_client(&cli);
 		} else if (crc && cli->crc == crc && cli->win != win) {
 			xcb_window_t old = cli->win;
@@ -3707,6 +3979,8 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	    win == toolbox.win || panel_window(win))
 		return NULL;
 
+	flags = 0;
+	scr = NULL;
 	cli = NULL;
 	a = NULL;
 	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
@@ -3728,9 +4002,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 
 	leader = window_leader(win);
 
-	if (leader != XCB_WINDOW_NONE)
-		rescan_ = 1;
-
 	if (!g->depth && !a->colormap) {
 		tt("win %#x, root %#x, colormap=%#x, class=%u, depth=%u\n", win,
 		   g->root, a->colormap, a->_class, g->depth);
@@ -3738,8 +4009,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		tt("ignore window %#x with unknown colormap\n", win);
 		goto out;
 	}
-
-	flags = 0;
 
 	if (ignore_window(win))
 		goto out;
@@ -3803,7 +4072,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		map_window(win);
 	}
 
-	scr = NULL;
 	tag = NULL;
 
 	if ((winflags & WIN_FLG_SCAN) && !(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
@@ -3896,7 +4164,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	} else if (cli->flags & CLI_FLG_TRAY || cli->flags & CLI_FLG_DOCK) {
 		cli->w = g->width;
 		cli->h = g->height;
-		ii("add dock win %#x pid %u\n", cli->win, cli->pid);
+		tt("add dock win %#x pid %u\n", cli->win, cli->pid);
 		add_dock(cli, g->border_width);
 		goto out;
 	} else if (!(winflags & WIN_FLG_SCAN)) {
@@ -3909,7 +4177,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 
 	if (!cli->tag && tag) /* not configured, restore from last session */
 		cli->tag = tag;
-	else if (!cli->tag) /* nothing worked, map to current tag */
+	if (!cli->tag) /* nothing worked, map to current tag */
 		cli->tag = scr->tag;
 
 	border_width(cli->win, BORDER_WIDTH);
@@ -3948,10 +4216,9 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		free(cfg);
 	}
 
-	ii("added win %#x scr %d tag '%s' pid %d geo %ux%u%+d%+d cli %p leader %#x\n",
+	tt("added win %#x scr %d tag '%s' pid %d geo %ux%u%+d%+d cli %p leader %#x\n",
 	   cli->win, scr->id, cli->tag->name, cli->pid, cli->w, cli->h,
 	   cli->x, cli->y, cli, cli->leader);
-
 	if (winflags & WIN_FLG_SCAN) {
 		cli->ts = time_us();
 	} else if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)) &&
@@ -3980,7 +4247,7 @@ out:
 	}
 
 	if (!cli || (cli && (!(cli->flags & (CLI_FLG_TRAY | CLI_FLG_DOCK))))) {
-		if (!rescan_)
+		if (scr && !rescan_)
 			scr->panel.refresh = 1;
 	}
 
@@ -3991,7 +4258,9 @@ out:
 
 static void raise_client(struct arg *arg)
 {
-	if (!arg->cli && arg->kmap) {
+	if (fresh_start) {
+		return;
+	} else if (!arg->cli && arg->kmap) {
 		xcb_window_t win = pointer2win();
 		if (win)
 			add_window(win, WIN_FLG_USER);
@@ -4045,7 +4314,7 @@ static void hide_leader(xcb_window_t win)
 	}
 }
 
-static void scan_clients(uint8_t rescan)
+static void scan_clients(bool rescan)
 {
 	int i, n, nn;
 	xcb_query_tree_cookie_t c;
@@ -4122,6 +4391,8 @@ static int tag_pointed(struct tag *tag, int16_t x, int16_t y)
 
 static inline void do_retag(struct tag *tag, struct client *cli)
 {
+	set_crtc_brightness(curscr->crtc, 0);
+
 	hide_toolbox();
 	window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
 	xcb_unmap_window_checked(dpy, cli->win);
@@ -4133,6 +4404,9 @@ static inline void do_retag(struct tag *tag, struct client *cli)
 	cli->tag = tag;
 	cli->scr = curscr;
 	store_client(cli, 0);
+	print_tag(curscr, tag, ITEM_FLG_FOCUSED);
+
+	root_fade_in(0, curscr);
 }
 
 static void retag_marked_client(struct tag *tag)
@@ -4971,6 +5245,7 @@ static void init_screen(struct output *out)
 	scr->w = out->crtc->width;
 	scr->h = out->crtc->height;
 	scr->name = strdup(out->name);
+	scr->crtc = out->info->crtc;
 
 	calc_screen_dpi(out, scr);
 	add_screen(scr);
@@ -5207,7 +5482,7 @@ static void init_outputs(void)
 	init_tray();
 	init_toolbox();
 	focus_root();
-	scan_clients(0);
+	scan_clients(false);
 
 	list_walk(cur, &screens) {
 		scr = list2screen(cur);
@@ -5532,7 +5807,7 @@ static void handle_user_request(int fd)
 		name.ptr = NULL;
 	}
 
-	ii("handle request '%s' len %u\n", name.str, name.len);
+	tt("handle request '%s' len %u\n", name.str, name.len);
 
 	if (match(name.str, "reload-keys")) {
 		init_keys();
@@ -6294,8 +6569,14 @@ static void handle_configure_notify(xcb_configure_notify_event_t *e)
 	print_configure_notify(e);
 
 	if (e->event == rootscr->root && e->window == rootscr->root) {
-		ii("root size changed wh (%u, %u)\n", e->width, e->height);
-		shutdown = true;
+		if (root_w != e->width || root_h != e->height) {
+			set_root_brightness(0);
+			root_w = e->width;
+			root_h = e->height;
+			shutdown = true;
+			ii("--> default screen wh (%u, %u)\n", defscr->w, defscr->h);
+			ii("--> root size changed wh (%u, %u)\n", e->width, e->height);
+		}
 	} else if (e->window != rootscr->root && e->border_width) {
 		border_width(e->window, BORDER_WIDTH);
 		xcb_flush(dpy);
@@ -6673,7 +6954,7 @@ static void init_keys_def(void)
 			continue;
 		}
 
-		ii("map %s to %s\n", kmap->actname, kmap->keyname);
+		tt("map %s to %s\n", kmap->actname, kmap->keyname);
 		list_add(&keymap, &kmap->head);
 
 		tmp = strlen(kmap->actname);
@@ -6683,7 +6964,7 @@ static void init_keys_def(void)
 		sprintf(path, "%s/keys/%s", homedir, kmap->keyname);
 
 		if ((f = fopen(path, "w"))) {
-			ii("write '%s'\n", kmap->actname);
+			tt("write '%s'\n", kmap->actname);
 			fprintf(f, "%s", kmap->actname);
 			fclose(f);
 		}
@@ -6874,6 +7155,7 @@ int main()
 		return 1;
 	}
 
+	fresh_start = true;
 	rootscr = xcb_setup_roots_iterator(xcb_get_setup(dpy)).data;
 	if (!rootscr)
 		panic("no screens found\n");
@@ -6902,6 +7184,9 @@ int main()
 	pfds[FD_CTL].fd = open_control(-1);
 	pfds[FD_CTL].events = POLLIN;
 	pfds[FD_CTL].revents = 0;
+
+	root_fade_in(1000, NULL);
+	fresh_start = false;
 
 	ii("defscr %d curscr %d display %u\n", defscr->id, curscr->id, disp);
 	ii("enter events loop\n");
@@ -6932,7 +7217,7 @@ int main()
 		 * for some reason xcb does not catch such events explicitly */
 
 		if (rescan_) {
-			scan_clients(1);
+			scan_clients(true);
 			rescan_ = 0;
 		}
 	}

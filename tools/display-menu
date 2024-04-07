@@ -34,8 +34,11 @@ run_script()
 			sleep 1
 		done
 
-		$script2_ >/dev/null 2>&1
 		rm -f $tmp_/outputs-ready
+
+		# Safeguard in case fwm fails to restore display brightness.
+		sleep 10
+		$script2_ >/dev/null 2>&1
 	fi
 }
 

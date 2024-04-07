@@ -18,8 +18,16 @@ sleep 0.5 # give window some time to settle
 while [ -f $run_ ]; do
 	fwm-netlink | while read msg; do
 		case $msg in
-		add@*usb*) updatedock $name_ $icon_ $normfg_;;
-		remove@*usb*) updatedock $name_ $icon_ $dimfg_;;
+		add@*usb*)
+			updatedock $name_ $icon_ $normfg_
+			# It does not hurt to call it on every addition.
+			if [ -x $FWM_HOME/bin/xkbmap ]; then
+				$FWM_HOME/bin/xkbmap
+			fi
+			;;
+		remove@*usb*)
+			updatedock $name_ $icon_ $dimfg_
+			;;
 		esac
 	done
 done

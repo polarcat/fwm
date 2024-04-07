@@ -29,6 +29,19 @@ printf "\a\tdisplay\n" >> $out_
 printf "\a\tsuspend\n" >> $out_
 printf "\a\texit\n" >> $out_
 
+exit_fwm()
+{
+	xrandr | while read name status role rest; do
+		case $status in
+		*disconnected*)
+			continue
+			;;
+		esac
+		xrandr --output "$name" --brightness 0
+	done
+	stopcmd fwm
+}
+
 startmenu -b -d $out_ | while read icon item; do
 	case $item in
 	"run..."*) exec run-menu &;;
@@ -46,7 +59,7 @@ startmenu -b -d $out_ | while read icon item; do
 	"sound"*) mixer-menu &;;
 	"display"*) display-menu &;;
 	"suspend"*) suspend-menu &;;
-	"exit"*) stopcmd fwm;;
+	"exit"*) exit_fwm;;
 	esac
 	break
 done
