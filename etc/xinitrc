@@ -6,5 +6,11 @@ xscreensaver -no-splash &
 rm -f ~/.fwm/.session/*
 
 while :; do
-	exec ~/.fwmrc
+	# NOTE: do not use `exec` here because it will propagate error to the
+	# parent process.
+	~/.fwmrc || true
+	sleep 1
 done
+
+dpy=(xrandr | grep prim | cut -f1 -d' ')
+xrandr --output "$dpy" --brightness 1
