@@ -6,7 +6,7 @@ sys_=/sys/class/net
 dev_=''
 ifs_=$IFS
 err_=0
-log_=/tmp/$USER/iwup.log
+log_=/tmp/$SUDO_USER/iwup.log
 dhcpc_=''
 dhcpa_=''
 
