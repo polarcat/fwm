@@ -901,7 +901,6 @@ static void root_fade_in(uint32_t speed, struct screen *scr)
 
 static void select_default_screen(void)
 {
-	char dpi_str[sizeof("65535")];
 	struct list_head *cur;
 	xcb_randr_get_output_primary_reply_t *r;
 	xcb_randr_get_output_primary_cookie_t c;
@@ -926,11 +925,6 @@ static void select_default_screen(void)
 		defscr = list2screen(screens.next); /* use very first one */
 
 	free(r);
-
-	snprintf(dpi_str, sizeof(dpi_str), "%u", defscr->hdpi);
-	setenv("FWM_HDPI", dpi_str, 1);
-	snprintf(dpi_str, sizeof(dpi_str), "%u", defscr->vdpi);
-	setenv("FWM_VDPI", dpi_str, 1);
 }
 
 static pid_t win2pid(xcb_window_t win)
@@ -5227,8 +5221,34 @@ static void add_screen(struct screen *scr)
 
 static void calc_screen_dpi(struct output *out, struct screen *scr)
 {
-	scr->hdpi = out->crtc->width / (out->info->mm_width / 25.4f);
-	scr->vdpi = out->crtc->height / (out->info->mm_height / 25.4f);
+	char dpi_str[sizeof("65535")];
+	const char *dpi_env;
+
+	if ((dpi_env = getenv("FWM_HDPI")) == NULL) {
+		scr->hdpi = out->crtc->width / (out->info->mm_width / 25.4f);
+	} else {
+		scr->hdpi = atoi(dpi_env);
+	}
+
+	if ((dpi_env = getenv("FWM_VDPI")) == NULL) {
+		scr->vdpi = out->crtc->height / (out->info->mm_height / 25.4f);
+	} else {
+		scr->vdpi = atoi(dpi_env);
+	}
+
+	if (scr->hdpi == 0) {
+		scr->hdpi = 96;
+	}
+
+	if (scr->vdpi == 0) {
+		scr->vdpi = 96;
+	}
+
+	snprintf(dpi_str, sizeof(dpi_str), "%u", scr->hdpi);
+	setenv("FWM_HDPI", dpi_str, 1);
+
+	snprintf(dpi_str, sizeof(dpi_str), "%u", scr->vdpi);
+	setenv("FWM_VDPI", dpi_str, 1);
 }
 
 static void init_screen(struct output *out)
