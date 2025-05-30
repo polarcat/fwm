@@ -6620,7 +6620,7 @@ static void tray_add(xcb_window_t win)
 
 static void handle_client_message(xcb_client_message_event_t *e)
 {
-	struct arg arg;
+	struct arg arg = {0};
 
 	print_atom_name(e->type);
 	tt("win %#x data[] = { %u, %u, %u, ... }, format %d type %d\n",
