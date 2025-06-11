@@ -62,6 +62,7 @@ connect_monitor()
 {
 	local pos='--left-of'
 	local auto=0
+	local rotate=$2
 
 	case $1 in
 	right) pos='--right-of';;
@@ -97,7 +98,7 @@ connect_monitor()
 			auto=$((auto + 1))
 		fi
 
-		echo "xrandr --output \"$name\" --auto $pos \"$primary\"" >> $script_
+		echo "xrandr --output \"$name\" --auto $pos \"$primary\" $rotate" >> $script_
 
 		if [ $auto -gt 2 ]; then
 			break
@@ -122,14 +123,20 @@ printf "\a\tbrightness\n" >> $out_
 printf "\a\tleft\n" >> $out_
 printf "\a\tright\n" >> $out_
 printf "\a\tauto\n" >> $out_
+printf "\a\tleft  r\n" >> $out_
+printf "\a\tright r\n" >> $out_
+printf "\a\tauto  r\n" >> $out_
 printf "\a\tdisconnect\n" >> $out_
 
 startmenu -b -d $out_ | while read icon item; do
 	case $item in
 	"brightness"*) exec brightness-menu &;;
-	"left"*) connect_monitor left;;
-	"right"*) connect_monitor right;;
-	"auto"*) connect_monitor auto;;
+	"left  r"*) connect_monitor left "--rotate right";;
+	"right r"*) connect_monitor right "--rotate right";;
+	"auto  r"*) connect_monitor auto "--rotate right";;
+	"left"*) connect_monitor left "--rotate normal";;
+	"right"*) connect_monitor right "--rotate normal";;
+	"auto"*) connect_monitor auto "--rotate normal";;
 	"disconnect"*) disconnect_monitor;;
 	esac
 done
