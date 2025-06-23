@@ -5107,7 +5107,6 @@ static void init_tray(void)
 	}
 
 	a_tray = get_atom_by_name(name, strlen(name));
-	free(name);
 
 	ii("tray atom %d\n", a_tray);
 	print_atom_name(a_tray);
@@ -5119,15 +5118,18 @@ static void init_tray(void)
 	r = xcb_get_selection_owner_reply(dpy, c, NULL);
 	if (!r) {
 		ee("xcb_get_selection_owner(%s) failed\n", name);
-		return;
+	} else {
+		if (r->owner != defscr->panel.win) {
+			ww("systray owned by win %#x scr %d\n", r->owner,
+			   defscr->id);
+		} else {
+			tray_notify(a_tray);
+		}
+
+		free(r);
 	}
 
-	if (r->owner != defscr->panel.win)
-		ww("systray owned by win %#x scr %d\n", r->owner, defscr->id);
-	else
-		tray_notify(a_tray);
-
-	free(r);
+	free(name);
 }
 
 static void init_fonts(void)
