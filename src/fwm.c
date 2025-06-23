@@ -3374,9 +3374,16 @@ static void place_window(struct arg *arg)
 		tt("WIN_POS_FILL\n");
 		arg->cli->flags |= CLI_FLG_FULLSCREEN;
 		x = curscr->x;
-		y = curscr->top;
-		w = curscr->w - 2 * BORDER_WIDTH;
-		h = curscr->h - 2 * BORDER_WIDTH;
+		if (curscr->panel.win == XCB_NONE) {
+			y = curscr->y;
+			w = curscr->w;
+			h = curscr->h;
+			border_width(arg->cli->win, 0);
+		} else {
+			y = curscr->top;
+			w = curscr->w - 2 * BORDER_WIDTH;
+			h = curscr->h - 2 * BORDER_WIDTH;
+		}
 		curscr->tag->anchor = NULL;
 		break;
 	case WIN_POS_CENTER:
@@ -4998,12 +5005,26 @@ static void destroy_panel(struct screen *scr)
 	}
 }
 
-static void create_panel(struct screen *scr)
+static bool skip_panel(struct screen *scr)
+{
+	struct stat st;
+	char path[256] = {0};
+
+	snprintf(path, sizeof(path) - 1, "panel/skip/%s", scr->name);
+	return (stat(path, &st) == 0);
+}
+
+static bool create_panel(struct screen *scr)
 {
 	uint32_t val[2], mask;
 	uint16_t h;
 
 	destroy_panel(scr); /* clean up previous setup */
+
+	if (skip_panel(scr)) {
+		ii("skip panel for '%s'\n", scr->name);
+		return false;
+	}
 
 	if (!(scr->panel.text = create_text())) {
 		ww("failed to allocate panel text\n");
@@ -5077,6 +5098,8 @@ static void create_panel(struct screen *scr)
 
 	ii("screen %d, panel %#x geo %ux%u+%d+%d\n", scr->id, scr->panel.win,
 	   scr->w, panel_height, scr->x, scr->panel.y);
+
+	return true;
 }
 
 static void tray_notify(xcb_atom_t atom)
@@ -5485,8 +5508,8 @@ static void init_outputs(void)
 
 	list_walk(cur, &screens) {
 		scr = list2screen(cur);
-		create_panel(scr);
-		scr->h -= panel_height + PANEL_SCREEN_GAP;
+		if (create_panel(scr))
+			scr->h -= panel_height + PANEL_SCREEN_GAP;
 
 		struct list_head *c;
 		list_walk(c, &clients) {
