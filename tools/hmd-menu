@@ -1,0 +1,162 @@
+#!/bin/sh
+
+. $FWM_HOME/lib/menu-utils
+
+ctl_=$FWM_HOME/.control$DISPLAY
+tmp_=$FWM_HOME/tmp
+out_=$tmp_/menu
+edid_=$tmp_/edid
+props_=$tmp_/xrandr-props.txt
+pri_=eDP-1
+
+hexdump_edid()
+{
+	hexdump -v -e '16/1 "%02x"' -e '"\n"' $1 2>/dev/null
+}
+
+find_primary_output()
+{
+	while read name status role info; do
+		case $role in
+		primary)
+			pri_=$name
+			break
+			;;
+		esac
+	done < $props_
+}
+
+#
+# Only interested in first 256 bytes of EDID.
+#
+extract_sysfs_edid()
+{
+	local i=0
+	local sysfs=/sys/class/drm
+
+	for card in $sysfs/card*; do
+		hexdump_edid $card/edid > $edid_/sysfs-$i.txt
+
+		strings $card/edid 2>/dev/null |\
+			tr -d '\n' > $edid_/sysfs-$i-strings.txt
+
+		i=$((i + 1))
+	done
+}
+
+match_output()
+{
+	local i=0
+	local file1=''
+	local file2=''
+
+	while [ $i -lt 10 ]; do
+		file1=$edid_/sysfs-$i.txt
+		file2=$edid_/sysfs-$i-strings.txt
+
+		diff >/dev/null 2>&1 $2 $file1
+		if [ $? -eq 0 ]; then
+			printf "\a\t$1\t$(cat $file2)\n" >> $out_
+			printf "\a\t$1\tnon-desktop\n" >> $out_
+			printf "\a\t$1\tdisconnect\n" >> $out_
+		fi
+
+		i=$((i + 1))
+	done
+}
+
+extract_randr_edid()
+{
+	local found_edid=0
+	local found_output=0
+	local output=''
+	local lines=0
+	local lines_max=15
+
+	while read name status rest; do
+		# Do some filtering for embedded displays.
+		case $name in
+		eDP*)
+			continue;
+			;;
+		esac
+
+		case $status in
+		*connected)
+			output=$name
+			found_output=1
+			found_edid=0
+			lines=0
+			continue
+			;;
+		esac
+
+		if [ $found_output -eq 1 ]; then
+			case $name in
+			*EDID:)
+				found_output=0
+				found_edid=1
+				lines=0
+				continue
+				;;
+			esac
+		fi
+
+		if [ $found_edid -eq 1 ]; then
+			if [ $lines -le $lines_max ]; then
+				echo "$name" >> $edid_/randr-$output.txt
+			else
+				match_output $output $edid_/randr-$output.txt
+				found_edid=0
+			fi
+			lines=$((lines + 1))
+		fi
+	done < $props_
+
+	rm -f $edid_/*.txt
+}
+
+connect_hmd()
+{
+	touch $FWM_HOME/panel/skip/$1
+	mkdir -p $FWM_HOME/screens/hmd
+	echo $1 > $FWM_HOME/screens/hmd/name
+	xrandr --output $1 --prop --set non-desktop 0 --auto --above $pri_
+}
+
+connect_nondesktop()
+{
+	xrandr --output $1 --set non-desktop 1
+}
+
+disconnect_hmd()
+{
+	xrandr --output $1 --off
+}
+
+handle_hmd()
+{
+	case $2 in
+	non-desktop) connect_nondesktop $1;;
+	disconnect) disconnect_hmd $1;;
+	*) connect_hmd $1;;
+	esac
+}
+
+xrandr --prop > $props_
+
+find_primary_output
+
+mkdir -p $edid_
+extract_sysfs_edid
+
+#printf "\a\t\n" > $out_
+printf "\a\t\t\n" > $out_
+
+extract_randr_edid
+
+startmenu -b -d $out_ | while read icon item info; do
+	case $item in
+	[A-Z]*) handle_hmd $item $info;;
+	esac
+done
