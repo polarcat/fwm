@@ -210,6 +210,8 @@ struct panel {
 #define BTN_PLACE "" /* fa-plus [&#xf067;] */
 #define BTN_RETAG ""
 
+#define BTN_HMD "" /* fa-cube [&#xf1b2;] */
+
 struct toolbar_item {
 	const char *str;
 	uint8_t len;
@@ -221,6 +223,7 @@ struct toolbar_item {
 static struct toolbar_item toolbar_items[] = {
 	{ BTN_CLOSE, slen(BTN_CLOSE), },
 	{ BTN_CENTER, slen(BTN_CENTER), },
+	{ BTN_HMD, slen(BTN_HMD), },
 	{ BTN_FLAG, slen(BTN_FLAG), },
 	{ BTN_LEFT, slen(BTN_LEFT), },
 	{ BTN_RIGHT, slen(BTN_RIGHT), },
@@ -897,6 +900,36 @@ static void root_fade_in(uint32_t speed, struct screen *scr)
 		set_crtc_brightness(scr->crtc, 1.f);
 	else
 		set_root_brightness(1.f);
+}
+
+static struct screen *find_hmd_screen(void)
+{
+	struct list_head *cur;
+	struct screen *scr;
+	ssize_t bytes;
+	int fd;
+	char buf[MAX_OUTPUT_NAME + 1] = {0};
+
+	chdir(homedir);
+
+	if ((fd = open("screens/hmd/name", O_RDONLY)) < 0) {
+		return NULL;
+	}
+
+	if ((bytes = read(fd, buf, sizeof(buf) - 1)) <= 0) {
+		return NULL;
+	}
+
+	buf[bytes - 1] = '\0';
+
+	list_walk(cur, &screens) {
+		scr = list2screen(cur);
+		if (strcmp(scr->name, buf) == 0) {
+			return scr;
+		}
+	}
+
+	return NULL;
 }
 
 static void select_default_screen(void)
@@ -3987,7 +4020,9 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	g = xcb_get_geometry_reply(dpy, xcb_get_geometry(dpy, win), NULL);
 
 	if (!g) {
-		ee("failed to get geometry for win %#x\n", win);
+		if (errno != ENOENT) {
+			ee("failed to get geometry for win %#x\n", win);
+		}
 		store_window(win, NULL, 0, 1);
 		goto out;
 	}
@@ -5958,6 +5993,8 @@ static void prepare_motion(struct client *cli)
 
 static void toolbar_button_press(void)
 {
+	struct screen *scr;
+	struct screen *tmp;
 	struct arg arg;
 
 	if (!focused_item) {
@@ -6012,6 +6049,17 @@ static void toolbar_button_press(void)
 		return; /* special case */
 	} else if (focused_item->str == (const char *) BTN_MOUSE) {
 		retag_cli = NULL;
+	} else if (focused_item->str == (const char *) BTN_HMD) {
+		if ((scr = find_hmd_screen()) != NULL) {
+			tmp = curscr;
+			curscr = scr;
+			do_retag(curscr->tag, arg.cli);
+			arg.cli->pos = WIN_POS_FILL;
+			place_window(&arg);
+			xcb_map_window_checked(dpy, arg.cli->win);
+			focus_screen(0);
+			curscr = tmp;
+		}
 	}
 
 	hide_toolbar();
