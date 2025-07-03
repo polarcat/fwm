@@ -128,6 +128,8 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_LDOCK (1 << 15)
 #define CLI_FLG_TINY (1 << 16)
 
+#define CLI_FLG_PANEL (CLI_FLG_DOCK | CLI_FLG_TRAY)
+
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
 #define SCR_FLG_CLIENT_RETAG (1 << 3)
@@ -1106,7 +1108,7 @@ static inline void free_window_title(struct sprop *title)
 
 static uint8_t get_window_title(xcb_window_t win, struct sprop *title)
 {
-	get_sprop(title, win, a_net_wm_name, UINT_MAX);
+	get_sprop(title, win, a_net_wm_name, UINT8_MAX);
 	if (!title->ptr || !title->len) {
 		get_sprop(title, win, XCB_ATOM_WM_NAME, UCHAR_MAX);
 		if (!title->ptr || !title->len)
@@ -4075,7 +4077,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 #endif
 
 	if (special(win, "popup", sizeof("popup"))) {
-		flags &= ~(CLI_FLG_DOCK | CLI_FLG_TRAY);
+		flags &= ~CLI_FLG_PANEL;
 		flags |= CLI_FLG_POPUP;
 	}
 
@@ -4084,7 +4086,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		goto out;
 	}
 
-	if (!(flags & (CLI_FLG_DOCK | CLI_FLG_TRAY)))
+	if (!(flags & CLI_FLG_PANEL))
 		crc = window_exclusive(win);
 	else
 		crc = 0;
@@ -4110,7 +4112,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 
 	tag = NULL;
 
-	if ((winflags & WIN_FLG_SCAN) && !(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
+	if ((winflags & WIN_FLG_SCAN) && !(flags & CLI_FLG_PANEL))
 		restore_window(win, &scr, &tag);
 
 	if (scr && (!scr->panel.win || !scr->panel.gc)) {
@@ -4208,7 +4210,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		g->y += scr->y;
 	}
 
-	if (!(cli->flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)))
+	if (!(cli->flags & CLI_FLG_PANEL))
 		cli->tag = configured_tag(win); /* read tag from configuration */
 
 	if (!cli->tag && tag) /* not configured, restore from last session */
@@ -4257,7 +4259,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	   cli->x, cli->y, cli, cli->leader);
 	if (winflags & WIN_FLG_SCAN) {
 		cli->ts = time_us();
-	} else if (!(flags & (CLI_FLG_TRAY | CLI_FLG_DOCK)) &&
+	} else if (!(flags & CLI_FLG_PANEL) &&
 		   !(winflags & WIN_FLG_SCAN)) {
 		struct arg arg = { .cli = cli, .kmap = NULL, };
 		arg.data = 1; /* do not update saved pointer coords */
@@ -4282,7 +4284,7 @@ out:
 		adjust_window_geom(win, g->x, g->y, g->width, g->height);
 	}
 
-	if (!cli || (cli && (!(cli->flags & (CLI_FLG_TRAY | CLI_FLG_DOCK))))) {
+	if (!cli || (cli && (!(cli->flags & CLI_FLG_PANEL)))) {
 		if (scr && !rescan_)
 			scr->panel.refresh = 1;
 	}
@@ -6304,7 +6306,7 @@ static void handle_motion_notify(xcb_motion_notify_event_t *e)
 	trace_screen_metrics(curscr);
 	cli = win2cli(e->child); /* window is being moved so search in global list */
 
-	if (cli && cli->flags & (CLI_FLG_DOCK | CLI_FLG_TRAY)) {
+	if (cli && cli->flags & CLI_FLG_PANEL) {
 		ww("win %#x is not moveable\n", cli->win);
 		return;
 	} else if (curscr && curscr->panel.win == e->child) {
