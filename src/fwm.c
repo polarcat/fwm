@@ -3993,6 +3993,12 @@ static uint8_t ignore_systray(xcb_window_t win)
 }
 #endif
 
+static bool is_fullscreen_size(struct screen *scr, int x, int y, int w, int h)
+{
+	return (x == scr->x && y == scr->y &&
+		w == scr->w && h == scr->h);
+}
+
 static bool is_inside_screen(struct screen *scr, int x, int y, int w, int h)
 {
 	return (x >= scr->x && x < (scr->x + scr->w) &&
@@ -4024,6 +4030,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	uint32_t val[1];
 	uint32_t crc;
 	uint32_t grav;
+	uint8_t border_w;
 	xcb_window_t leader;
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
@@ -4153,6 +4160,12 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		scr = defscr;
 	}
 
+	if (is_fullscreen_size(scr, g->x, g->y, g->width, g->height)) {
+		if (scr->panel.win == XCB_NONE) {
+			flags |= CLI_FLG_FULLSCREEN;
+		}
+	}
+
 	if ((cli = win2cli(win))) {
 		ii("win %#x already on clients list\n", win);
 		list_del(&cli->head);
@@ -4249,8 +4262,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	if (!cli->tag) /* nothing worked, map to current tag */
 		cli->tag = scr->tag;
 
-	border_width(cli->win, BORDER_WIDTH);
-
 	/* subscribe events */
 	val[0] = XCB_EVENT_MASK_ENTER_WINDOW;
 	val[0] |= XCB_EVENT_MASK_PROPERTY_CHANGE;
@@ -4263,7 +4274,15 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	unfocus_clients(curscr->tag);
 	list_add(&cli->tag->clients, &cli->head);
 	list_add(&clients, &cli->list); /* also add to global list of clients */
-	client_moveresize(cli, g->x, g->y, g->width, g->height);
+
+	if (cli->flags & CLI_FLG_FULLSCREEN) {
+		border_w = 0;
+	} else {
+		border_w = BORDER_WIDTH;
+		client_moveresize(cli, g->x, g->y, g->width, g->height);
+	}
+
+	border_width(cli->win, border_w);
 
 	if (scr->tag != cli->tag) {
 		window_state(cli->win, XCB_ICCCM_WM_STATE_ICONIC);
