@@ -3993,8 +3993,29 @@ static uint8_t ignore_systray(xcb_window_t win)
 }
 #endif
 
+static bool is_inside_screen(struct screen *scr, int x, int y, int w, int h)
+{
+	return (x >= scr->x && x < (scr->x + scr->w) &&
+		y >= scr->y && y < (scr->y + scr->h));
+}
+
+static struct screen *find_screen_by_geom(int x, int y, int w, int h)
+{
+	struct list_head *cur;
+
+	list_walk(cur, &screens) {
+		struct screen *scr = list2screen(cur);
+		if (is_inside_screen(scr, x, y, w, h)) {
+			return scr;
+		}
+	}
+
+	return NULL;
+}
+
 static struct client *add_window(xcb_window_t win, uint8_t winflags)
 {
+	struct screen *tmp_scr;
 	struct list_head *cur, *tmp;
 	uint32_t flags;
 	struct tag *tag;
@@ -4118,7 +4139,17 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	if (scr && (!scr->panel.win || !scr->panel.gc)) {
 		scr = defscr;
 		tag = scr->tag;
-	} else if (!scr && !(scr = pointer2scr())) {
+	}
+
+	if (!scr && flags == 0) {
+		tmp_scr = find_screen_by_geom(g->x, g->y, g->width, g->height);
+		if (tmp_scr) {
+			scr = tmp_scr;
+			tag = scr->tag;
+		}
+	}
+
+	if (!scr && !(scr = pointer2scr())) {
 		scr = defscr;
 	}
 
