@@ -90,7 +90,7 @@ devstat()
 
 	printf "#!/bin/sh\ncat $out_\nsleep 30" > $FWM_HOME/tmp/wlan-stat
 	chmod +x $FWM_HOME/tmp/wlan-stat
-	SHELL="$FWM_HOME/tmp/wlan-stat" xterm -geometry 80x20
+	SHELL="$FWM_HOME/tmp/wlan-stat" xterm -geometry 80x25
 }
 
 info()

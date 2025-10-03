@@ -26,6 +26,7 @@ update()
 			icon_="" # normal
 		else
 			icon_="" # low
+			$FWM_HOME/bin/bat-alert
 		fi
 		rc=0
 	fi

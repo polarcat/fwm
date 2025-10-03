@@ -1,0 +1,11 @@
+#!/bin/sh
+
+script_=$FWM_HOME/tmp/bat-alert
+
+cat > $script_ << EOF
+printf "\033[1m Battery is low \033[0m\033[?25l"
+sleep 10
+EOF
+chmod 0755 $script_
+
+xterm -bg "#ff4020" -name "bat-alert" -geometry 16x1 -e $script_
