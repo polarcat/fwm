@@ -7,6 +7,7 @@ tmp_=$FWM_HOME/tmp
 out_=$tmp_/menu
 edid_=$tmp_/edid
 props_=$tmp_/xrandr-props.txt
+connected_=$tmp_/randr-connected.txt
 pri_=eDP-1
 
 hexdump_edid()
@@ -34,11 +35,14 @@ extract_sysfs_edid()
 	local i=0
 	local sysfs=/sys/class/drm
 
+	rm -f $edid_/sysfs/edids/*.txt
+	rm -f $edid_/sysfs/strings/*.txt
+
 	for card in $sysfs/card*; do
-		hexdump_edid $card/edid > $edid_/sysfs-$i.txt
+		hexdump_edid $card/edid > $edid_/sysfs/edids/$i.txt
 
 		strings $card/edid 2>/dev/null |\
-			tr -d '\n' > $edid_/sysfs-$i-strings.txt
+			tr -d '\n' > $edid_/sysfs/strings/$i.txt
 
 		i=$((i + 1))
 	done
@@ -46,74 +50,85 @@ extract_sysfs_edid()
 
 match_output()
 {
-	local i=0
-	local file1=''
-	local file2=''
+	local found=1
+	local strings_file=''
+	local output_name=''
 
-	while [ $i -lt 10 ]; do
-		file1=$edid_/sysfs-$i.txt
-		file2=$edid_/sysfs-$i-strings.txt
+	for randr_edid in $edid_/outputs/*; do
+		for sysfs_edid in $edid_/sysfs/edids/*.txt; do 
+			diff $randr_edid $sysfs_edid >/dev/null 2>&1
+			found=$?
 
-		diff >/dev/null 2>&1 $2 $file1
-		if [ $? -eq 0 ]; then
-			printf "\a\t$1\t$(cat $file2)\n" >> $out_
-			printf "\a\t$1\tnon-desktop\n" >> $out_
-			printf "\a\t$1\tdisconnect\n" >> $out_
-		fi
-
-		i=$((i + 1))
+			if [ $found -eq 0 ]; then
+				output_name=$(basename $randr_edid)
+				strings_file=$edid_/sysfs/strings/$(basename $sysfs_edid)
+				break
+			fi
+		done
 	done
+
+	if [ $found -eq 0 ]; then
+		printf "\a\t$output_name\t$(cat $strings_file 2>/dev/null)\n" >> $out_
+		printf "\a\t$output_name\tnon-desktop\n" >> $out_
+		printf "\a\t$output_name\tdisconnect\n" >> $out_
+	fi
 }
 
-extract_randr_edid()
+find_connected_displays()
 {
-	local found_edid=0
-	local found_output=0
 	local output=''
-	local lines=0
-	local lines_max=15
+	local found_output=0
+	local found_edid=0
+	local line=0
 
-	while read name status rest; do
-		# Do some filtering for embedded displays.
-		case $name in
-		eDP*)
-			continue;
-			;;
-		esac
+	xrandr |\
+	grep -E "^[A-Za-z0-9].*[[:blank:]]connected" |\
+	cut -f1 -d' ' |\
+	grep -v "eDP" > $connected_
 
-		case $status in
-		*connected)
-			output=$name
-			found_output=1
-			found_edid=0
-			lines=0
-			continue
-			;;
-		esac
-
-		if [ $found_output -eq 1 ]; then
-			case $name in
-			*EDID:)
-				found_output=0
-				found_edid=1
-				lines=0
+	while read name; do
+		line=$(grep -n $name $props_ | cut -f1 -d':')
+		tail -n +$line $props_ | while read name status rest; do
+			case $status in
+			disconnected)
+				break
+				;;
+			connected)
+				output=$name
+				found_output=1
+				echo -n > $edid_/outputs/${output}
 				continue
 				;;
 			esac
-		fi
 
-		if [ $found_edid -eq 1 ]; then
-			if [ $lines -le $lines_max ]; then
-				echo "$name" >> $edid_/randr-$output.txt
-			else
-				match_output $output $edid_/randr-$output.txt
-				found_edid=0
+			if [ $found_output -eq 0 ]; then
+				continue
 			fi
-			lines=$((lines + 1))
-		fi
-	done < $props_
 
-	rm -f $edid_/*.txt
+			case $name in
+			EDID:)
+				found_edid=1
+				continue
+				;;
+			esac
+
+			if [ $found_edid -eq 0 ]; then
+				continue
+			fi
+
+			case $name in
+			*[g-zA-Z-:+]*)
+				continue
+				;;
+			[0-9abcdef]*)
+				echo $name >> $edid_/outputs/${output}
+				;;
+			esac
+		done
+
+		found_output=0
+		found_edid=0
+	done < $connected_
 }
 
 connect_hmd()
@@ -143,17 +158,18 @@ handle_hmd()
 	esac
 }
 
+mkdir -p $edid_/sysfs/edids $edid_/sysfs/strings $edid_/outputs
+
 xrandr --prop > $props_
 
+find_connected_displays
 find_primary_output
-
-mkdir -p $edid_
 extract_sysfs_edid
 
 #printf "\a\t\n" > $out_
 printf "\a\t\t\n" > $out_
 
-extract_randr_edid
+match_output
 
 startmenu -b -d $out_ | while read icon item info; do
 	case $item in
