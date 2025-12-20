@@ -10,6 +10,13 @@ out_=$dir_/list
 tmp_=$dir_/temp
 sel_='nil'
 
+case $0 in
+*reset-clipboard)
+	rm -frv $dat_ $out_ $tmp_
+	exit $?
+	;;
+esac
+
 getsel_()
 {
 	case $3 in

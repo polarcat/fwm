@@ -106,7 +106,13 @@ ssid() { printf "\a\t$2\t$3\n" >> $out_; }
 
 cleanup()
 {
-	jedi ifconfig $dev down
+	cat > $FWM_HOME/tmp/wlan-stop << EOF
+#!/bin/sh
+printf "\033[2m\nDisconnect $1\033[0m\n"
+sudo ifconfig $1 down
+EOF
+	chmod +x $FWM_HOME/tmp/wlan-stop
+	SHELL="$FWM_HOME/tmp/wlan-stop" xterm -geometry 40x4
 }
 
 disconnect()

@@ -30,11 +30,14 @@ connect()
 		fi
 	done < /proc/net/route
 
-	jedi ifup $iface_ 2>&1 | while read line; do
-		echo "$line" >> $out_
-	done
-
-	showinfo -d $out_
+	cat > $FWM_HOME/tmp/lan-start << EOF
+#!/bin/sh
+printf "\033[1;32m\n Connect $iface_\033[0m\n\033[2m "
+sudo ifconfig $iface_ up
+sudo dhclient $iface_
+EOF
+        chmod +x $FWM_HOME/tmp/lan-start
+        SHELL="$FWM_HOME/tmp/lan-start" xterm -geometry 40x4
 }
 
 info()
@@ -45,7 +48,13 @@ info()
 
 disconnect()
 {
-	jedi ifdown $iface_
+	cat > $FWM_HOME/tmp/lan-stop << EOF
+#!/bin/sh
+printf "\033[2m\n Disconnect $iface_\033[0m\n\033[2m "
+sudo ifconfig $iface_ down
+EOF
+        chmod +x $FWM_HOME/tmp/lan-stop
+        SHELL="$FWM_HOME/tmp/lan-stop" xterm -geometry 40x4
 }
 
 printf "\a\t\t\n" > $out_

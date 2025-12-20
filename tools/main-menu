@@ -24,6 +24,7 @@ printf "\a\ttag editor\n" >> $out_
 #   fa-hotel (alias) [&#xf236;]
 #   fa-pause [&#xf04c;]
 printf "\a\twifi\n" >> $out_
+printf "\a\tlan\n" >> $out_
 printf "\a\tsound\n" >> $out_
 printf "\a\thmd\n" >> $out_
 printf "\a\tdisplay\n" >> $out_
@@ -57,6 +58,7 @@ startmenu -b -d $out_ | while read icon item; do
 	"grid"*) printf "make-grid" > $ctl_;;
 	"tag editor"*) tag-menu &;;
 	"wifi"*) wlan-menu &;;
+	"lan"*) lan-menu &;;
 	"sound"*) mixer-menu &;;
 	"hmd"*) hmd-menu &;;
 	"display"*) display-menu &;;
