@@ -127,12 +127,14 @@ typedef uint8_t strlen_t;
 #define CLI_FLG_RANCHOR (1 << 14)
 #define CLI_FLG_LDOCK (1 << 15)
 #define CLI_FLG_TINY (1 << 16)
+#define CLI_FLG_TOP (1 << 17)
 
 #define CLI_FLG_PANEL (CLI_FLG_DOCK | CLI_FLG_TRAY)
 
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
 #define SCR_FLG_CLIENT_RETAG (1 << 3)
+#define SCR_FLG_HMD (1 << 4)
 
 #define TAG_NAME_MAX 32
 
@@ -211,6 +213,7 @@ struct panel {
 //#define BTN_PLACE "" /* fa-paperclip [&#xf0c6;] */
 #define BTN_PLACE "" /* fa-plus [&#xf067;] */
 #define BTN_RETAG ""
+#define BTN_PIN  "" /* fa-thumb-tack [&#xf08d;] */
 
 #define BTN_HMD "" /* fa-cube [&#xf1b2;] */
 
@@ -233,6 +236,7 @@ static struct toolbar_item toolbar_items[] = {
 	{ BTN_BOTTOM, slen(BTN_BOTTOM), },
 	{ BTN_EXPAND, slen(BTN_EXPAND), },
 	{ BTN_RETAG, slen(BTN_RETAG), },
+	{ BTN_PIN, slen(BTN_PIN), },
 	{ BTN_MOVE, slen(BTN_MOVE), },
 	{ BTN_MOUSE, slen(BTN_MOUSE), },
 };
@@ -422,7 +426,7 @@ enum winpos {
 };
 
 static uint8_t last_winpos;
-static xcb_window_t stashed_win;
+static xcb_window_t top_win;
 
 enum dir {
 	DIR_NEXT = 1,
@@ -445,7 +449,7 @@ static void grow_window(struct arg *);
 static void make_grid(struct arg *);
 static void show_toolbar(struct arg *);
 static void flag_window(struct arg *);
-static void stash_window(struct arg *);
+static void top_window(struct arg *);
 
 struct keymap {
 	uint16_t mod;
@@ -497,8 +501,8 @@ static struct keymap kmap_def[] = {
 	  place_window, WIN_POS_BOTTOM_FILL, },
 	{ MOD, XK_F9, 0, "mod_f9", "full screen",
 	  place_window, WIN_POS_FILL, },
-	{ MOD, XK_F10, 0, "mod_f10", "stash window",
-	  stash_window, },
+	{ MOD, XK_F10, 0, "mod_f10", "top window",
+	  top_window, },
 	{ MOD, XK_F3, 0, "mod_f3", "make grid",
 	  make_grid, },
 	{ MOD, XK_F4, 0, "mod_f4", "show toolbar",
@@ -927,7 +931,11 @@ static struct screen *find_hmd_screen(void)
 	list_walk(cur, &screens) {
 		scr = list2screen(cur);
 		if (strcmp(scr->name, buf) == 0) {
+			ii("HMD screen '%s' id %u\n", scr->name, scr->id);
+			scr->flags |= SCR_FLG_HMD;
 			return scr;
+		} else {
+			scr->flags &= ~SCR_FLG_HMD;
 		}
 	}
 
@@ -1626,21 +1634,15 @@ static void raise_window(xcb_window_t win)
 		xcb_configure_window_checked(dpy, win, mask, val);
 }
 
-static void stash_window(struct arg *arg)
+static void top_window(struct arg *arg)
 {
 	if (!arg || !arg->cli) {
 		return;
-	} else if (stashed_win == XCB_WINDOW_NONE) {
-		stashed_win = arg->cli->win;
-		xcb_unmap_window_checked(dpy, stashed_win);
+	} else if (arg->cli->win == top_win) {
+		top_win = XCB_WINDOW_NONE;
 	} else {
-		xcb_map_window_checked(dpy, stashed_win);
-		raise_window(stashed_win);
-		focus_window(stashed_win);
-		stashed_win = XCB_WINDOW_NONE;
+		top_win = arg->cli->win;
 	}
-
-	xcb_flush(dpy);
 }
 
 static void print_menu(struct screen *scr)
@@ -1882,7 +1884,7 @@ static int toolbox_obscured(struct client *cli, int16_t x, int16_t y)
 		ww = xx + it->w;
 		hh = yy + it->h;
 
-		if (cli->ts < it->ts &&
+		if (((cli->ts < it->ts) | (it->win == top_win)) &&
 		    x >= xx && x + d <= ww && y >= yy && y + d <= hh) {
 			return 1;
 		}
@@ -3033,8 +3035,20 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 	else
 		arg.cli = prev_client(arg.cli);
 
-	if (!arg.cli)
+	if (!arg.cli) {
 		return NULL;
+	} else if (arg.cli->win == top_win) {
+		show_toolbox(arg.cli);
+
+		if (dir == DIR_NEXT)
+			arg.cli = next_client(arg.cli);
+		else
+			arg.cli = prev_client(arg.cli);
+
+		if (!arg.cli) {
+			return NULL;
+		}
+	}
 
 	tt("scr %u tag '%s' next cli %p, win %#x\n",
 	   scr->id, scr->tag->name, arg.cli, arg.cli->win);
@@ -3046,6 +3060,11 @@ static struct client *switch_window(struct screen *scr, enum dir dir)
 		center_pointer(arg.cli);
 
 	scr->flags &= ~SCR_FLG_SWITCH_WINDOW_NOWARP;
+
+	if (top_win != XCB_WINDOW_NONE) {
+		raise_window(top_win);
+	}
+
 	xcb_flush(dpy);
 
 	return arg.cli;
@@ -3564,6 +3583,10 @@ static void show_windows(struct tag *tag, uint8_t focus)
 	}
 
 	raise_client(&arg);
+
+	if (top_win != XCB_WINDOW_NONE) {
+		raise_window(top_win);
+	}
 }
 
 static void hide_windows(struct tag *tag)
@@ -3851,6 +3874,10 @@ static void del_window(xcb_window_t win)
 	struct client *cli;
 
 	dd("delete win %#x\n", win);
+
+	if (top_win == win) {
+		top_win = XCB_WINDOW_NONE;
+	}
 
 	if (toolbar.cli && toolbar.cli->win == win)
 		hide_toolbar();
@@ -4145,18 +4172,21 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 
 	if (scr && (!scr->panel.win || !scr->panel.gc)) {
 		scr = defscr;
-		tag = scr->tag;
 	}
 
 	if (!scr && flags == 0) {
 		tmp_scr = find_screen_by_geom(g->x, g->y, g->width, g->height);
 		if (tmp_scr) {
 			scr = tmp_scr;
-			tag = scr->tag;
 		}
 	}
 
 	if (!scr && !(scr = pointer2scr())) {
+		scr = defscr;
+	}
+
+	if (scr && defscr && (scr->flags & SCR_FLG_HMD)) {
+		tt("Skip HMD '%s' %d for win %#x\n", scr->id, scr->name, win);
 		scr = defscr;
 	}
 
@@ -4337,6 +4367,10 @@ out:
 	if (!cli || (cli && (!(cli->flags & CLI_FLG_PANEL)))) {
 		if (scr && !rescan_)
 			scr->panel.refresh = 1;
+	}
+
+	if (top_win != XCB_WINDOW_NONE) {
+		raise_window(top_win);
 	}
 
 	free(a);
@@ -5626,6 +5660,9 @@ static void init_outputs(void)
 	}
 
 	outputs_ready();
+
+	/* find and flag HMD display */
+	find_hmd_screen();
 }
 
 static void load_color(const char *path, struct color *color)
@@ -6101,16 +6138,20 @@ static void toolbar_button_press(void)
 		return; /* special case */
 	} else if (focused_item->str == (const char *) BTN_MOUSE) {
 		retag_cli = NULL;
+	} else if (focused_item->str == (const char *) BTN_PIN) {
+		top_win = arg.cli->win;
 	} else if (focused_item->str == (const char *) BTN_HMD) {
 		if ((scr = find_hmd_screen()) != NULL) {
-			tmp = curscr;
-			curscr = scr;
-			do_retag(curscr->tag, arg.cli);
-			arg.cli->pos = WIN_POS_FILL;
-			place_window(&arg);
-			xcb_map_window_checked(dpy, arg.cli->win);
-			focus_screen(0);
-			curscr = tmp;
+			if (arg.cli->scr != scr) {
+				tmp = curscr;
+				curscr = scr;
+				do_retag(curscr->tag, arg.cli);
+				arg.cli->pos = WIN_POS_FILL;
+				place_window(&arg);
+				xcb_map_window_checked(dpy, arg.cli->win);
+				focus_screen(0);
+				curscr = tmp;
+			}
 		}
 	}
 
