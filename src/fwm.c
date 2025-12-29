@@ -4020,10 +4020,29 @@ static uint8_t ignore_systray(xcb_window_t win)
 }
 #endif
 
-static bool is_fullscreen_size(struct screen *scr, int x, int y, int w, int h)
+static bool is_fullscreen_hmd(struct screen *scr, xcb_get_geometry_reply_t *g)
 {
-	return (x == scr->x && y == scr->y &&
-		w == scr->w && h == scr->h);
+	return (
+		g->x == scr->x &&
+		g->y == scr->y &&
+		(
+			(g->width == scr->w && g->height == scr->h) ||
+			/*
+			 * This is to handle HMDs which require SBS window.
+			 * The problem is manifested when different kind of
+			 * HMDs are plugged one after and display re-detection
+			 * has not been triggered.
+			 */
+			(g->width == scr->w / 2) ||
+			(g->width / 2 == scr->w)
+		)
+		);
+}
+
+static bool is_fullscreen_size(struct screen *scr, xcb_get_geometry_reply_t *g)
+{
+	return (g->x == scr->x && g->y == scr->y &&
+		g->width == scr->w && g->height == scr->h);
 }
 
 static bool is_inside_screen(struct screen *scr, int x, int y, int w, int h)
@@ -4062,6 +4081,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
+	bool fullscreen_hmd;
 
 	/* save current pointer coords */
 	pointer2coord(&save_x_, &save_y_, NULL);
@@ -4185,12 +4205,15 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		scr = defscr;
 	}
 
-	if (scr && defscr && (scr->flags & SCR_FLG_HMD)) {
-		tt("Skip HMD '%s' %d for win %#x\n", scr->id, scr->name, win);
+	fullscreen_hmd = is_fullscreen_hmd(scr, g);
+
+	if ((scr->flags & SCR_FLG_HMD) && !fullscreen_hmd) {
+		tt("Skip HMD '%s' wh (%u %u) for win %#x\n", scr->name,
+		   scr->w, scr->h, win);
 		scr = defscr;
 	}
 
-	if (is_fullscreen_size(scr, g->x, g->y, g->width, g->height)) {
+	if (fullscreen_hmd || is_fullscreen_size(scr, g)) {
 		if (scr->panel.win == XCB_NONE) {
 			flags |= CLI_FLG_FULLSCREEN;
 		}
