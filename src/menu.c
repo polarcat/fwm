@@ -37,11 +37,17 @@
 
 #ifdef DEBUG
 #undef dd
-#define dd(...) fprintf(stderr, __VA_ARGS__)
+#define dd(...) fprintf(stderr, "D " __VA_ARGS__)
 #else /* ! DEBUG */
 #undef dd
 #define dd(...) ;
 #endif /* DEBUG */
+
+#undef ww
+#define ww(...) fprintf(stderr, "W " __VA_ARGS__)
+
+#undef ii
+#define ii(...) fprintf(stderr, "I " __VA_ARGS__)
 
 #define FONT_H_MARGIN 2
 #define COLOR_DISTANCE 10
@@ -144,6 +150,7 @@ struct row {
 	struct column *cols;
 };
 
+static char data_buf_[128];
 static char *data_;
 static size_t data_size_;
 
@@ -163,6 +170,12 @@ static uint8_t search_col_idx_;
 static uint8_t selidx_;
 static uint8_t page_idx_;
 static uint8_t follow_;
+
+static uint8_t wait_visible_;
+
+static uint8_t hide_input_;
+static char hidden_buf_[128];
+static uint8_t hidden_idx_;
 
 static void get_space_width(fontid_t font_id)
 {
@@ -258,12 +271,18 @@ static void draw_search_bar(void)
 	struct xcb xcb = { ctx_.dpy, ctx_.win, ctx_.gc };
 	int16_t x = x_pad_ * 2;
 	int16_t y = draw_rect(rows_per_page_, 0) + ctx_.text_y;
-	uint8_t len = search_idx_ + 1;
+	uint8_t len;
 	char *str = search_buf_;
 
-	search_buf_[0] = '>';
-	search_buf_[1] = ' ';
-	search_buf_[search_idx_] = '_';
+	if (hide_input_) {
+		len = hidden_idx_ + 1;
+		y += 3 * (ctx_.space_w / 3);
+	} else {
+		str[0] = '>';
+		str[1] = ' ';
+		str[search_idx_] = '_';
+		len = search_idx_ + 1;
+	}
 
 	set_text_str(text_.txt, str, len);
 	set_text_pos(text_.txt, x, y);
@@ -652,6 +671,15 @@ static void key_release(xcb_key_press_event_t *e)
 	}
 }
 
+static void done()
+{
+	if (hide_input_) {
+		hidden_buf_[hidden_idx_] = '\0';
+		printf("%s", hidden_buf_);
+	}
+	ctx_.done = 1;
+}
+
 static void key_press(xcb_key_press_event_t *e)
 {
 	xcb_keysym_t sym;
@@ -667,6 +695,33 @@ static void key_press(xcb_key_press_event_t *e)
 
 	sym = xcb_key_press_lookup_keysym(ctx_.syms, e, 0);
 
+	if (hide_input_) {
+		if (sym == XK_BackSpace && hidden_idx_ == 0) {
+			search_buf_[0] = '\0';
+			hidden_buf_[0] = '\0';
+		} else if (sym == XK_BackSpace && hidden_idx_ > 0) {
+			hidden_idx_--;
+			search_buf_[hidden_idx_] = '\0';
+			hidden_buf_[hidden_idx_] = '\0';
+		} else if (sym == XK_Return) {
+			done();
+		} else if (sym == XK_Shift_L || sym == XK_Shift_R) {
+			level_ = 1; /* expect upper-case symbols */
+			return;
+		} else if (sym < 0x21 || sym > 0x7e) {
+			return;
+		} else if ((sym = get_keysyms(e->detail))) {
+			if (hidden_idx_ < sizeof(hidden_buf_)) {
+				search_buf_[hidden_idx_] = '*';
+				hidden_buf_[hidden_idx_] = sym;
+				hidden_idx_++;
+			}
+		}
+
+		draw_search_bar();
+		return;
+	}
+
 	if (sym == XK_Shift_L || sym == XK_Shift_R) {
 		level_ = 1; /* expect upper-case symbols */
 		return;
@@ -678,7 +733,7 @@ static void key_press(xcb_key_press_event_t *e)
 		control_ = 1; /* expect command */
 		return;
 	} else if (sym == XK_Escape) {
-		ctx_.done = 1;
+		done();
 	} else if (sym == XK_Next && pages_num_ > 1 &&
 		   page_idx_ < pages_num_ - 1) {
 		page_down();
@@ -705,24 +760,19 @@ static void key_press(xcb_key_press_event_t *e)
 		if (!print_input_ && !append_) {
 			printf("%s\n", str);
 		} else if (print_input_ && !append_) {
-			fprintf(stderr, "%s:%d\n", __func__, __LINE__);
 			search_buf_[search_idx_] = '\0';
 			printf("%s\n", &search_buf_[PROMPT_LEN]);
 		} else if (search_idx_) {
-			fprintf(stderr, "%s:%d\n", __func__, __LINE__);
 			search_buf_[search_idx_] = '\0';
 			printf("%s\t%s\n", str, &search_buf_[PROMPT_LEN]);
 		} else {
-			fprintf(stderr, "%s:%d\n", __func__, __LINE__);
 			printf("\n");
 		}
 
-		ctx_.done = 1;
-	} else {
-		if ((sym = get_keysyms(e->detail))) {
-			warp_ = 1;
-			find_row(sym);
-		}
+		done();
+	} else if ((sym = get_keysyms(e->detail))) {
+		warp_ = 1;
+		find_row(sym);
 	}
 
 	follow_ = 0;
@@ -1103,6 +1153,8 @@ static void help(const char *name)
 	 "  -a, --append                 append entered text to result\n"
 	 "  -p, --print-input            only print entered text\n"
 	 "  -b, --search-bar             show search bar\n"
+	 "  -x, --hide-input             hide input in the search bar\n"
+	 "  -w, --wait-visible           wait until window becomes fully visible\n"
 	 "  -0, --normalfg <hex>         rgb color, default 0x%x\n"
 	 "  -1, --normalbg <hex>         rgb color, default 0x%x\n"
 	 "  -2, --activefg <hex>         rgb color, default 0x%x\n"
@@ -1202,6 +1254,11 @@ static uint8_t opts(int argc, char *argv[])
 			print_input_ = 1;
 		} else if (opt(arg, "-b", "--search-bar")) {
 			search_bar_ = 1;
+		} else if (opt(arg, "-x", "--hide-input")) {
+			hide_input_ = 1;
+			search_bar_ = 1;
+		} else if (opt(arg, "-w", "--wait-visible")) {
+			wait_visible_ = 1;
 		} else if (opt(arg, "-0", "--normal-foreground")) {
 			i++;
 			if (argv[i])
@@ -1275,8 +1332,21 @@ static xcb_atom_t get_atom(const char *str, uint8_t len)
 	return a;
 }
 
-#ifdef STAY_OBSCURED
-static void wait(void)
+static void focus_window()
+{
+	uint32_t val[1] = { XCB_STACK_MODE_ABOVE, };
+	uint16_t mask = XCB_CONFIG_WINDOW_STACK_MODE;
+
+	xcb_configure_window_checked(ctx_.dpy, ctx_.win, mask, val);
+
+	xcb_change_property_checked(ctx_.dpy, XCB_PROP_MODE_REPLACE,
+		ctx_.scr->root, ctx_.win, XCB_ATOM_WINDOW, 32, 1, &ctx_.win);
+	xcb_set_input_focus_checked(ctx_.dpy, XCB_NONE, ctx_.win,
+		XCB_CURRENT_TIME);
+	xcb_flush(ctx_.dpy);
+}
+
+static void wait_visible(void)
 {
 	int state;
 	xcb_generic_event_t *e;
@@ -1294,7 +1364,6 @@ static void wait(void)
 			break;
 	}
 }
-#endif
 
 static void button_press(xcb_button_press_event_t *e)
 {
@@ -1304,7 +1373,7 @@ static void button_press(xcb_button_press_event_t *e)
 	case MOUSE_BTN_RIGHT:
 		*(selrow_->str + selrow_->len) = '\0';
 		printf("%s\n", selrow_->str);
-		ctx_.done = 1;
+		done();
 		break;
 	case MOUSE_BTN_FWD:
 		line_up();
@@ -1334,13 +1403,23 @@ static uint8_t events(uint8_t wait)
 		switch (((xcb_visibility_notify_event_t *) e)->state) {
 		case XCB_VISIBILITY_PARTIALLY_OBSCURED: /* fall through */
 			dd("XCB_VISIBILITY_PARTIALLY_OBSCURED\n");
+			if (hide_input_) {
+				break;
+			}
 		case XCB_VISIBILITY_FULLY_OBSCURED:
 			dd("XCB_VISIBILITY_FULLY_OBSCURED\n");
-#ifdef STAY_OBSCURED
-			wait();
-#else
-			ctx_.done = 1;
-#endif
+			if (hide_input_) {
+				focus_window();
+			} else {
+				if (wait_visible_) {
+					wait_visible();
+				} else {
+					done(); // By default it is expected
+						// that window is fully
+						// visible. Otherwise close
+						// window and ungrab pointer
+				}
+			}
 			break;
 		case XCB_VISIBILITY_UNOBSCURED:
 			dd("XCB_VISIBILITY_UNOBSCURED\n");
@@ -1350,12 +1429,12 @@ static uint8_t events(uint8_t wait)
 	case XCB_UNMAP_NOTIFY:
 		dd("XCB_UNMAP_NOTIFY\n");
 		xcb_ungrab_pointer(ctx_.dpy, XCB_CURRENT_TIME);
-		ctx_.done = 1;
+		done();
 		break;
 	case XCB_DESTROY_NOTIFY:
 		dd("XCB_DESTROY_NOTIFY\n");
 		xcb_ungrab_pointer(ctx_.dpy, XCB_CURRENT_TIME);
-		ctx_.done = 1;
+		done();
 		break;
 	case XCB_ENTER_NOTIFY:
 		dd("XCB_ENTER_NOTIFY\n");
@@ -1364,7 +1443,7 @@ static uint8_t events(uint8_t wait)
 	case XCB_LEAVE_NOTIFY:
 		dd("XCB_LEAVE_NOTIFY\n");
 		xcb_ungrab_pointer(ctx_.dpy, XCB_CURRENT_TIME);
-		ctx_.done = 1;
+		done();
 		break;
 	case XCB_EXPOSE:
 		dd("XCB_EXPOSE\n");
@@ -1396,7 +1475,7 @@ int main(int argc, char *argv[])
 {
 	uint8_t ret = 1;
 	struct pollfd pfd;
-	int fd;
+	int fd = -1;
 	uint32_t mask;
 	xcb_screen_t *scr;
 	uint32_t val[2];
@@ -1431,8 +1510,26 @@ int main(int argc, char *argv[])
 	val[1] = 0;
 	xcb_create_gc(ctx_.dpy, ctx_.gc, scr->root, mask, val);
 
-	if ((fd = init_menu()) < 0)
-		goto err;
+	if (!hide_input_) {
+		if ((fd = init_menu()) < 0)
+			goto err;
+	} else {
+		uint32_t sz1 = strlen(ctx_.name);
+		uint32_t sz2 = sizeof(data_buf_) - 3;
+
+		if (sz1 > sz2) {
+			sz1 = sz2;
+		}
+
+		memcpy(data_buf_, ctx_.name, sz1);
+		data_buf_[sz1] = '\n';
+
+		data_ = data_buf_;
+		data_size_ = sz1 + 1;
+
+		if (init_rows() != 0)
+			goto err;
+	}
 
 	page_h_ = ctx_.row_h * rows_per_page_;
 
@@ -1483,6 +1580,8 @@ int main(int argc, char *argv[])
 	if (init_xkb() < 0)
 		goto err;
 
+	ctx_.scr = scr;
+
 	while (!ctx_.done)
 		events(1);
 
@@ -1515,6 +1614,11 @@ err:
 	destroy_text(&text_.txt);
 	close_font(icon_.font_id);
 	close_font(text_.font_id);
+
+	if (data_ != NULL) {
+		munmap(data_, data_size_);
+	}
+	close(fd);
 
 	return ret;
 }
