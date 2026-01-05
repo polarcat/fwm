@@ -2521,6 +2521,11 @@ static void spawn_cleanup(int sig)
 	}
 }
 
+static void shutdown_wm(int sig)
+{
+	shutdown = 1;
+}
+
 static void spawn(struct arg *arg)
 {
 	uint16_t len = homelen + sizeof("/keys/") + UCHAR_MAX;
@@ -3755,6 +3760,79 @@ static struct tag *configured_tag(xcb_window_t win)
 	}
 
 	return NULL;
+}
+
+static void store_current_tag(time_t now_time)
+{
+	FILE *f;
+	char path[homelen + sizeof("/screens/255/tags/255/time")];
+
+	snprintf(path, sizeof(path), "%s/screens/%u/tags/%u/time", homedir,
+		defscr->id, defscr->tag->id);
+	if ((f = fopen(path, "w+")) == NULL) {
+		ww("failed to open '%s'\n", path);
+	} else {
+		fprintf(f, "0x%lx", now_time);
+		fclose(f);
+	}
+}
+
+static void restore_current_tag()
+{
+	DIR *d;
+	int fd;
+	struct dirent *ent;
+	struct list_head *cur;
+	char path[homelen + sizeof("/screens/255/tags/255/time")];
+	char tag_time[sizeof("0xffffffff")];
+	uint8_t tag_id;
+	time_t max_time;
+	time_t now_time;
+
+	snprintf(path, sizeof(path), "%s/screens/%u/tags", homedir, defscr->id);
+
+	if ((d = opendir(path)) == NULL) {
+		ee("failed to open '%s'\n", path);
+		return;
+	}
+
+	chdir(path);
+
+	tag_id = 0;
+	max_time = 0;
+	while ((ent = readdir(d)) != NULL) {
+		if (ent->d_name[0] == '.') {
+			continue;
+		}
+
+		snprintf(path, sizeof(path), "%s/time", ent->d_name);
+
+		if ((fd = open(path, O_RDONLY)) < 0) {
+			tt("failed to open '%s'\n", path);
+			continue;
+		} else {
+			read(fd, tag_time, sizeof(tag_time));
+			close(fd);
+
+			now_time = strtol(tag_time, NULL, 16);
+			if (now_time > max_time) {
+				max_time = now_time;
+				tag_id = atoi(ent->d_name);
+			}
+		}
+	}
+
+	list_walk(cur, &defscr->tags) {
+		struct tag *tag = list2tag(cur);
+		if (tag->id == tag_id) {
+			ii("restore tag '%s'\n", tag->name);
+			focus_tag(defscr, tag);
+			break;
+		}
+	}
+
+	chdir(homedir);
+	closedir(d);
 }
 
 static void arrange_dock(struct screen *scr)
@@ -5686,6 +5764,8 @@ static void init_outputs(void)
 
 	/* find and flag HMD display */
 	find_hmd_screen();
+
+	restore_current_tag();
 }
 
 static void load_color(const char *path, struct color *color)
@@ -6785,6 +6865,7 @@ static void handle_configure_notify(xcb_configure_notify_event_t *e)
 			shutdown = true;
 			ii("--> default screen wh (%u, %u)\n", defscr->w, defscr->h);
 			ii("--> root size changed wh (%u, %u)\n", e->width, e->height);
+			store_current_tag(time(NULL));
 		}
 	} else if (e->window != rootscr->root && e->border_width) {
 		border_width(e->window, BORDER_WIDTH);
@@ -7356,6 +7437,9 @@ int main()
 	if (signal(SIGCHLD, spawn_cleanup) == SIG_ERR)
 		panic("SIGCHLD handler failed\n");
 
+	if (signal(SIGTERM, shutdown_wm) == SIG_ERR)
+		panic("SIGTERM handler failed\n");
+
 	disp = getdisplay();
 	init_colors();
 	dpy = xcb_connect(NULL, NULL);
@@ -7431,10 +7515,13 @@ int main()
 		}
 	}
 
+	store_current_tag(time(NULL));
+
 	xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
 			    XCB_CURRENT_TIME);
 	xcb_flush(dpy);
 
 	clean();
+	ii("exit\n");
 	return 0;
 }
