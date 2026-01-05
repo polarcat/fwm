@@ -340,6 +340,13 @@ static int16_t motion_init_y;
 static int16_t save_x_;
 static int16_t save_y_;
 
+struct wininfo {
+	uint8_t scr_id;
+	uint8_t tag_id;
+	int16_t x;
+	int16_t y;
+} __attribute__((__packed__));
+
 struct tag {
 	struct list_head head;
 	struct list_head clients;
@@ -1242,12 +1249,12 @@ static void center_pointer(struct client *cli)
 }
 
 static void restore_window(xcb_window_t win, struct screen **scr,
-			   struct tag **tag)
+	struct tag **tag, int16_t *x, int16_t *y)
 {
 	struct list_head *cur;
 	FILE *f;
 	char path[homelen + sizeof("/.session/0xffffffffffffffff")];
-	uint8_t data[2];
+	struct wininfo info;
 
 	*scr = NULL;
 	*tag = NULL;
@@ -1258,13 +1265,13 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 		return;
 	}
 
-	data[0] = data[1] = 0;
-	fread(data, sizeof(data), 1, f); /* continue with 0,0 upon failure */
+	memset(&info, 0, sizeof(info));
+	fread(&info, sizeof(info), 1, f); /* continue with 0,0 upon failure */
 	fclose(f);
 
 	list_walk(cur, &screens) {
 		struct screen *tmp = list2screen(cur);
-		if (data[0] == tmp->id) {
+		if (info.scr_id == tmp->id) {
 			*scr = tmp;
 			break;
 		}
@@ -1275,23 +1282,28 @@ static void restore_window(xcb_window_t win, struct screen **scr,
 
 	list_walk(cur, &(*scr)->tags) {
 		struct tag *tmp = list2tag(cur);
-		if (data[1] == tmp->id) {
+		if (info.tag_id == tmp->id) {
 			*tag = tmp;
-			tt("restore win %#x scr %d tag %d '%s'\n", win,
-			   (*scr)->id, (*tag)->id, (*tag)->name);
+			*x = (*scr)->x + info.x;
+			*y = (*scr)->y + info.y;
+
+			tt("restore win %#x (%d %d) scr %d (%d %d) tag %d '%s'\n",
+			   win, info.x, info.y,
+			   (*scr)->id, (*scr)->x, (*scr)->y,
+			   (*tag)->id, (*tag)->name);
 			return;
 		}
 	}
 }
 
-static void store_window(xcb_window_t win, uint8_t *data, uint8_t size, uint8_t clean)
+static void store_window(xcb_window_t win, struct wininfo *info)
 {
 	FILE *f;
 	char path[homelen + sizeof("/.session/0xffffffffffffffff")];
 
 	sprintf(path, "%s/.session/%#x", homedir, win);
 
-	if (clean) {
+	if (info == NULL) {
 		errno = 0;
 		unlink(path);
 		tt("clean %s, errno=%d\n", path, errno);
@@ -1304,13 +1316,13 @@ static void store_window(xcb_window_t win, uint8_t *data, uint8_t size, uint8_t 
 	}
 
 	errno = 0;
-	fwrite(data, size, 1, f); /* ignore errors */
+	fwrite((void *)info, sizeof(*info), 1, f); /* ignore errors */
 	fclose(f);
 }
 
 static void store_client(struct client *cli, uint8_t clean)
 {
-	uint8_t data[2];
+	struct wininfo info;
 
 	if (window_status(cli->win) == WIN_STATUS_UNKNOWN) { /* gone */
 		clean = 1;
@@ -1321,14 +1333,31 @@ static void store_client(struct client *cli, uint8_t clean)
 	}
 
 	if (clean) {
-		store_window(cli->win, NULL, 0, clean);
+		store_window(cli->win, NULL);
 		tt("clean win %#x\n", cli->win);
 	} else {
-		data[0] = cli->scr->id;
-		data[1] = cli->tag->id;
-		store_window(cli->win, data, sizeof(data), clean);
-		tt("store win %#x scr %d tag %d '%s'\n", cli->win,
-		   cli->scr->id, cli->tag->id, cli->tag->name);
+		info.scr_id = cli->scr->id;
+		info.tag_id = cli->tag->id;
+		info.x = cli->x - cli->scr->x;
+		info.y = cli->y - cli->scr->y;
+		store_window(cli->win, &info);
+		tt("store win %#x (%d %d) scr %d (%d %d) tag %d '%s'\n",
+		   cli->win, info.x, info.y,
+		   cli->scr->id, cli->scr->x, cli->scr->y,
+		   cli->tag->id, cli->tag->name);
+	}
+}
+
+static void store_clients()
+{
+	struct list_head *scr_head;
+	struct list_head *cli_head;
+
+	list_walk(scr_head, &screens) {
+		struct screen *scr = list2screen(scr_head);
+		list_walk(cli_head, &scr->tag->clients) {
+			store_client(list2cli(cli_head), 0);
+		}
 	}
 }
 
@@ -4178,7 +4207,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 		if (errno != ENOENT) {
 			ee("failed to get geometry for win %#x\n", win);
 		}
-		store_window(win, NULL, 0, 1);
+		store_window(win, NULL);
 		goto out;
 	}
 
@@ -4187,7 +4216,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 
 	if (!a) {
 		ee("xcb_get_window_attributes() failed\n");
-		store_window(win, NULL, 0, 1);
+		store_window(win, NULL);
 		goto out;
 	}
 
@@ -4196,7 +4225,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	if (!g->depth && !a->colormap) {
 		tt("win %#x, root %#x, colormap=%#x, class=%u, depth=%u\n", win,
 		   g->root, a->colormap, a->_class, g->depth);
-		store_window(win, NULL, 0, 1);
+		store_window(win, NULL);
 		tt("ignore window %#x with unknown colormap\n", win);
 		goto out;
 	}
@@ -4266,7 +4295,7 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	tag = NULL;
 
 	if ((winflags & WIN_FLG_SCAN) && !(flags & CLI_FLG_PANEL))
-		restore_window(win, &scr, &tag);
+		restore_window(win, &scr, &tag, &g->x, &g->y);
 
 	if (scr && (!scr->panel.win || !scr->panel.gc)) {
 		scr = defscr;
@@ -7516,6 +7545,7 @@ int main()
 	}
 
 	store_current_tag(time(NULL));
+	store_clients();
 
 	xcb_set_input_focus(dpy, XCB_NONE, XCB_INPUT_FOCUS_POINTER_ROOT,
 			    XCB_CURRENT_TIME);
