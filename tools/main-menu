@@ -41,7 +41,7 @@ exit_fwm()
 		esac
 		xrandr --output "$name" --brightness 0
 	done
-	stopcmd fwm
+	killall fwm
 }
 
 startmenu -b -d $out_ | while read icon item; do
