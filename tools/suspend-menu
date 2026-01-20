@@ -21,9 +21,8 @@ suspend()
 		sleep 1
 	done
 
-#	xdotool key Alt+Control+F1
 	xscreensaver-command --lock
-#	sleep 2
+	sleep 3 # give it some time before screen gets blank
 	jedi pm-suspend >$log_ 2>&1
 }
 
