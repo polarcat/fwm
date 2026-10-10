@@ -851,7 +851,7 @@ fontid_t open_font(const char *path, uint16_t hdpi, uint16_t vdpi)
 		if (!fontcache_[i].face) {
 			font_id = i;
 		} else if (fontcache_[i].font_hash == font_hash) {
-			ww("font '%s' already registered\n", path);
+			dd("font '%s' already registered\n", path);
 			return i;
 		}
 	}

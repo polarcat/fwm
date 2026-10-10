@@ -8,10 +8,12 @@
 #ifndef MISC_H
 #define MISC_H
 
+#include <time.h>
 #include <errno.h>
 #include <ctype.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include <inttypes.h>
 #include <sys/uio.h>
@@ -101,6 +103,15 @@
 #else
 #define te(fmt, ...) do {} while(0)
 #endif
+
+#ifndef LOG_TAG
+#define LOG_TAG "fwm: "
+#endif
+
+#define logi(fmt, ...) ii(LOG_TAG fmt "\n", ##__VA_ARGS__)
+#define logw(fmt, ...) ww(LOG_TAG fmt "\n", ##__VA_ARGS__)
+#define loge(fmt, ...) ee(LOG_TAG fmt "\n", ##__VA_ARGS__)
+#define logd(fmt, ...) dd(LOG_TAG fmt "\n", ##__VA_ARGS__)
 
 static inline void hexdump(const char *buf, int16_t len)
 {
@@ -229,6 +240,20 @@ remake:
 	}
 
 	return open(path, O_RDONLY | O_NONBLOCK, S_IRUSR);
+}
+
+static inline void sleep_ms(int ms)
+{
+	struct timespec ts = {
+		.tv_sec = ms / 1000,
+		.tv_nsec = (ms % 1000) * 1000000L,
+	};
+
+	while (nanosleep(&ts, NULL) == -1) {
+		if (errno != EINTR) {
+			break;
+		}
+	}
 }
 
 #endif /* MISC_H */

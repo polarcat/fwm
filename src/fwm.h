@@ -9,6 +9,7 @@
 #define FWM_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifndef FONT1_SIZE
 #define FONT1_SIZE 10.5
