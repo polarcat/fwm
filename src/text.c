@@ -577,9 +577,9 @@ static inline void draw_glyph(struct draw *d)
 					if (rgb.b < d->text->bg.b)
 						rgb.b = d->text->bg.b;
 				} else {
-					rgb.r = (255 - c) * d->text->bg.r / 255;
-					rgb.g = (255 - c) * d->text->bg.g / 255;
-					rgb.b = (255 - c) * d->text->bg.b / 255;
+					rgb.r = (255 - c) * d->text->fg.r / 255;
+					rgb.g = (255 - c) * d->text->fg.g / 255;
+					rgb.b = (255 - c) * d->text->fg.b / 255;
 
 					if (rgb.r > d->text->bg.r) {
 						rgb.r = d->text->bg.r;
@@ -593,6 +593,8 @@ static inline void draw_glyph(struct draw *d)
 						rgb.r = d->text->bg.b;
 						rgb.g = d->text->bg.b;
 						rgb.b = d->text->bg.b;
+					} else {
+						rgb.data = d->text->fg.data;
 					}
 				}
 #ifdef DRAW_BY_PIXEL
