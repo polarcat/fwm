@@ -6,4 +6,9 @@ src = src/rtlink.c
 $(target): FORCE
 	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
-include $(common)
+install: FORCE
+	@unlink $(basedir)/bin/$(out);\
+	cp -v bin/$(out) $(basedir)/bin/;\
+
+clean:
+	-rm -f bin/$(out)
