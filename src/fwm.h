@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define FWM_SHARED_DIR "/dev/shm/fwm"
+
 #ifndef FONT1_SIZE
 #define FONT1_SIZE 10.5
 #endif

@@ -1,11 +1,17 @@
 out = fwm-dock
 src = src/dock.c src/text.c
-cflags += $(ftcflags)
-ldflags += $(ftldflags) -lxcb
 
-.PHONY: FORCE clean
+cflags += $(ft_cflags) $(lua_cflags) $(xcb_cflags)
+ldflags += $(ft_libs) $(lua_libs) $(xcb_libs)
+
+.PHONY: FORCE
 
 $(target): FORCE
 	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
 
-include $(common)
+install: FORCE
+	@unlink $(basedir)/bin/$(out); \
+	cp -v bin/$(out) $(basedir)/bin/; \
+
+clean:
+	-rm -f bin/$(out)

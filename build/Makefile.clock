@@ -1,7 +1,8 @@
 out = fwm-clock
 src = src/clock.c src/text.c
-cflags += $(ftcflags)
-ldflags += $(ftldflags) -lxcb
+
+cflags += $(ft_cflags)
+ldflags += $(ft_libs) -lxcb
 
 .PHONY: FORCE clean
 

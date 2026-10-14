@@ -1,12 +1,26 @@
-out = fwm-menu
-src = src/menu.c src/text.c
-cflags += $(ftcflags)
-ldflags = $(ftldflags) -lxcb -lxcb-keysyms
-ldflags += -lxkbcommon -lxkbcommon-x11
+cflags += $(ft_cflags) $(lua_cflags)
+ldflags += $(ft_libs) $(lua_libs)
 
-.PHONY: FORCE clean
+menu_out = fwm-menu
+menu_src = src/menu.c src/text.c
+menu_flags = $(cflags) $(ldflags) $(xcb_cflags) $(xcb_libs)
+
+script_out = fwm-script
+script_src = src/script.c
+script_flags = $(cflags) $(ldflags) $(lua_cflags) $(lua_libs)
+
+.PHONY: FORCE
 
 $(target): FORCE
-	$(cc) -o bin/$(out) $(src) $(cflags) $(ldflags)
+	$(cc) -o bin/$(menu_out) $(menu_src) $(menu_flags)
+	$(cc) -o bin/$(script_out) $(script_src) $(script_flags)
 
-include $(common)
+install: FORCE
+	@unlink $(basedir)/bin/$(menu_out); \
+	@unlink $(basedir)/bin/$(script_out); \
+	cp -v bin/$(menu_out) $(basedir)/bin/; \
+	cp -v bin/$(script_out) $(basedir)/bin/; \
+
+clean:
+	-rm -f bin/$(menu_out)
+	-rm -f bin/$(script_out)

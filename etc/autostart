@@ -1,47 +1,25 @@
 #!/bin/sh
 
-spawn()
-{
-	exec $@ &
-	sleep 0.3 # FIXME: have to delay or wm will miss window creation event
-}
+tools="\
+ fwm-script\
+ fwm-rtlink\
+ fwm-rtlink2\
+ fwm-netlink\
+ fwm-clock\
+ fwm-cpumon\
+ fwm-menu\
+ fwm-dock\
+ udevadm\
+"
 
-wlan=0
-lan=0
+killall $tools 2>/dev/null
 
-for iface in /sys/class/net/*; do
-	read type < $iface/type
-
-	if [ -d $iface/wireless ]; then
-		if [ $wlan -eq 0 ]; then
-			spawn wlan-dock
-			wlan=1
-		fi
-	elif [ "$type" = "1" ]; then
-		if [ $lan -eq 0 ]; then
-			spawn lan-dock
-			lan=1
-		fi
-	elif [ $lan -eq 1 -a $wlan -eq 1 ]; then
-		break
-	fi
-done
-
-for power in /sys/class/power_supply/*; do
-	read type < $power/type
-	case $type in
-	*attery*) spawn bat-dock;;
-	*ains*) spawn ac-dock;;
-	esac
-done
-
-for sound in /dev/snd/*; do
-	case $sound in
-	*dev*snd*pcm*) spawn mixer-dock; break;;
-	esac
-done
-
-spawn usb-dock
-spawn display-dock
-spawn cpu-dock
-spawn clock-dock
+fwm-dock -s $FWM_HOME/scripts/lua/lan-dock.lua
+fwm-dock -s $FWM_HOME/scripts/lua/wlan-dock.lua
+fwm-dock -s $FWM_HOME/scripts/lua/bat-dock.lua
+fwm-dock -s $FWM_HOME/scripts/lua/ac-dock.lua
+fwm-dock -s $FWM_HOME/scripts/lua/sound-dock.lua
+fwm-dock -s $FWM_HOME/scripts/lua/usb-dock.lua
+fwm-dock -s $FWM_HOME/scripts/lua/display-dock.lua
+fwm-dock -s $FWM_HOME/scripts/lua/clock-dock.lua
+fwm-dock -s $FWM_HOME/scripts/lua/cpu-dock.lua

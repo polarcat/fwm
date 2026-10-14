@@ -5834,7 +5834,7 @@ static void focus_screen(uint8_t id)
 	}
 }
 
-static void focus_tagwin_req(uint8_t id, xcb_window_t win)
+static void focus_tag_by_id(uint8_t id)
 {
 	struct list_head *curscr;
 
@@ -5844,22 +5844,10 @@ static void focus_tagwin_req(uint8_t id, xcb_window_t win)
 
 		list_walk(curtag, &scr->tags) {
 			struct tag *tag = list2tag(curtag);
-			struct client *cli;
-			struct arg arg;
-
-			if (tag->id != id) {
-				continue;
-			} else if ((cli = tag2cli(tag, win))) {
-				arg.cli = cli;
-				arg.kmap = NULL;
-				raise_client(&arg);
-				center_pointer(cli);
+			if (tag && tag->id == id) {
+				focus_tag(scr, tag);
+				return;
 			}
-
-			focus_tag(scr, tag);
-			dd("focus scr %u tag %s win %#x\n", scr->id, tag->name,
-			 win);
-			return;
 		}
 	}
 }
@@ -6117,16 +6105,8 @@ static void handle_user_request(int fd)
 			focus_screen(atoi(arg));
 	} else if (match(name.str, "focus-tag")) {
 		const char *tagstr = &name.str[sizeof("focus-tag")];
-		char *winstr = NULL;
-		uint8_t id;
-
-		errno = 0;
-		id = strtol(tagstr, &winstr, 10);
-		if (!errno) {
-			xcb_window_t win = strtol(winstr, NULL, 16);
-			if (!errno)
-				focus_tagwin_req(id, win);
-		}
+		uint8_t id = atoi(tagstr);
+		focus_tag_by_id(id);
 	} else if (match(name.str, "focus-window")) {
 		const char *str = &name.str[sizeof("focus-window")];
 
@@ -7370,6 +7350,10 @@ static void init_homedir(void)
 
 	if (mkdir("colors", mode) < 0 && errno != EEXIST)
 		ee("mkdir(%scolors) failed\n", homedir);
+
+	if (mkdir(FWM_SHARED_DIR, mode) < 0 && errno != EEXIST) {
+		ee("mkdir(" FWM_SHARED_DIR ") failed\n");
+	}
 }
 
 enum fdtypes {
@@ -7382,7 +7366,7 @@ static int open_control(int fd)
 {
 	char path[MAX_PATH];
 
-	snprintf(path, sizeof(path), "%s/.control:%u", homedir, disp);
+	snprintf(path, sizeof(path), FWM_SHARED_DIR "/.control");
 	dd("open control %s\n", path);
 	return open_fifo(path, fd);
 }

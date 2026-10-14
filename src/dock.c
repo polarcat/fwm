@@ -5,6 +5,7 @@
  * Released under the GNU General Public License, version 2
  */
 
+#include "fwm.h"
 #include "misc.h"
 #include "text.h"
 
@@ -15,9 +16,19 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <poll.h>
+#include <limits.h>
+
+#include <errno.h>
+#include <stddef.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include <xcb/xcb.h>
 #include <xcb/xcb_util.h>
+
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
 
 #define DEFAULT_FONT_SIZE 10.5
 #define DEFAULT_DPI 96
@@ -32,6 +43,8 @@ struct text_info {
 };
 
 struct ctx {
+	const char *control;
+	int pipe[2]; // pipefd[0] = read end, pipefd[1] = write end.
 	xcb_connection_t *dpy;
 	xcb_screen_t *scr;
 	pid_t pid;
@@ -43,7 +56,7 @@ struct ctx {
 	uint16_t h;
 	uint32_t fg;
 	uint32_t bg;
-	uint8_t done;
+	bool done;
 	float font_size;
 	uint16_t hdpi;
 	uint16_t vdpi;
@@ -51,6 +64,7 @@ struct ctx {
 	const char *icon_font;
 	uint8_t text_y;
 	uint8_t text_h;
+	const char *script;
 };
 
 static struct ctx ctx_;
@@ -59,8 +73,9 @@ static struct text_info icon_;
 
 static uint8_t update_text(struct text_info *text)
 {
-	if (!text->str)
+	if (text->len == 0) {
 		return 0;
+	}
 
 	set_text_color(text->txt, ctx_.fg, ctx_.bg);
 	set_text_pos(text->txt, text->x, ctx_.text_y);
@@ -81,38 +96,178 @@ static void show(void)
 
 	clear();
 
-	if (icon_.str && update_text(&icon_))
+	if (icon_.str && update_text(&icon_)) {
 		draw_text_xcb(&xcb, icon_.txt);
+	}
 
-	if (text_.str && update_text(&text_))
+	if (text_.len > 0 && update_text(&text_)) {
 		draw_text_xcb(&xcb, text_.txt);
+	}
 }
 
-static void *task(void *arg)
+static void *run_script(void *arg)
 {
-	system((const char *) arg);
-	dd("'%s' exited\n", (const char *) arg);
+	(void)arg;
+	lua_State *lua;
+
+	dd("Run Lua script '%s'\n", ctx_.script);
+
+	if ((lua = luaL_newstate()) == NULL) {
+		ee("Failed to create Lua state\n");
+		return NULL;
+	}
+	luaL_openlibs(lua);
+
+	if (luaL_dofile(lua, ctx_.script) != LUA_OK) {
+		ee("Lua script error: %s\n", lua_tostring(lua, -1));
+		goto out;
+	}
+
+	lua_getglobal(lua, "start");
+	if (!lua_isfunction(lua, -1)) {
+		ee("Lua start() function not found\n");
+		goto out;
+	}
+
+	lua_pushinteger(lua, ctx_.pipe[1]);
+	if (lua_pcall(lua, 1, 0, 0) != LUA_OK) {
+		ee("Lua start() call failed: %s\n", lua_tostring(lua, -1));
+		goto out;
+	}
+
+out:
+	lua_close(lua);
 	return NULL;
 }
 
 static void spawn(const char *cmd)
 {
-	char *arg;
-	size_t len = strlen(cmd) + sizeof("65535") + 1;
-	pthread_t t;
-	const char *home;
+	lua_State *lua;
 
-	if ((arg = calloc(1, len))) {
-		snprintf(arg, len, "%s %u", cmd, ctx_.pid);
-	} else {
-		ww("calloc(%zu) failed\n", len);
-		arg = (char *) cmd;
+	dd("Run Lua script '%s'\n", ctx_.script);
+
+	if ((lua = luaL_newstate()) == NULL) {
+		ee("Failed to create Lua state\n");
+		return;
+	}
+	luaL_openlibs(lua);
+
+	if (luaL_dofile(lua, ctx_.script) != LUA_OK) {
+		ee("Lua script error: %s\n", lua_tostring(lua, -1));
+		goto out;
 	}
 
-	if ((home = getenv("HOME")))
-		chdir(home);
+	lua_getglobal(lua, "spawn");
+	if (!lua_isfunction(lua, -1)) {
+		goto out;
+	}
 
-	pthread_create(&t, NULL, task, (void *) arg);
+	lua_pushstring(lua, cmd);
+	if (lua_pcall(lua, 1, 0, 0) != LUA_OK) {
+		ee("Lua spawn() call failed: %s\n", lua_tostring(lua, -1));
+		goto out;
+	}
+
+out:
+	lua_close(lua);
+	return;
+}
+
+static char *lua_field_string(lua_State *lua, char const *key)
+{
+	char *ret;
+
+	lua_getfield(lua, -1, key);
+	ret = lua_isstring(lua, -1) != 0
+		? strdup(lua_tostring(lua, -1))
+		: strdup("");
+	lua_pop(lua, 1);
+
+	return ret;
+}
+
+static int lua_field_int(lua_State *lua, char const *key)
+{
+	int ret = 0;
+
+	lua_getfield(lua, -1, key);
+	ret = luaL_checkinteger(lua, -1);
+	lua_pop(lua, 1);
+
+	return ret;
+}
+
+static inline double lua_field_number(lua_State *lua, char const *key)
+{
+	double ret;
+
+	lua_getfield(lua, -1, key);
+	ret = lua_tonumber(lua, -1);
+	lua_pop(lua, 1);
+
+	return ret;
+}
+
+static inline bool lua_field_bool(lua_State *lua, char const *key)
+{
+	bool ret;
+
+	lua_getfield(lua, -1, key);
+	ret = lua_toboolean(lua, -1) != 0;
+	lua_pop(lua, 1);
+
+	return ret;
+}
+
+static void read_params(void)
+{
+	lua_State *lua;
+
+	dd("Run Lua script '%s'\n", ctx_.script);
+
+	if ((lua = luaL_newstate()) == NULL) {
+		ee("Failed to create Lua state\n");
+		return;
+	}
+	luaL_openlibs(lua);
+
+	if (luaL_dofile(lua, ctx_.script) != LUA_OK) {
+		ee("Lua script error: %s\n", lua_tostring(lua, -1));
+		goto out;
+	}
+
+	lua_getglobal(lua, "get_params");
+	if (!lua_isfunction(lua, -1)) {
+                ee("Lua function get_params() not found\n");
+		goto out;
+	}
+
+	if (lua_pcall(lua, 0, 1, 0) != LUA_OK) {
+		ee("Lua get_params() call failed: %s\n", lua_tostring(lua, -1));
+		goto out;
+	}
+
+	if (!lua_istable(lua, -1)) {
+		ee("Lua get_params() did not return a table\n");
+		goto out;
+	}
+
+	icon_.str = lua_field_string(lua, "icon");
+	icon_.len = strlen(icon_.str);
+
+	text_.str = lua_field_string(lua, "text");
+	text_.len = strlen(text_.str);
+
+	ctx_.name = lua_field_string(lua, "name");
+	ctx_.cmd = lua_field_string(lua, "cmd");
+	ctx_.bg = lua_field_int(lua, "bg");
+	ctx_.fg = lua_field_int(lua, "fg");
+
+	ctx_.control = lua_field_string(lua, "control");
+
+out:
+	lua_close(lua);
+	return;
 }
 
 static xcb_atom_t getatom(const char *str, uint8_t len)
@@ -132,6 +287,30 @@ static xcb_atom_t getatom(const char *str, uint8_t len)
 	a = r->atom;
 	free(r);
 	return a;
+}
+
+// WM_CLASS is two null-terminated strings: instance and class.
+//
+static void set_window_class(void)
+{
+	size_t name_len = strlen(ctx_.name);
+	size_t class_len = strlen(ctx_.name) + sizeof("dock") + 1;
+	char *class = calloc(1, class_len);
+
+	if (class == NULL) {
+		class = (char *)ctx_.name;
+	} else {
+		memcpy(class, ctx_.name, name_len);
+		*(class + name_len) = '\0';
+		memcpy(class + name_len + 1, "dock", sizeof("dock"));
+	}
+
+	xcb_change_property(ctx_.dpy, XCB_PROP_MODE_REPLACE, ctx_.win,
+	 XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8, class_len, class);
+
+	if (class != ctx_.name) {
+		free(class);
+	}
 }
 
 static int create_window(void)
@@ -167,11 +346,9 @@ static int create_window(void)
 	xcb_change_property(ctx_.dpy, XCB_PROP_MODE_REPLACE, ctx_.win,
 	 XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, name_len, ctx_.name);
 
-	xcb_change_property(ctx_.dpy, XCB_PROP_MODE_REPLACE, ctx_.win,
-	 XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8, name_len, ctx_.name);
+	set_window_class();
 
 	atom = getatom("_NET_WM_PID", sizeof("_NET_WM_PID") - 1);
-
 	if (atom != XCB_ATOM_NONE) {
 		ctx_.pid = getpid();
 		xcb_change_property(ctx_.dpy, XCB_PROP_MODE_REPLACE, ctx_.win,
@@ -201,26 +378,94 @@ static void resize(xcb_resize_request_event_t *e)
 		xcb_flush(ctx_.dpy);
 
 		if (create_window() < 0) {
-			ee("failed to create new window %ux%u\n", e->width, e->height);
+			ee("failed to create new window %ux%u\n", e->width,
+				e->height);
 			exit(1); /* consider it fatal */
 		}
 	}
 }
 
-static void handle_message(xcb_client_message_event_t *e)
+static int handle_events(void)
 {
-	char *dat = (char *) e->data.data8;
-	char *end = dat + sizeof(e->data.data8);
-	char *ptr = dat;
+	uint8_t type;
+	xcb_generic_event_t *e = xcb_poll_for_event(ctx_.dpy);
+
+	if (e == NULL) {
+		return 0;
+	}
+
+	type = XCB_EVENT_RESPONSE_TYPE(e);
+	switch (type) {
+	case XCB_VISIBILITY_NOTIFY:
+		switch (((xcb_visibility_notify_event_t *) e)->state) {
+		case XCB_VISIBILITY_PARTIALLY_OBSCURED: /* fall through */
+		case XCB_VISIBILITY_UNOBSCURED:
+			dd("XCB_VISIBILITY_UNOBSCURED\n");
+			show();
+			break;
+		}
+		break;
+	case XCB_EXPOSE:
+		dd("XCB_EXPOSE\n");
+		show();
+		break;
+	case XCB_KEY_PRESS:
+		if (((xcb_key_press_event_t *)e)->detail == 9)
+			ctx_.done = true;
+		break;
+	case XCB_BUTTON_PRESS:
+		if (ctx_.cmd != NULL && ctx_.cmd[0] != '\0') {
+			spawn(ctx_.cmd);
+		}
+		break;
+	case XCB_RESIZE_REQUEST:
+		dd("XCB_RESIZE_REQUEST\n");
+		resize((xcb_resize_request_event_t *) e);
+		break;
+	default:
+		dd("got message type %d\n", type);
+	}
+
+	xcb_flush(ctx_.dpy);
+	free(e);
+	return 1;
+}
+
+static inline void handle_server_event(struct pollfd *pfd)
+{
+	if (pfd->revents & POLLIN) {
+		while (handle_events()) {} /* read all events */
+	}
+
+	pfd->revents = 0;
+}
+
+static void handle_user_request(int fd)
+{
+	char str[PATH_MAX] = {0};
+	char *ptr;
 	char *msg[3] = {0};
-	uint8_t i = 0;
+	int i = 0;
 
-	dd("dat '%s' len %zu\n", (char *) e->data.data8, sizeof(e->data.data8));
+	errno = 0;
+	if (read(fd, str, sizeof(str) - 1) < 1) {
+		ee("Failed to read %zu bytes from %d\n", sizeof(str) - 1, fd);
+		return;
+	}
 
-	msg[i] = ptr;
+	if (strncmp(str, "exit", sizeof("exit") - 1) == 0) {
+		ctx_.done = true;
+		return;
+	}
 
-	while (ptr < end) {
-		if (*ptr == ' ') {
+	msg[i] = str;
+	ptr = str;
+
+	while (*ptr != '\0') {
+		if (*ptr == '\n') {
+			*ptr = '\0';
+			break;
+		} else if (*ptr == ' ') {
 			*ptr = '\0';
 			msg[++i] = ptr + 1;
 		}
@@ -240,8 +485,10 @@ static void handle_message(xcb_client_message_event_t *e)
 		dd("rgb '%s' len %zu\n", msg[1], strlen(msg[1]));
 	}
 
-	if (msg[2] && text_.str) {
-		free(text_.str);
+	if (msg[2]) {
+		if (text_.str != NULL) {
+			free(text_.str);
+		}
 		text_.str = strdup(msg[2]);
 		text_.len = strlen(text_.str);
 		dd("txt '%s' len %u\n", text_.str, text_.len);
@@ -250,52 +497,23 @@ static void handle_message(xcb_client_message_event_t *e)
 	show();
 }
 
-static int events(void)
+static inline void handle_control_event2(struct pollfd *pfd)
 {
-	uint8_t type;
-	xcb_generic_event_t *e = xcb_wait_for_event(ctx_.dpy);
-
-	if (!e)
-		return 0;
-
-	type = XCB_EVENT_RESPONSE_TYPE(e);
-
-	switch (type) {
-	case XCB_VISIBILITY_NOTIFY:
-		switch (((xcb_visibility_notify_event_t *) e)->state) {
-		case XCB_VISIBILITY_PARTIALLY_OBSCURED: /* fall through */
-		case XCB_VISIBILITY_UNOBSCURED:
-			dd("XCB_VISIBILITY_UNOBSCURED\n");
-			show();
-			break;
-		}
-		break;
-	case XCB_EXPOSE:
-		dd("XCB_EXPOSE\n");
-		show();
-		break;
-	case XCB_KEY_PRESS:
-		if (((xcb_key_press_event_t *)e)->detail == 9)
-			ctx_.done = 1;
-		break;
-	case XCB_BUTTON_PRESS:
-		if (ctx_.cmd)
-			spawn(ctx_.cmd);
-		break;
-	case XCB_RESIZE_REQUEST:
-		dd("XCB_RESIZE_REQUEST\n");
-		resize((xcb_resize_request_event_t *) e);
-		break;
-	case XCB_CLIENT_MESSAGE:
-		handle_message((xcb_client_message_event_t *) e);
-		break;
-	default:
-		dd("got message type %d\n", type);
+	if (pfd->revents & POLLIN) {
+		handle_user_request(pfd->fd);
+		pfd->fd = open_fifo(ctx_.control, pfd->fd);
 	}
 
-	xcb_flush(ctx_.dpy);
-	free(e);
-	return 1;
+	pfd->revents = 0;
+}
+
+static inline void handle_control_event(struct pollfd *pfd)
+{
+	if (pfd->revents & POLLIN) {
+		handle_user_request(pfd->fd);
+	}
+
+	pfd->revents = 0;
 }
 
 static uint16_t get_space_width(fontid_t font_id)
@@ -339,10 +557,12 @@ static void help(const char *prog)
 {
 	printf("Usage: %s <options>\n"
 	 "\nOptions:\n"
-	 "  -n, --name <str>          window name (%s)\n"
+	 "  -s, --script <path>       path to Lua script (optional)\n"
+	 "  -n, --name <str>          window name\n"
 	 "  -i, --icon <glyph>        icon to display\n"
 	 "  -t, --text <str>          text next to icon (%u chars)\n"
 	 "  -c, --cmd <str>           command to run on mouse click\n"
+	 "\n"
 	 "  -bg, --bgcolor <hex>      rgb color, default 0x%x\n"
 	 "  -fg, --fgcolor <hex>      rgb color, default 0x%x\n"
 	 "\nEnvironment:\n"
@@ -350,21 +570,29 @@ static void help(const char *prog)
 	 "  FWM_FONT=%s\n"
 	 "  FWM_FONT_SIZE=%f\n"
 	 "  FWM_HDPI=%u\n"
-	 "  FWM_VDPI=%u\n\n",
-	 prog, ctx_.name, TEXT_MAXLEN, ctx_.bg, ctx_.fg, ctx_.icon_font,
-	 ctx_.text_font, ctx_.font_size, ctx_.hdpi, ctx_.vdpi);
+	 "  FWM_VDPI=%u\n\n"
+	 "  FWM_DEBUG=%s\n",
+	 prog, TEXT_MAXLEN, ctx_.bg, ctx_.fg, ctx_.icon_font,
+	 ctx_.text_font, ctx_.font_size, ctx_.hdpi, ctx_.vdpi,
+	 getenv("FWM_DEBUG"));
 }
 
-int main(int argc, char *argv[])
+static int run(int argc, char *argv[])
 {
+	struct pollfd pfds[3];
 	const char *hdpi_str;
 	const char *vdpi_str;
 	const char *font_size_str;
 	const char *arg;
+	pthread_t thread;
+
+	if (pipe(ctx_.pipe) < 0) {
+		ee("Failed to create pipe");
+		return EXIT_FAILURE;
+	}
 
 	 /* init these defaults before checking args */
 
-	ctx_.name = "dock";
 	ctx_.fg = 0x808080;
 	ctx_.bg = 0x202020;
 
@@ -388,7 +616,7 @@ int main(int argc, char *argv[])
 
 	if (argc < 2) {
 		help(argv[0]);
-		return 0;
+		return EXIT_SUCCESS;
 	}
 
 	while (argc > 1) {
@@ -401,6 +629,8 @@ int main(int argc, char *argv[])
 			text_.len = strlen(text_.str);
 		} else if (opt(arg, "-c", "--cmd")) {
 			ctx_.cmd = argv[argc + 1];
+		} else if (opt(arg, "-s", "--script")) {
+			ctx_.script = argv[argc + 1];
 		} else if (opt(arg, "-bg", "--bgcolor")) {
 			ctx_.bg = strtol(argv[argc + 1], NULL, 16);
 		} else if (opt(arg, "-fg", "--fgcolor")) {
@@ -408,6 +638,16 @@ int main(int argc, char *argv[])
 		} else if (opt(arg, "-n", "--name")) {
 			ctx_.name = argv[argc + 1];
 		}
+	}
+
+	if (ctx_.script) {
+		/* Overrides all command line argument */
+		read_params();
+	}
+
+	if (ctx_.name == NULL) {
+		ee("\nWindow name is not set\n\n");
+		return EXIT_FAILURE;
 	}
 
 	if (!icon_.str && !text_.str) {
@@ -418,21 +658,22 @@ int main(int argc, char *argv[])
 
 	if (icon_.str) {
 		icon_.font_id = open_font(ctx_.icon_font, ctx_.hdpi, ctx_.vdpi);
-		if (invalid_font_id(icon_.font_id))
-			return 1;
-		else if (!init_text(&icon_))
-			return 1;
+		if (invalid_font_id(icon_.font_id)) {
+			return EXIT_FAILURE;
+		} else if (!init_text(&icon_)) {
+			return EXIT_FAILURE;
+		}
 
 		text_.x = ctx_.w;
 	}
 
-	if (text_.str) {
+	if (text_.len > 0) {
 		text_.font_id = open_font(ctx_.text_font, ctx_.hdpi, ctx_.vdpi);
-		if (invalid_font_id(text_.font_id))
-			return 1;
-		else if (!init_text(&text_))
-			return 1;
-		else if (icon_.str) {
+		if (invalid_font_id(text_.font_id)) {
+			return EXIT_FAILURE;
+		} else if (!init_text(&text_)) {
+			return EXIT_FAILURE;
+		} else if (icon_.str) {
 			uint8_t space = get_space_width(text_.font_id);
 			text_.x += space;
 			ctx_.w += space;
@@ -443,16 +684,53 @@ int main(int argc, char *argv[])
 	ctx_.dpy = xcb_connect(NULL, NULL);
 	if (!ctx_.dpy) {
 		ee("xcb_connect() failed\n");
-		return 1;
+		return EXIT_FAILURE;
 	}
 
 	ctx_.scr = xcb_setup_roots_iterator(xcb_get_setup(ctx_.dpy)).data;
 
-	if (create_window() < 0)
-		return 1;
+	if (create_window() < 0) {
+		return EXIT_FAILURE;
+	}
 
-	while (1)
-		events();
+	pfds[0].fd = xcb_get_file_descriptor(ctx_.dpy);
+	pfds[0].events = POLLIN;
+	pfds[0].revents = 0;
+
+	pfds[1].fd = ctx_.pipe[0];
+	pfds[1].events = POLLIN;
+	pfds[1].revents = 0;
+
+	if (ctx_.control[0] == '\0') {
+		pfds[2].fd = -1;
+	} else {
+		ii("Open control '%s'\n", ctx_.control);
+		pfds[2].fd = open_fifo(ctx_.control, -1);
+		pfds[2].events = POLLIN;
+		pfds[2].revents = 0;
+	}
+
+	if (ctx_.script != NULL) {
+		// This should start after control file is created.
+		pthread_create(&thread, NULL, run_script, (void *) arg);
+	}
+
+	while (!ctx_.done) {
+		int rc = poll(pfds, ARRAY_SIZE(pfds), -1);
+		if (rc == 0) { /* timeout */
+			/* TODO: some user-defined periodic task */
+		} else if (rc < 0) {
+			if (errno == EINTR)
+				continue;
+			/* something weird happened, but relax and try again */
+			sleep(1);
+			continue;
+		}
+
+		handle_server_event(&pfds[0]);
+		handle_control_event(&pfds[1]);
+		handle_control_event2(&pfds[2]);
+	}
 
 	free(icon_.str);
 	free(text_.str);
@@ -462,5 +740,31 @@ int main(int argc, char *argv[])
 	xcb_disconnect(ctx_.dpy);
 	close_font(icon_.font_id);
 	close_font(text_.font_id);
-	return 0;
+	return EXIT_SUCCESS;
 }
+
+int main(int argc, char *argv[])
+{
+	if (getenv("FWM_DEBUG")) {
+		return run(argc, argv);
+	}
+
+	pid_t pid = fork();
+
+	if (pid < 0) {
+		ee("Failed to fork");
+		return EXIT_FAILURE;
+	}
+
+	if (pid == 0) {
+		/* Child process */
+		dd("Child=%ld, parent=%ld\n", (long)getpid(), (long)getppid());
+		run(argc, argv);
+		return EXIT_SUCCESS;
+	}
+
+	/* Parent process */
+	dd("Parent=%ld, child=%ld\n", (long)getpid(), (long)pid);
+	return EXIT_SUCCESS;
+}
+

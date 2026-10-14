@@ -1,10 +1,18 @@
 common = build/Makefile.common
 cc = $(CROSS_COMPILE)gcc
-cflags = -Wall -Wunused-function
-cflags += $(CFLAGS)
+
+cflags = -Wall -Wunused-function $(CFLAGS)
 ldflags = $(LDFLAGS)
-ftcflags = $(shell pkg-config --cflags freetype2)
-ftldflags = $(shell pkg-config --libs freetype2) -lxcb-image
+
+ft_cflags = $(shell pkg-config --cflags freetype2)
+ft_libs = $(shell pkg-config --libs freetype2)
+
+xcb_cflags = $(shell pkg-config --cflags xcb xcb-keysyms xkbcommon-x11 xcb-randr xcb-util)
+xcb_libs = $(shell pkg-config --libs xcb xcb-keysyms xkbcommon-x11 xcb-image xcb-randr xcb-util)
+
+lua_cflags = $(shell pkg-config --cflags lua5.4)
+lua_libs = $(shell pkg-config --libs lua5.4)
+
 target = $@
 destdir = $(DESTDIR)
 homedir = $(DESTDIR)$(HOME)
@@ -38,6 +46,7 @@ second = $(word 2,$(MAKECMDGOALS))
 
 dirs:
 	@mkdir -p bin
+	@mkdir -p lib
 	@mkdir -p $(basedir)
 	@mkdir -p $(bindir)
 	@mkdir -p $(keysdir)
@@ -83,3 +92,13 @@ icons: FORCE dirs
 
 sudoers: FORCE dirs
 	$(makecmd)
+
+scripts: FORCE dirs
+	$(makecmd)
+
+libs: FORCE dirs
+	$(makecmd)
+
+clean:
+
+install:

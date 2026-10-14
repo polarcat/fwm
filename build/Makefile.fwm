@@ -1,8 +1,9 @@
 out = fwm
 src = src/fwm.c src/text.c
-cflags += $(ftcflags)
-ldflags += -lm -lxcb -lxcb-randr -lxcb-util -lxcb-keysyms -lpthread
-ldflags += $(ftldflags)
+
+cflags += $(ft_cflags) $(xcb_cflags)
+ldflags += $(ft_libs) $(xcb_libs) -lm
+
 note = \033[0;31mdo not forget to rename .xinitrc-fwm -> .xinitrc\033[0m\n
 
 .PHONY: FORCE
@@ -33,6 +34,7 @@ install: FORCE
 	mkdir -p $(basedir)/tmp; \
 	mkdir -p $(basedir)/bin; \
 	cp -v bin/fwm-cleanup $(basedir)/bin/; \
+	cp -v bin/fwm-lock $(basedir)/bin/; \
 
 clean:
 	-rm -f bin/$(out)
