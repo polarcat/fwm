@@ -1,4 +1,4 @@
-common = build/Makefile.common
+common = make/Makefile.common
 cc = $(CROSS_COMPILE)gcc
 
 cflags = -Wall -Wunused-function $(CFLAGS)
@@ -30,7 +30,7 @@ dockdir = $(basedir)/screens/$(defscr)/dock
 
 export
 
-makecmd = make -f build/Makefile.$@
+makecmd = make -f make/Makefile.$@
 
 ifneq (,$(findstring clean,$(MAKECMDGOALS)))
 makecmd += clean
@@ -55,7 +55,7 @@ dirs:
 ifeq ($(second),)
 install: dirs
 	@for target in $(all); do \
-		make -f build/Makefile.$$target install; \
+		make -f make/Makefile.$$target install; \
 	done
 endif
 
