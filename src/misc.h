@@ -62,12 +62,12 @@
 
 #define ee(fmt, ...) {\
 	int errno_save__ = errno;\
-	fprintf(stderr, "(ee) %s: " fmt, __func__, ##__VA_ARGS__);\
+	fprintf(stderr, "E  %s: " fmt, __func__, ##__VA_ARGS__);\
 	if (errno_save__ != 0)\
-		fprintf(stderr, "(ee) %s: %s, errno=%d\n", __func__,\
+		fprintf(stderr, "E  %s: %s, errno=%d\n", __func__,\
 		     strerror(errno_save__), errno_save__);\
 	errno = errno_save__;\
-	fprintf(stderr, "(ee) %s: %s at %d\n", __func__, __FILE__, __LINE__);\
+	fprintf(stderr, "E  %s: %s at %d\n", __func__, __FILE__, __LINE__);\
 }
 
 #ifdef DEBUG
@@ -76,30 +76,30 @@
 #define TRACE_ATOM
 #define TRACE_EVENTS
 #define dd(fmt, ...) {\
-	printf("(dd) " fmt, ##__VA_ARGS__);\
-	printf("(dd) ^^^ %s:%d\n", __func__, __LINE__);\
+	printf("D  " fmt, ##__VA_ARGS__);\
+	printf("D  ^^^ %s:%d\n", __func__, __LINE__);\
 }
 #else
 #define dd(fmt, ...) do {} while(0)
 #endif
 
 #ifdef VERBOSE
-#define mm(fmt, ...) printf("(==) " fmt, ##__VA_ARGS__)
+#define mm(fmt, ...) printf("=  " fmt, ##__VA_ARGS__)
 #else
 #define mm(fmt, ...) do {} while(0)
 #endif
 
-#define ww(fmt, ...) printf("(ww) " fmt, ##__VA_ARGS__)
-#define ii(fmt, ...) printf("(ii) " fmt, ##__VA_ARGS__)
+#define ww(fmt, ...) printf("W  " fmt, ##__VA_ARGS__)
+#define ii(fmt, ...) printf("I  " fmt, ##__VA_ARGS__)
 
 #ifdef TRACE
-#define tt(fmt, ...) printf("(tt) %s: " fmt, __func__, ##__VA_ARGS__)
+#define tt(fmt, ...) printf("T  %s: " fmt, __func__, ##__VA_ARGS__)
 #else
 #define tt(fmt, ...) do {} while(0)
 #endif
 
 #ifdef TRACE_EVENTS
-#define te(fmt, ...) printf("(te) " fmt, ##__VA_ARGS__)
+#define te(fmt, ...) printf("T  " fmt, ##__VA_ARGS__)
 #else
 #define te(fmt, ...) do {} while(0)
 #endif
