@@ -12,6 +12,11 @@
 #include "list.h"
 #include "text.h"
 
+#define _GNU_SOURCE
+#include <execinfo.h> // backtrace()
+#include <sys/syscall.h> // SYS_gettid
+#include <sys/types.h> // gettid()
+
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -632,8 +637,58 @@ static uint8_t ignore_panel;
 static uint8_t randrbase;
 
 static void scan_clients(bool rescan);
+static void focus_tag(struct screen *scr, struct tag *tag);
 
 /* ... and the mess begins */
+
+static inline long get_thread_id(void)
+{
+#ifdef SYS_gettid
+	return syscall(SYS_gettid);
+#else
+	return (long)gettid();
+#endif
+}
+
+static void crash_handler(int sig)
+{
+	const char msg[] = "Fatal signal; stack trace:\n";
+	write(STDERR_FILENO, msg, sizeof msg - 1);
+
+	void *frames[64];
+	int count = backtrace(frames, 64);
+	backtrace_symbols_fd(frames, count, STDERR_FILENO);
+
+	_exit(128 + sig);
+}
+
+static void setvar(const char *var, const char *val)
+{
+	FILE *f;
+	char *path;
+	size_t size = sizeof(FWM_SHARED_DIR "/") + strlen(var);
+
+	if ((path = calloc(1, size)) == NULL) {
+		ee("failed to allocate %zu bytes for shmvar, %s\n", size,
+			strerror(errno));
+		return;
+	}
+
+	snprintf(path, size, FWM_SHARED_DIR "/%s", var);
+	if ((f = fopen(path, "w")) == NULL) {
+		ee("failed to open file '%s', %s\n", path, strerror(errno));
+		goto out;
+	}
+
+	if (fputs(val, f) < 0) {
+		ee("failed to set '%s', %s\n", var, strerror(errno));
+	}
+	dd("set '%s' to '%s'\n", path, val);
+
+out:
+	free(path);
+	fclose(f);
+}
 
 static void get_sprop(struct sprop *ret, xcb_window_t win,
 		      enum xcb_atom_enum_t atom, uint32_t len)
@@ -1068,7 +1123,7 @@ static enum winstatus window_status(xcb_window_t win)
 
 static struct client *front_client(struct tag *tag)
 {
-	if (list_empty(&tag->clients))
+	if (tag == NULL || list_empty(&tag->clients))
 		return NULL;
 	else
 		return list2cli(tag->clients.prev);
@@ -1595,17 +1650,41 @@ static xcb_window_t pointer2win(void)
 	return win;
 }
 
+static struct tag *find_last_tag(struct screen *scr)
+{
+	struct list_head *cur;
+	struct tag *tag;
+
+	if (list_empty(&scr->tags)) {
+		return NULL;
+	}
+
+	list_walk(cur, &scr->tags) {
+		tag = list2tag(cur);
+	}
+
+	return tag;
+}
+
 static struct client *pointer2cli(void)
 {
 	struct list_head *head;
 	xcb_window_t win = pointer2win();
 
+	if (curscr->tag == NULL) {
+		if ((curscr->tag = find_last_tag(curscr)) == NULL) {
+			return NULL;
+		}
+		focus_tag(curscr, curscr->tag);
+	}
+
 	list_walk(head, &curscr->tag->clients) {
 		struct client *cli = list2cli(head);
-		if (cli->flags & CLI_FLG_POPUP)
+		if (cli == NULL || cli->flags & CLI_FLG_POPUP) {
 			return NULL;
-		else if (cli->win == win)
+		} else if (cli->win == win) {
 			return cli;
+		}
 	}
 
         return NULL;
@@ -3627,10 +3706,32 @@ static void hide_windows(struct tag *tag)
 	}
 }
 
+static void update_current_tag_var(struct screen *scr)
+{
+	struct list_head *cur;
+	uint16_t count;
+	char val[sizeof("255 255") + TAG_NAME_MAX];
+
+	count = 0;
+	list_walk(cur, &scr->tag->clients) {
+		count++;
+	}
+
+	snprintf(val, sizeof(val), "%u %u %u %s", scr->id,
+		scr->tag->id, count, scr->tag->name);
+	setvar("current-tag", val);
+}
+
 static void focus_tag(struct screen *scr, struct tag *tag)
 {
 	hide_toolbox();
 	hide_toolbar();
+
+	if (tag == NULL) {
+		if ((tag = find_last_tag(scr)) == NULL) {
+			return;
+		}
+	}
 
 	if (scr->tag) {
 		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
@@ -3642,6 +3743,8 @@ static void focus_tag(struct screen *scr, struct tag *tag)
 
 	if (!(scr->flags & SCR_FLG_CLIENT_RETAG))
 		show_windows(tag, 1);
+
+	update_current_tag_var(scr);
 }
 
 static void switch_tag(struct screen *scr, enum dir dir)
@@ -3653,7 +3756,7 @@ static void switch_tag(struct screen *scr, enum dir dir)
 			tag = list2tag(scr->tags.next);
 		else
 			tag = list2tag(scr->tag->head.next);
-	} else {
+	} else if (scr->tag) {
 		if (scr->tag->head.prev == &scr->tags) /* head of list */
 			tag = list2tag(scr->tags.prev);
 		else
@@ -4742,6 +4845,7 @@ static void select_tag(struct screen *scr, int16_t x, int16_t y)
 
 		show_windows(scr->tag, 0);
 	}
+	update_current_tag_var(scr);
 
 	if ((tmp = front_client(scr->tag)))
 		show_toolbox(tmp);
@@ -4842,7 +4946,7 @@ static int add_tag(struct screen *scr, const char *name, uint8_t id,
 	return pos + tag->w + panel_space;
 }
 
-static int tag_del(struct screen *scr, uint8_t id)
+static int del_tag(struct screen *scr, uint8_t id)
 {
 	struct list_head *cur;
 
@@ -4901,7 +5005,7 @@ static int init_tags(struct screen *scr)
 		if ((st.st_mode & S_IFMT) != S_IFDIR)
 			delete = 1;
 
-		if (delete && tag_del(scr, i))
+		if (delete && del_tag(scr, i))
 			continue;
 
 		sprintf(path, "%s/screens/%d/tags/%d/name", homedir, scr->id, i);
@@ -5019,6 +5123,10 @@ static void refresh_panel(uint8_t id)
 		if (scr->id != id)
 			continue;
 
+		ii("scr %u tag '%s'\n", id, scr->tag ? scr->tag->name : "nil");
+		if (scr->tag == NULL) {
+			continue;
+		}
 		print_tag(scr, scr->tag, ITEM_FLG_NORMAL);
 		reinit_panel(scr);
 		break;
@@ -5674,20 +5782,6 @@ static void init_output(struct output *out)
 	out->info = NULL;
 }
 
-static void outputs_ready(void)
-{
-	FILE *f;
-	char path[homelen + sizeof("/tmp/outputs-ready")];
-
-	sprintf(path, "%s/tmp/outputs-ready", homedir);
-
-	if ((f = fopen(path, "w+"))) {
-		fclose(f);
-	} else {
-		ee("failed to create '%s'\n", path);
-	}
-}
-
 static void init_outputs(void)
 {
 	struct stat st;
@@ -5773,8 +5867,6 @@ static void init_outputs(void)
 		ii("screen %d geo %ux%u+%d+%d size (%d %d)\n", scr->id, scr->w,
 		 scr->h, scr->x, scr->y, scr->x + scr->w, scr->y + scr->h);
 	}
-
-	outputs_ready();
 
 	/* find and flag HMD display */
 	find_hmd_screen();
@@ -6081,7 +6173,7 @@ static void handle_user_request(int fd)
 		name.ptr = NULL;
 	}
 
-	tt("handle request '%s' len %u\n", name.str, name.len);
+	ii("handle request '%s' len %u\n", name.str, name.len);
 
 	if (match(name.str, "reload-keys")) {
 		init_keys();
@@ -6097,8 +6189,9 @@ static void handle_user_request(int fd)
 		dump_tags();
 	} else if (match(name.str, "refresh-panel")) {
 		const char *arg = &name.str[sizeof("refresh-panel")];
-		if (arg)
+		if (arg) {
 			refresh_panel(atoi(arg));
+		}
 	} else if (match(name.str, "focus-screen")) {
 		const char *arg = &name.str[sizeof("focus-screen")];
 		if (arg)
@@ -7403,6 +7496,7 @@ static uint8_t getdisplay(void)
 
 int main()
 {
+	struct sigaction sa = {0};
 	struct pollfd pfds[FD_MAX];
 	const char *logfile;
 
@@ -7429,6 +7523,16 @@ int main()
 		time_t t = time(NULL);
 		ii("logfile %s, session %s", logfile, asctime(localtime(&t)));
 	}
+
+	sa.sa_handler = crash_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESETHAND;
+
+	sigaction(SIGSEGV, &sa, NULL);
+	sigaction(SIGABRT, &sa, NULL);
+	sigaction(SIGBUS, &sa, NULL);
+	sigaction(SIGILL, &sa, NULL);
+	sigaction(SIGFPE, &sa, NULL);
 
 	init_homedir();
 

@@ -1,8 +1,12 @@
 out = fwm
 src = src/fwm.c src/text.c
 
-cflags += $(ft_cflags) $(xcb_cflags)
-ldflags += $(ft_libs) $(xcb_libs) -lm
+# Uncomment for getting symbols resolved.
+#dcflags = -g -O0 -fno-omit-frame-pointer -rdynamic
+#dldflags = -no-pie
+
+cflags += $(ft_cflags) $(xcb_cflags) $(dcflags)
+ldflags += $(ft_libs) $(xcb_libs) -lm $(dldflags)
 
 note = \033[0;31mdo not forget to rename .xinitrc-fwm -> .xinitrc\033[0m\n
 
