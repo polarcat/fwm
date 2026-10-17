@@ -18,7 +18,6 @@ local main_menu = {
 	"\a\tethernet\n",
 	"\a\tsound\n",
 	"\a\tdisplay\n",
-	"\a\thmd\n",
 	"\n",
 	"\a\tclipboard\n",
 	"\n",

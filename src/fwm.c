@@ -139,7 +139,6 @@ typedef uint8_t strlen_t;
 #define SCR_FLG_SWITCH_WINDOW (1 << 1)
 #define SCR_FLG_SWITCH_WINDOW_NOWARP (1 << 2)
 #define SCR_FLG_CLIENT_RETAG (1 << 3)
-#define SCR_FLG_HMD (1 << 4)
 
 #define TAG_NAME_MAX 32
 
@@ -220,8 +219,6 @@ struct panel {
 #define BTN_RETAG ""
 #define BTN_PIN  "" /* fa-thumb-tack [&#xf08d;] */
 
-#define BTN_HMD "" /* fa-cube [&#xf1b2;] */
-
 struct toolbar_item {
 	const char *str;
 	uint8_t len;
@@ -233,7 +230,6 @@ struct toolbar_item {
 static struct toolbar_item toolbar_items[] = {
 	{ BTN_CLOSE, slen(BTN_CLOSE), },
 	{ BTN_CENTER, slen(BTN_CENTER), },
-	{ BTN_HMD, slen(BTN_HMD), },
 	{ BTN_FLAG, slen(BTN_FLAG), },
 	{ BTN_LEFT, slen(BTN_LEFT), },
 	{ BTN_RIGHT, slen(BTN_RIGHT), },
@@ -968,40 +964,6 @@ static void root_fade_in(uint32_t speed, struct screen *scr)
 		set_crtc_brightness(scr->crtc, 1.f);
 	else
 		set_root_brightness(1.f);
-}
-
-static struct screen *find_hmd_screen(void)
-{
-	struct list_head *cur;
-	struct screen *scr;
-	ssize_t bytes;
-	int fd;
-	char buf[MAX_OUTPUT_NAME + 1] = {0};
-
-	chdir(homedir);
-
-	if ((fd = open("screens/hmd/name", O_RDONLY)) < 0) {
-		return NULL;
-	}
-
-	if ((bytes = read(fd, buf, sizeof(buf) - 1)) <= 0) {
-		return NULL;
-	}
-
-	buf[bytes - 1] = '\0';
-
-	list_walk(cur, &screens) {
-		scr = list2screen(cur);
-		if (strcmp(scr->name, buf) == 0) {
-			ii("HMD screen '%s' id %u\n", scr->name, scr->id);
-			scr->flags |= SCR_FLG_HMD;
-			return scr;
-		} else {
-			scr->flags &= ~SCR_FLG_HMD;
-		}
-	}
-
-	return NULL;
 }
 
 static void select_default_screen(void)
@@ -4219,31 +4181,6 @@ static uint8_t ignore_systray(xcb_window_t win)
 }
 #endif
 
-static bool is_fullscreen_hmd(struct screen *scr, xcb_get_geometry_reply_t *g)
-{
-	return (
-		g->x == scr->x &&
-		g->y == scr->y &&
-		(
-			(g->width == scr->w && g->height == scr->h) ||
-			/*
-			 * This is to handle HMDs which require SBS window.
-			 * The problem is manifested when different kind of
-			 * HMDs are plugged one after and display re-detection
-			 * has not been triggered.
-			 */
-			(g->width == scr->w / 2) ||
-			(g->width / 2 == scr->w)
-		)
-		);
-}
-
-static bool is_fullscreen_size(struct screen *scr, xcb_get_geometry_reply_t *g)
-{
-	return (g->x == scr->x && g->y == scr->y &&
-		g->width == scr->w && g->height == scr->h);
-}
-
 static bool is_inside_screen(struct screen *scr, int x, int y, int w, int h)
 {
 	return (x >= scr->x && x < (scr->x + scr->w) &&
@@ -4280,7 +4217,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 	xcb_get_geometry_reply_t *g;
 	xcb_get_window_attributes_cookie_t c;
 	xcb_get_window_attributes_reply_t *a;
-	bool fullscreen_hmd;
 
 	/* save current pointer coords */
 	pointer2coord(&save_x_, &save_y_, NULL);
@@ -4402,20 +4338,6 @@ static struct client *add_window(xcb_window_t win, uint8_t winflags)
 
 	if (!scr && !(scr = pointer2scr())) {
 		scr = defscr;
-	}
-
-	fullscreen_hmd = is_fullscreen_hmd(scr, g);
-
-	if ((scr->flags & SCR_FLG_HMD) && !fullscreen_hmd) {
-		tt("Skip HMD '%s' wh (%u %u) for win %#x\n", scr->name,
-		   scr->w, scr->h, win);
-		scr = defscr;
-	}
-
-	if (fullscreen_hmd || is_fullscreen_size(scr, g)) {
-		if (scr->panel.win == XCB_NONE) {
-			flags |= CLI_FLG_FULLSCREEN;
-		}
 	}
 
 	if ((cli = win2cli(win))) {
@@ -5868,9 +5790,6 @@ static void init_outputs(void)
 		 scr->h, scr->x, scr->y, scr->x + scr->w, scr->y + scr->h);
 	}
 
-	/* find and flag HMD display */
-	find_hmd_screen();
-
 	restore_current_tag();
 }
 
@@ -6272,8 +6191,6 @@ static void prepare_motion(struct client *cli)
 
 static void toolbar_button_press(void)
 {
-	struct screen *scr;
-	struct screen *tmp;
 	struct arg arg;
 
 	if (!focused_item) {
@@ -6330,19 +6247,6 @@ static void toolbar_button_press(void)
 		return; /* special case */
 	} else if (focused_item->str == (const char *) BTN_MOUSE) {
 		retag_cli = NULL;
-	} else if (focused_item->str == (const char *) BTN_HMD) {
-		if ((scr = find_hmd_screen()) != NULL) {
-			if (arg.cli->scr != scr) {
-				tmp = curscr;
-				curscr = scr;
-				do_retag(curscr->tag, arg.cli);
-				arg.cli->pos = WIN_POS_FILL;
-				place_window(&arg);
-				xcb_map_window_checked(dpy, arg.cli->win);
-				focus_screen(0);
-				curscr = tmp;
-			}
-		}
 	}
 
 	hide_toolbar();
