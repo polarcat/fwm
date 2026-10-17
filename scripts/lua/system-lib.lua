@@ -70,6 +70,36 @@ function system.read_number(path)
 	return ret
 end
 
+function system.fputs(path, str)
+	local file, err = io.open(path, "w")
+	if not file then
+		print(("[file] %s"):format(path, err))
+		return
+	end
+
+	file:write(str)
+	file:close()
+end
+
+function system.fgets(path)
+	local file, err = io.open(path, "r")
+	if not file then
+		print(("[file] %s"):format(path, err))
+		return nil
+	end
+
+	local str = file:read("*l")
+	file:close()
+	return str
+end
+
+function system.rmdir(path)
+	for file in lfs.dir(path) do
+		os.remove(path .. "/" .. file)
+	end
+	os.remove(path)
+end
+
 --------------------------------------------------------------------------------
 --
 -- Misc helpers.
